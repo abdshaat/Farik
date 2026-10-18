@@ -96,11 +96,13 @@ pub fn changes_code(role: Role) -> bool {
 }
 
 /// Whether an agent reviews the contract's result (ADR 0061): a task, not an epic, whose assignee's
-/// role changes code. Every other contract is accepted or rejected by the governor on the criteria
+/// role changes code, and which is not a bug hunt (ADR 0063). Every other contract is accepted or rejected by the governor on the criteria
 /// Catervas runs itself. It is known when the contract is written, before any diff exists.
 #[must_use]
 pub fn reviewed_by_an_agent(contract: &TaskContract) -> bool {
-    contract.kind == TaskKind::Task && changes_code(contract.assignee_role)
+    contract.kind == TaskKind::Task
+        && changes_code(contract.assignee_role)
+        && !crate::folders::is_hunt(contract)
 }
 
 /// The folder, under the project root, that only one role's sessions work in (`docs/SPEC.md` 6.6,

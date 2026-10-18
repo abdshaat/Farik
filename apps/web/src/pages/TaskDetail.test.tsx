@@ -355,6 +355,27 @@ describe("task detail", () => {
 		expect(told).toEqual(["Catervas filed it to document the project."]);
 	});
 
+	it("names_a_connection_request_in_a_tasks_history", async () => {
+		await opened(CONTRACT, [], {
+			"task.history": {
+				events: [
+					event(
+						21,
+						"connection.requested",
+						{ server: "buffer", why: "The plan posts every Tuesday." },
+						"2026-09-25T10:00:00Z",
+					),
+				],
+			},
+		});
+		await screen.findByRole("heading", { level: 1, name: "Gift cards" });
+		fireEvent.click(screen.getByRole("tab", { name: "History" }));
+		const told = within(screen.getByRole("tabpanel"))
+			.getAllByRole("listitem")
+			.map((line) => line.querySelector("span")?.textContent);
+		expect(told).toEqual([en.toldConnectionRequested]);
+	});
+
 	it("shows_the_designers_plan_and_who_approved_it", async () => {
 		// The plan was written the day the page is read, so the page says "today".
 		vi.useFakeTimers({ toFake: ["Date"] });
@@ -878,6 +899,25 @@ describe("task detail", () => {
 
 		// A Developer's task is code: its reviewer still reviews it.
 		await opened();
+		expect(
+			await screen.findByText(
+				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+	});
+
+	it("says_catervas_checks_a_hunt", async () => {
+		const hunt = (allowed_paths: string[]) => ({ ...CONTRACT, allowed_paths });
+		await opened(hunt(["docs/catervas/engineering/bug-hunt.html"]));
+		expect(
+			await screen.findByText(
+				"CTV-1. Theo is doing it, and Catervas checks it. Try 1 of 4.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/reviews it/)).toBeNull();
+		cleanup();
+
+		await opened(hunt(["docs/catervas/engineering/bug-hunt.html", "src/**"]));
 		expect(
 			await screen.findByText(
 				"CTV-1. Theo is doing it, and Ada reviews it. Try 1 of 4.",

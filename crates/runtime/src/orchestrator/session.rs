@@ -8,7 +8,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, BudgetState, SessionLedger, add_usage};
 use catervas_core::contract::{Role, TaskContract, TaskStatus};
-use catervas_core::folders::role_folder;
+use catervas_core::folders::{is_hunt, role_folder};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::permissions::{ConnectorTag, PermissionTier, SessionConnector};
 use catervas_core::governor::transition::TransitionRequest;
@@ -919,10 +919,16 @@ pub(super) const CHECK_PAGE_TOOL: &str = "catervas_check_page";
 
 /// The one tool that writes in a chat, offered in a chat session alone.
 const CHAT_REPLY_TOOL: &str = "catervas_chat_reply";
+/// The tool that takes the owner's request as the agent's own task, offered in a chat session
+/// alone (ADR 0063).
+const TAKE_TASK_TOOL: &str = "catervas_take_task";
 
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).
 const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
+/// The tool a bug hunt's assignee files a bug with, offered in the implement session of a hunt
+/// alone (ADR 0063).
+const FILE_BUG_TOOL: &str = "catervas_file_bug";
 /// The tool that schedules a social post, the Marketing Specialist's alone (ADR 0042).
 const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
@@ -993,6 +999,12 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         .filter(|tool| tool.name != WRITE_MEMORY_TOOL || !reviews_its_own_task(ask))
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
+        .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
+        // A bug is filed in the implement session of a hunt (ADR 0063).
+        .filter(|tool| {
+            tool.name != FILE_BUG_TOOL
+                || (ask.purpose == SessionPurpose::Implement && ask.contract.is_some_and(is_hunt))
+        })
         // A marketing plan is proposed by the Marketing Specialist, working on a task (ADR 0042).
         .filter(|tool| {
             (tool.name != PROPOSE_MARKETING_PLAN_TOOL && tool.name != SCHEDULE_POST_TOOL)
@@ -2828,6 +2840,37 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn offers_file_bug_to_a_hunts_implement_session_alone() {
+        let harness = Harness::new("session-file-bug-tool", |_| {});
+        harness.file("CTV-1", "ready", |wire| {
+            wire["allowed_paths"] = json!(["docs/catervas/engineering/bug-hunt.html"]);
+        });
+        harness.ready("CTV-2");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let read = |task: &str| {
+            deps.tools
+                .files
+                .read_contract(&task.parse().expect("an id"))
+                .expect("the contract")
+        };
+        let (hunt, ordinary) = (read("CTV-1"), read("CTV-2"));
+        let offered = |purpose: SessionPurpose, about| {
+            let ask = asked(deps, agent(&team, "dev-a"), purpose, about);
+            session_spec(deps, &team, &ask)
+                .expect("the spec")
+                .catervas_tools
+                .iter()
+                .any(|tool| tool == "catervas_file_bug")
+        };
+        assert!(offered(SessionPurpose::Implement, Some(&hunt)));
+        assert!(!offered(SessionPurpose::Refine, Some(&hunt)));
+        assert!(!offered(SessionPurpose::Implement, Some(&ordinary)));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn offers_the_seller_tools_to_procurement_alone() {
         const SELLER: [&str; 3] = [
             "catervas_draft_seller_message",
@@ -3375,7 +3418,9 @@ mod tests {
         ] {
             let given = tools(asked(deps, who, purpose, about));
             assert!(
-                !given.iter().any(|tool| tool == "catervas_chat_reply"),
+                !given
+                    .iter()
+                    .any(|tool| tool == "catervas_chat_reply" || tool == "catervas_take_task"),
                 "{purpose:?}: {given:?}"
             );
         }
@@ -3405,6 +3450,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded")
@@ -3630,6 +3676,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded");
@@ -3743,6 +3790,7 @@ mod tests {
                     in_reply_to: None,
                     request: None,
                     session_id: None,
+                    as_task: false,
                 },
             )
             .expect("recorded");

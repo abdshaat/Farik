@@ -112,6 +112,13 @@ pub(super) fn query(
                     .map(|(agent, server)| json!({ "agent": agent, "server": server }))
                     .collect::<Vec<_>>()
             );
+            answer["requested_connections"] = json!(
+                crate::connectors::requested_connections(&deps.log)
+                    .map_err(|e| internal(&e))?
+                    .into_iter()
+                    .map(|(agent, server, why)| json!({ "agent": agent, "server": server, "why": why }))
+                    .collect::<Vec<_>>()
+            );
             Ok(answer)
         }
         "team.propose" => propose(deps),
@@ -5299,6 +5306,37 @@ pub(super) mod tests {
                 .exists()
         );
         assert_eq!(harness.project.events(&[]).len(), seen);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn team_get_lists_requested_connections() {
+        let (harness, _) = keeping_a_kit("requested-connections");
+        let requested = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["requested_connections"]
+                .clone()
+        };
+        assert_eq!(requested(&harness), json!([]));
+        for (server, why) in [
+            ("fixture", "first reason, long enough"),
+            ("fixture", "second reason, long enough"),
+            ("other", "third reason, long enough"),
+        ] {
+            harness.project.record_by(
+                Some("dev-a"),
+                at(),
+                "CTV-1",
+                "connection.requested",
+                &json!({ "server": server, "why": why }),
+            );
+        }
+        assert_eq!(
+            requested(&harness),
+            json!([
+                { "agent": "dev-a", "server": "fixture", "why": "second reason, long enough" },
+                { "agent": "dev-a", "server": "other", "why": "third reason, long enough" }
+            ])
+        );
     }
 
     #[test]

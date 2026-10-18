@@ -217,9 +217,11 @@ pub fn file_request(
             parent,
             from_chat_message,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: None,
+            given_to: None,
             filed_as: None,
         },
         (now, ids),
@@ -333,9 +335,11 @@ pub fn file_rederive_request(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: Some(twin),
             product_plan: false,
             catervafies: None,
+            given_to: None,
             filed_as: None,
         },
         (now, ids),
@@ -366,13 +370,133 @@ pub fn file_raise_request(
             parent: None,
             from_chat_message: None,
             raises: Some(plan),
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: None,
+            given_to: None,
             filed_as: None,
         },
         (now, ids),
     )
+}
+
+/// Files a bug a hunt found as a draft request created by `created_by`, `found_by` the hunt,
+/// triaged small by Catervas in the same filing (ADR 0063).
+///
+/// # Errors
+///
+/// As [`file_request`].
+pub fn file_bug(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    found_by: &TaskId,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            found_by: Some(found_by),
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+            given_to: None,
+            filed_as: None,
+        },
+        (now, ids),
+    )
+}
+
+/// Files the task the owner gave `given_to` in its chat (ADR 0063), as `file_request` files one:
+/// `from_chat_message` is the owner's own message in that agent's chat, and the contract's intent
+/// is that message's text, whoever files it. `task.created` names the agent in `given_to`, and
+/// `request.triaged { small }` follows at once, by `catervas`, so that no triage session runs.
+///
+/// # Errors
+///
+/// As `file_request`; `Refused` too when the message is not the owner's in that chat, the intent
+/// is not its text, or it was already sent.
+#[allow(clippy::too_many_arguments)]
+pub fn file_given_task(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    given_to: &str,
+    from_chat_message: u64,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: Some(from_chat_message),
+            raises: None,
+            found_by: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+            given_to: Some(given_to),
+            filed_as: None,
+        },
+        (now, ids),
+    )
+}
+
+/// The agent the owner gave `task` to in its chat, when it was given to one (`task.created`'s
+/// `given_to`).
+///
+/// # Errors
+///
+/// The log could not be read.
+pub fn given_to(log: &EventLog, task: &TaskId) -> Result<Option<String>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            task_id: Some(task.clone()),
+            kinds: vec![EventKind::TaskCreated],
+            limit: Some(1),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| match event.body {
+            EventBody::TaskCreated(body) => body.given_to.map(|agent| agent.to_string()),
+            _ => None,
+        }))
+}
+
+/// Every (bug, hunt) a `task.created` with `found_by` records, oldest first.
+///
+/// # Errors
+///
+/// The log could not be read.
+pub fn bugs_found(log: &EventLog) -> Result<Vec<(TaskId, TaskId)>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| {
+            let EventBody::TaskCreated(body) = event.body else {
+                return None;
+            };
+            let hunt = TaskId::try_from(body.found_by?.as_str()).ok()?;
+            Some((event.envelope.ids.task_id?, hunt))
+        })
+        .collect())
 }
 
 /// The whole contract of the task that drafts a new project's product plan (`docs/SPEC.md` 4.3,
@@ -446,9 +570,11 @@ pub fn file_product_plan_request(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: true,
             catervafies: None,
+            given_to: None,
             filed_as: None,
         },
         (now, ids),
@@ -479,9 +605,11 @@ pub fn file_catervafication_epic(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: Some(project),
+            given_to: None,
             filed_as: None,
         },
         (now, ids),
@@ -736,9 +864,11 @@ pub fn file_small_request(
             parent: None,
             from_chat_message: None,
             raises: None,
+            found_by: None,
             rederives: None,
             product_plan: false,
             catervafies: None,
+            given_to: None,
             filed_as: Some((filed_as, reason)),
         },
         (now, ids),
@@ -752,9 +882,13 @@ struct Filing<'a> {
     parent: Option<&'a TaskId>,
     from_chat_message: Option<u64>,
     raises: Option<&'a str>,
+    /// The hunt that found this bug (ADR 0063).
+    found_by: Option<&'a TaskId>,
     rederives: Option<&'a str>,
     product_plan: bool,
     catervafies: Option<CatervaficationStartedBodyProject>,
+    /// The agent the owner gave this task to in its chat (ADR 0063).
+    given_to: Option<&'a str>,
     /// How a whole contract was filed, and why it is triaged small.
     filed_as: Option<(TaskCreatedBodyFiledAs, &'a str)>,
 }
@@ -775,7 +909,10 @@ fn file(
     // ponytail: one lock for the process; a second process (the command line) never links a chat.
     let _filing = FILING.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(seq) = from_chat_message {
-        check_proposal(log, seq)?;
+        match filing.given_to {
+            Some(agent) => check_task_message(log, seq, agent, wire["intent"].as_str())?,
+            None => check_proposal(log, seq)?,
+        }
     }
     let written = fields_not_the_authors(&wire);
     if !written.is_empty() {
@@ -868,6 +1005,10 @@ fn file(
 
 /// The events a request is filed with: `task.created`, and the triage that follows at once for a
 /// task of an epic and for a request that raises a marketing plan's budget.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one triage per way a request is filed"
+)]
 fn creation_bodies(
     contract: &TaskContract,
     filing: Filing<'_>,
@@ -877,10 +1018,12 @@ fn creation_bodies(
         parent,
         from_chat_message,
         raises,
+        found_by,
         rederives,
         product_plan,
         catervafies,
         filed_as,
+        given_to,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -906,12 +1049,46 @@ fn creation_bodies(
             })
             .transpose()?,
         filed_as: filed_as.map(|(kind, _)| kind),
+        given_to: given_to
+            .map(|agent| {
+                agent
+                    .to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("given to {agent:?}, which is no agent's id"),
+                    })
+            })
+            .transpose()?,
+        found_by: found_by
+            .map(|hunt| {
+                hunt.as_str()
+                    .to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("found by {}, which is no hunt's id", hunt.as_str()),
+                    })
+            })
+            .transpose()?,
     })];
     if let Some(parent) = parent {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a task of {}", parent.as_str()),
             triaged_by: created_by.to_string(),
+        }));
+    }
+    if let Some(hunt) = found_by {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: format!("a bug {} found", hunt.as_str()),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if let Some(agent) = given_to {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size: RequestTriagedBodySize::Small,
+            reason: format!("a task the owner gave {agent} in their chat"),
+            triaged_by: "catervas".to_string(),
         }));
     }
     if let Some(plan) = raises {
@@ -987,6 +1164,56 @@ fn check_proposal(log: &EventLog, seq: u64) -> Result<(), RequestError> {
         return refused(format!(
             "links to message {seq}, a reply that proposes no request"
         ));
+    }
+    let sent = log
+        .read(&EventQuery {
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find(|event| match &event.body {
+            EventBody::TaskCreated(body) => {
+                body.from_chat_message.map(NonZeroU64::get) == Some(seq)
+            }
+            _ => false,
+        });
+    match sent.and_then(|event| event.envelope.ids.task_id) {
+        Some(task_id) => refused(format!("was already sent, as {}", task_id.as_str())),
+        None => Ok(()),
+    }
+}
+
+/// Refused unless `seq` is the owner's own message in `agent`'s chat, no task was made from it
+/// yet, and `intent` is its text: so a given task's work is only ever the owner's words.
+fn check_task_message(
+    log: &EventLog,
+    seq: u64,
+    agent: &str,
+    intent: Option<&str>,
+) -> Result<(), RequestError> {
+    let refused = |reason: String| Err(RequestError::Refused { reason });
+    let event = log
+        .read(&EventQuery {
+            after_seq: Some(seq.saturating_sub(1)),
+            limit: Some(1),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find(|event| event.envelope.seq == seq);
+    let message = match event.map(|event| event.body) {
+        Some(EventBody::ChatMessagePosted(message))
+            if message.author == HUMAN && message.chat == agent =>
+        {
+            message
+        }
+        _ => {
+            return refused(format!(
+                "links to message {seq}, which is not the owner's message in {agent}'s chat"
+            ));
+        }
+    };
+    if intent != Some(message.text.as_str()) {
+        return refused(format!("its intent is not the owner's message {seq}"));
     }
     let sent = log
         .read(&EventQuery {
@@ -1375,9 +1602,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        PLACEHOLDER, RequestError, file_catervafication_epic, file_product_plan_request,
-        file_request, hold_contract, placeholder_budget_usd, product_plan_request,
-        request_from_brief, triage_by_human,
+        PLACEHOLDER, RequestError, bugs_found, file_bug, file_catervafication_epic,
+        file_product_plan_request, file_request, hold_contract, placeholder_budget_usd,
+        product_plan_request, request_from_brief, triage_by_human,
     };
     use crate::files::fixtures::{TempProject, a_team};
     use crate::git::fixtures::git_in;
@@ -1833,6 +2060,130 @@ mod tests {
         let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
             .expect("the request is filed");
         assert_eq!(request.id.as_str(), "CTV-1");
+    }
+
+    #[test]
+    fn files_a_bug_triaged_small_and_linked_to_its_hunt() {
+        let (project, log) = a_project("requests-bug");
+        let files = project.files();
+        let hunt = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
+            .expect("the hunt stands in as a request");
+        assert_eq!(hunt.id.as_str(), "CTV-1");
+        let wire = request_from_brief(
+            "The save button does nothing",
+            "Fix this bug, found by Theo while hunting in CTV-1.",
+            20.0,
+        )
+        .expect("a request");
+        let bug = file_bug(&files, &log, wire, "dev-a", &hunt.id, at(), &ids())
+            .expect("the bug is filed");
+        assert_eq!(bug.id.as_str(), "CTV-2");
+        assert_eq!(bug.status, TaskStatus::Draft);
+        assert_eq!(bug.kind, TaskKind::Task);
+
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        let EventBody::TaskCreated(created) = &events[1].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "dev-a");
+        assert_eq!(
+            created.found_by.as_ref().map(|hunt| hunt.as_str()),
+            Some("CTV-1")
+        );
+        let EventBody::RequestTriaged(triaged) = &events[2].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Small);
+        assert_eq!(triaged.reason, "a bug CTV-1 found");
+        assert_eq!(triaged.triaged_by, "catervas");
+        assert_eq!(events[2].envelope.ids.task_id.as_ref(), Some(&bug.id));
+
+        assert_eq!(bugs_found(&log).expect("reads"), vec![(bug.id, hunt.id)]);
+    }
+
+    /// The owner's, or an agent's, message in `agent`'s chat, at the seq it is recorded under.
+    fn chat_post(log: &EventLog, agent: &str, author: &str, text: &str, as_task: bool) -> u64 {
+        use catervas_protocol::event::{ChatMessagePostedBody, new_event};
+        let body = EventBody::ChatMessagePosted(ChatMessagePostedBody {
+            chat: agent.to_string(),
+            author: author.to_string(),
+            text: text.to_string(),
+            in_reply_to: None,
+            request: None,
+            heard: None,
+            as_task: as_task.then_some(true),
+        });
+        let ids = EventIds {
+            agent_id: Some(agent.to_string()),
+            ..ids()
+        };
+        let event = new_event(body, at(), ids).expect("a chat message");
+        log.append(&event).expect("it is recorded").envelope.seq
+    }
+
+    #[test]
+    fn files_a_given_task_triaged_small() {
+        use super::{file_given_task, given_to};
+        let (project, log) = a_project("requests-given");
+        let files = project.files();
+        let text = "Add a dark mode switch to the settings page";
+        let seq = chat_post(&log, "dev", "human", text, true);
+        let wire = || request_from_brief("Dark mode switch", text, 20.0).expect("a request");
+        let given = |wire: Value, from: u64| {
+            file_given_task(&files, &log, wire, "human", "dev", from, at(), &ids())
+        };
+        let task = given(wire(), seq).expect("the task is given");
+        assert_eq!(task.id.as_str(), "CTV-1");
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        let EventBody::TaskCreated(created) = &events[1].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(created.created_by, "human");
+        assert_eq!(
+            created.from_chat_message.map(std::num::NonZeroU64::get),
+            Some(seq)
+        );
+        assert_eq!(
+            created.given_to.as_ref().map(|agent| agent.as_str()),
+            Some("dev")
+        );
+        let EventBody::RequestTriaged(triaged) = &events[2].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Small);
+        assert_eq!(triaged.reason, "a task the owner gave dev in their chat");
+        assert_eq!(triaged.triaged_by, "catervas");
+        assert_eq!(
+            given_to(&log, &task.id).expect("reads").as_deref(),
+            Some("dev")
+        );
+
+        let refused = |result: Result<_, RequestError>| match result {
+            Err(RequestError::Refused { reason }) => reason,
+            other => panic!("expected a refusal, got {other:?}"),
+        };
+        assert_eq!(refused(given(wire(), seq)), "was already sent, as CTV-1");
+        let other = chat_post(
+            &log,
+            "dev",
+            "human",
+            "Something else entirely, please",
+            true,
+        );
+        assert_eq!(
+            refused(given(wire(), other)),
+            format!("its intent is not the owner's message {other}")
+        );
+        let reply = chat_post(&log, "dev", "dev", text, false);
+        assert_eq!(
+            refused(given(wire(), reply)),
+            format!("links to message {reply}, which is not the owner's message in dev's chat")
+        );
+        let elsewhere = chat_post(&log, "ada", "human", text, true);
+        assert_eq!(
+            refused(given(wire(), elsewhere)),
+            format!("links to message {elsewhere}, which is not the owner's message in dev's chat")
+        );
     }
 
     #[test]

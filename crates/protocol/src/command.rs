@@ -211,6 +211,8 @@ pub enum Command {
         agent_id: String,
         /// What the human says, its line breaks kept.
         text: String,
+        /// Send the message as a task for the agent (ADR 0063).
+        as_task: bool,
     },
     /// Give an agent a custom MCP server whose keys are already kept on this machine, or replace
     /// the one of its name (ADR 0030).
@@ -581,6 +583,7 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
             Ok(Command::ChatMessagePost {
                 agent_id: body.agent_id,
                 text: body.text,
+                as_task: body.as_task.unwrap_or(false),
             })
         }
         CommandName::ConnectorConnect | CommandName::ConnectorDisconnect => {
@@ -953,9 +956,17 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::ProductPlanDraft => (CommandName::ProductPlanDraft, json!({})),
         Command::CatervaficationStart => (CommandName::CatervaficationStart, json!({})),
         Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
-        Command::ChatMessagePost { agent_id, text } => (
+        Command::ChatMessagePost {
+            agent_id,
+            text,
+            as_task,
+        } => (
             CommandName::ChatMessagePost,
-            json!({ "agent_id": agent_id, "text": text }),
+            if *as_task {
+                json!({ "agent_id": agent_id, "text": text, "as_task": true })
+            } else {
+                json!({ "agent_id": agent_id, "text": text })
+            },
         ),
         Command::ConnectorConnect { .. } | Command::ConnectorDisconnect { .. } => {
             connector_wire(command)
@@ -1815,6 +1826,28 @@ mod tests {
             let command = command_from_value(&wire).expect("the wire reads");
             assert_eq!(command_to_value(&command), wire);
         }
+    }
+
+    #[test]
+    fn reads_a_chat_message_sent_as_a_task() {
+        let wire = |body: Value| json!({ "command": "chat_message_post", "body": body });
+        let task =
+            wire(json!({ "agent_id": "dev", "text": "Add a dark mode switch", "as_task": true }));
+        let command = command_from_value(&task).expect("a task message reads");
+        assert!(matches!(
+            &command,
+            Command::ChatMessagePost { as_task: true, .. }
+        ));
+        assert_eq!(command_to_value(&command), task);
+        let plain = wire(json!({ "agent_id": "dev", "text": "Add a dark mode switch" }));
+        let command = command_from_value(&plain).expect("a plain message reads");
+        assert!(matches!(
+            &command,
+            Command::ChatMessagePost { as_task: false, .. }
+        ));
+        assert_eq!(command_to_value(&command), plain);
+        let bad = wire(json!({ "agent_id": "dev", "text": "Add a dark mode", "as_task": "yes" }));
+        assert!(command_from_value(&bad).is_err());
     }
 
     #[test]

@@ -137,6 +137,27 @@ pub(super) fn refine_message(
     message
 }
 
+/// What the agent a task was given to in its chat is told before the refine message (ADR 0063).
+/// `{name}` is the agent's display name and `{role}` its role's wire name.
+pub(super) const GIVEN_TASK_LEAD: &str = "{name}, the owner gave you this task in your one-to-one chat, and you write its contract yourself, as the Product Manager would. Its intent is their words: keep it, and set its scope, requirements, exit criteria, allowed paths and budget. Its assignee_role stays {role}: you do the work once it is ready. Only a code change is reviewed; a task that changes no code is checked by its command, test and artifact criteria alone. Ask the owner first with catervas_ask_human only if you cannot write it without an answer.";
+
+/// The refine session's message for a task given to `agent` in its chat: `GIVEN_TASK_LEAD`, a
+/// blank line, then [`refine_message`].
+pub(super) fn given_task_message(
+    contract: &TaskContract,
+    agent: &Agent,
+    first: bool,
+    failures: &[String],
+) -> String {
+    format!(
+        "{}\n\n{}",
+        GIVEN_TASK_LEAD
+            .replace("{name}", agent.display_name.as_str())
+            .replace("{role}", &agent.role.to_string()),
+        refine_message(contract, first, failures)
+    )
+}
+
 /// The Product Manager's message for an epic in progress with no live task and no Architect: file
 /// its tasks, in lanes when the team has builders.
 pub(super) fn breakdown_message(contract: &TaskContract, builders: usize) -> String {

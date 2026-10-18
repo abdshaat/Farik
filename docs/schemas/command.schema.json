@@ -239,7 +239,8 @@
       "required": ["agent_id", "text"],
       "properties": {
         "agent_id": { "type": "string" },
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "as_task": { "type": "boolean", "description": "Send the message as a task for the agent (ADR 0063): the same command files a request given to that agent, which writes its contract and is assigned it. Written only when true." }
       }
     },
     "connectorConnectBody": {

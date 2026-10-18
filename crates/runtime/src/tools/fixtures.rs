@@ -390,6 +390,18 @@ impl TestProject {
         raises: Option<&str>,
         change: impl FnOnce(&mut Value),
     ) {
+        self.filed_extra(task, (status, kind, parent), &json!({}), raises, change);
+    }
+
+    /// `filed_given_to`'s ground: a task whose `task.created` body also holds `extra`.
+    fn filed_extra(
+        &self,
+        task: &str,
+        (status, kind, parent): (&str, &str, Option<&str>),
+        extra: &Value,
+        raises: Option<&str>,
+        change: impl FnOnce(&mut Value),
+    ) {
         let mut wire = a_contract_wire();
         wire["id"] = json!(task);
         wire["status"] = json!(status);
@@ -416,7 +428,30 @@ impl TestProject {
         if let Some(plan) = raises {
             body["raises"] = json!(plan);
         }
+        if let Some(extra) = extra.as_object() {
+            for (key, value) in extra {
+                body[key] = value.clone();
+            }
+        }
         self.record(task, "task.created", &body);
+    }
+
+    /// `filed_with` a standalone task the owner gave `agent` in its chat (ADR 0063): its
+    /// `task.created` also names `agent` in `given_to`.
+    pub(crate) fn filed_given_to(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.filed_extra(
+            task,
+            (status, "task", None),
+            &json!({ "given_to": agent }),
+            None,
+            change,
+        );
     }
 
     /// `filed_with` and no change.

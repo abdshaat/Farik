@@ -8,7 +8,7 @@ use std::sync::Arc;
 use catervas_core::branch::task_branch;
 use catervas_core::budget::{BudgetScope, SessionLedger, check_budgets};
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskStatus};
-use catervas_core::folders::with_format;
+use catervas_core::folders::{is_hunt, with_format};
 use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::task_status::is_terminal;
 use catervas_core::governor::transition::TransitionRequest;
@@ -263,7 +263,14 @@ pub(super) async fn tick(
         }
     }
     if runs(8) {
-        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+        // The tasks given in a chat go first (ADR 0063): next in their agent's queue.
+        let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready)
+            .filter(in_scope)
+            .partition(|row| {
+                catervas_store::requests::given_to(&deps.tools.log, &row.task_id)
+                    .is_ok_and(|agent| agent.is_some())
+            });
+        for row in given.into_iter().chain(others) {
             if let Some(report) = ready(deps, &team, &board, row, &mut waiting).await? {
                 return Ok(report);
             }
@@ -898,6 +905,7 @@ pub(super) const CHAT_TOOLS: &[&str] = &[
     "catervas_read_data_pipelines",
     "catervas_read_seller_messages",
     "catervas_read_seller_replies",
+    "catervas_take_task",
     "catervas_chat_reply",
     "catervas_read_sheet",
 ];
@@ -1476,7 +1484,8 @@ async fn in_progress(
     };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     // A Designer implements only a plan the Product Manager approved (ADR 0026).
-    let approved = if Role::from(assignee.role) == Role::UiUxDesigner {
+    // A bug hunt has no plan to wait for (ADR 0063): it goes straight to its implement session.
+    let approved = if Role::from(assignee.role) == Role::UiUxDesigner && !is_hunt(&contract) {
         match design::stage(orchestrator, team, row, assignee, &contract, waiting).await? {
             Stage::Approved(plan) => Some(plan),
             Stage::Handled(report) => return Ok(report),
@@ -1750,6 +1759,14 @@ async fn ready(
     if requests::is_epic(row) {
         return requests::ready_epic(deps, team, board, row);
     }
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    match requests::given_agent(deps, team, &contract)? {
+        requests::Given::Active(agent) => {
+            return ready_given(deps, team, board, row, &contract, agent);
+        }
+        requests::Given::Waits => return Ok(None),
+        requests::Given::No => {}
+    }
     // A task under an epic is assigned by the epic's assignee (5.16 item 3).
     let assigner = match &row.parent {
         Some(_) => requests::epic_assignee(team, board, row),
@@ -1758,7 +1775,6 @@ async fn ready(
     let Some(assigner) = assigner else {
         return Ok(None);
     };
-    let contract = deps.tools.files.read_contract(&row.task_id)?;
     // A sleeping agent is still offered as an assignee below; only its own sessions wait.
     if spent(deps, team, &contract, &mut waiting.day_spent)?
         | asleep(deps, assigner, &mut waiting.slept)?
@@ -1814,6 +1830,73 @@ async fn ready(
     )
     .await?;
     Ok(Some(acted(row, assigner, "plan", &end)))
+}
+
+/// Rule 8 for a task the owner gave `agent` in its chat (ADR 0063): assigned to that agent, with
+/// no session, as soon as it has room, the reviewer named as usual. Passed over when the agent is
+/// full, the move was refused since the task became `ready`, there is no assigner or reviewer, or
+/// the governor's own conditions for an assignment do not hold.
+fn ready_given(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+    contract: &TaskContract,
+    agent: &Agent,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    if !has_room(team, board, agent, None)
+        || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
+    {
+        return Ok(None);
+    }
+    let Some(assigner) = assigner(team) else {
+        return Ok(None);
+    };
+    let reviewer = team
+        .active_agents()
+        .find(|other| {
+            Role::from(other.role) == contract.reviewer_role
+                && other.id.as_str() != agent.id.as_str()
+        })
+        .or_else(|| {
+            (Role::from(agent.role) == contract.reviewer_role
+                && contract.reviewer_role.reviews_its_own())
+            .then_some(agent)
+        });
+    let Some(reviewer) = reviewer else {
+        return Ok(None);
+    };
+    if !assignable(deps, team, contract, assigner, agent.id.as_str())? {
+        return Ok(None);
+    }
+    let outcome = deps.tools.transitions.request(
+        &TransitionRequest {
+            task_id: row.task_id.clone(),
+            to: TaskStatus::Assigned,
+            actor: if Role::from(assigner.role) == Role::ScrumMaster {
+                TransitionActor::ScrumMaster
+            } else {
+                TransitionActor::ProductManager
+            },
+            agent_id: Some(assigner.id.to_string()),
+        },
+        &TransitionAsk {
+            assignee_id: Some(agent.id.to_string()),
+            reviewer_id: Some(reviewer.id.to_string()),
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    Ok(match outcome {
+        TransitionOutcome::Moved(_) => Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!(
+                "assigned it to {}, who was given it in its chat",
+                agent.id.as_str()
+            ),
+        }),
+        TransitionOutcome::Refused(_) => None,
+    })
 }
 
 /// Who assigns: the active Scrum Master, else the active Product Manager (D6).
@@ -5652,6 +5735,70 @@ mod tests {
         assert_eq!(started[0].purpose, SessionPurpose::Implement);
     }
 
+    #[test]
+    fn a_chat_session_may_take_a_task() {
+        use crate::prompt::CLOSING_INSTRUCTIONS;
+
+        let position = |tool: &str| super::CHAT_TOOLS.iter().position(|name| *name == tool);
+        let take = position("catervas_take_task").expect("the chat is offered it");
+        assert_eq!(Some(take + 1), position("catervas_chat_reply"));
+        let closing = |wanted: SessionPurpose| {
+            CLOSING_INSTRUCTIONS
+                .iter()
+                .find(|(purpose, _)| *purpose == wanted)
+                .map(|(_, text)| *text)
+                .expect("an entry")
+        };
+        let chat = closing(SessionPurpose::Chat);
+        assert!(
+            chat.contains(
+                "take it with `catervas_take_task` and reply in one line naming the task"
+            ),
+            "{chat}"
+        );
+        assert!(
+            chat.contains("When it asks for work another role does"),
+            "{chat}"
+        );
+        for (purpose, text) in CLOSING_INSTRUCTIONS {
+            assert!(
+                purpose == SessionPurpose::Chat || !text.contains("catervas_take_task"),
+                "{purpose:?}: {text}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn assigns_a_given_task_to_its_agent_first_without_a_session() {
+        let harness = Harness::new("orch-given-assigned", |wire| {
+            crate::tools::fixtures::with_the_suggested_six(wire);
+            wire["policy"]["wip_limit_per_agent"] = json!(1);
+        });
+        harness.file("CTV-1", "ready", |_| {});
+        harness.file_given("CTV-2", "ready", "dev", |wire| {
+            wire["reviewer_role"] = json!("architect");
+        });
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Acted {
+                task_id: "CTV-2".parse().expect("a task id"),
+                what: "assigned it to dev, who was given it in its chat".to_string(),
+            }
+        );
+        let row = harness.row("CTV-2");
+        assert_eq!(row.status, TaskStatus::Assigned);
+        assert_eq!(row.assignee_id.as_deref(), Some("dev"));
+        assert_eq!(row.reviewer_id.as_deref(), Some("ada"));
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn assigns_a_ready_task_whatever_the_day_cost_without_a_daily_budget() {
@@ -6067,7 +6214,7 @@ mod tests {
         let spec = &adapter.started()[0];
         let tiers = default_tiers(Role::ProductManager);
         // The Designer's page check and design review are offered in its own sessions alone, a
-        // chat's reply in a chat alone, the books' tools to the Finance Specialist, an evaluation
+        // chat's reply and its task in a chat alone, the books' tools to the Finance Specialist, an evaluation
         // to the Procurement Specialist in an implement session, and a post to the Marketing
         // Specialist in one; every role reads a workbook, and a folder document is written in a
         // ceremony alone.
@@ -6081,6 +6228,7 @@ mod tests {
                     "catervas_check_page",
                     "catervas_record_design_review",
                     "catervas_chat_reply",
+                    "catervas_take_task",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",
@@ -6094,6 +6242,7 @@ mod tests {
                     "catervas_read_seller_replies",
                     "catervas_schedule_post",
                     "catervas_write_folder_doc",
+                    "catervas_file_bug",
                 ]
                 .contains(&tool.name)
             })
@@ -7449,6 +7598,7 @@ mod tests {
                 request: None,
                 heard: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the greeting is recorded");
@@ -7477,7 +7627,7 @@ mod tests {
         harness
     }
 
-    /// The three tasks of a new project's Catervafication, and that Marketing's depends on the plan.
+    /// The three tasks of a new project's Catervafication; Marketing's depends on nothing (ADR 0063).
     fn the_new_projects_tasks_are_filed(harness: &Harness) {
         let files = &harness.project.deps.files;
         let roles: Vec<String> = ["CTV-4", "CTV-5", "CTV-6"]
@@ -7497,14 +7647,10 @@ mod tests {
         let marketing = files
             .read_contract(&"CTV-6".parse().expect("an id"))
             .expect("the task is filed");
-        assert_eq!(
-            marketing
-                .dependencies
-                .iter()
-                .map(|dependency| dependency.as_str())
-                .collect::<Vec<_>>(),
-            ["CTV-2"],
-            "the Marketing task reads the plan task's branch"
+        assert!(
+            marketing.dependencies.is_empty(),
+            "the Marketing task waits for nothing: {:?}",
+            marketing.dependencies
         );
     }
 
@@ -8645,6 +8791,7 @@ mod tests {
                 in_reply_to,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the chat message is recorded")
@@ -8882,6 +9029,7 @@ mod tests {
         assert_eq!(
             given,
             BTreeSet::from([
+                "catervas_take_task",
                 "catervas_read_task",
                 "catervas_read_board",
                 "catervas_read_rules",

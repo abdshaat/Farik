@@ -1554,6 +1554,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             Command::ChatMessagePost {
                 agent_id: agent.clone(),
                 text: text.join(" "),
+                as_task: false,
             },
         ),
         Commands::Marketing {

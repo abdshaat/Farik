@@ -10,11 +10,12 @@ use catervas_core::governor::gates::{
     check_contract_write, check_repo_write,
 };
 use catervas_core::governor::transition_table::TransitionActor;
+use catervas_core::team::AgentStatus;
 use catervas_protocol::event::{
     ContractWrittenBody, EventBody, EventKind, RequestTriagedBody, RequestTriagedBodySize,
 };
 use catervas_store::EventQuery;
-use catervas_store::requests::{RequestError, file_request, summary_of};
+use catervas_store::requests::{RequestError, file_request, given_to, summary_of};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -144,7 +145,7 @@ pub(super) fn write_contract(
 ) -> Result<Value, ToolError> {
     let task = call.task()?;
     let (contract, row) = call.contract(task)?;
-    let actor = contract_writer(call, &contract)?;
+    let actor = contract_writer(call, &contract, row.status)?;
     if contract.kind == TaskKind::Epic && has_asked(call, task)? {
         return Err(Refusal::QuestionUnanswered {
             task_id: task.to_string(),
@@ -179,6 +180,7 @@ pub(super) fn write_contract(
         object.insert("exit_criteria".to_string(), Value::Array(criteria));
     }
     fill_reviewer_role(call, object, contract.kind);
+    check_given_task_fixed(call, &contract, &before, &after)?;
     let changed = changed_fields(&before, &after);
     match check_contract_write(contract.kind, row.status, row.locked, &actor, &changed) {
         Ok(ContractWriteOutcome::Allowed) => {}
@@ -277,14 +279,26 @@ pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Val
 }
 
 /// Which actor a contract write is judged as: by role first, then by relation to the contract.
+///
+/// The agent the owner gave a task in its chat (ADR 0063) writes it with the Product Manager's
+/// standing while it is `draft` or `refining`, and then no longer.
 fn contract_writer(
     call: &Call<'_>,
     contract: &TaskContract,
+    status: TaskStatus,
 ) -> Result<ContractWriteActor, ToolError> {
     let me = call.agent_id();
     let kind = match call.role() {
         Role::ProductManager => TransitionActor::ProductManager,
         Role::ScrumMaster => TransitionActor::ScrumMaster,
+        _ if matches!(status, TaskStatus::Draft | TaskStatus::Refining)
+            && given_to(&call.deps().log, &contract.id)
+                .map_err(failed)?
+                .as_deref()
+                == Some(me) =>
+        {
+            TransitionActor::ProductManager
+        }
         _ if contract.assignee.as_deref() == Some(me) => TransitionActor::Assignee,
         _ if contract.reviewer.as_deref() == Some(me) => TransitionActor::Reviewer,
         _ => {
@@ -299,6 +313,66 @@ fn contract_writer(
         kind,
         agent_id: Some(me.to_string()),
     })
+}
+
+/// Refuses a write, by anybody, that changes what a task given in a chat keeps (ADR 0063): its
+/// assignee role is the given agent's, its reviewer role is the usual one, and its intent is the
+/// owner's words. A task is given while its agent is on the team and not retired and its
+/// assignee role is still the agent's; the human's `contract.save` may change it back to an
+/// ordinary task.
+fn check_given_task_fixed(
+    call: &Call<'_>,
+    contract: &TaskContract,
+    before: &Value,
+    after: &Value,
+) -> Result<(), ToolError> {
+    let Some(given) = given_to(&call.deps().log, &contract.id).map_err(failed)? else {
+        return Ok(());
+    };
+    let Some(agent) = call
+        .team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == given && agent.status != AgentStatus::Retired)
+    else {
+        return Ok(());
+    };
+    let role = Role::from(agent.role);
+    if before["assignee_role"].as_str() != Some(role.to_string().as_str()) {
+        return Ok(());
+    }
+    let task = contract.id.as_str();
+    let fixed = |kind: &'static str, field: &str, stays: &str| -> Result<(), ToolError> {
+        Err(Refusal::GivenTaskFixed {
+            kind,
+            detail: format!(
+                "{task} was given to {given} in its chat, so its {field} stays {stays}"
+            ),
+        }
+        .into())
+    };
+    if after["assignee_role"] != before["assignee_role"] {
+        return fixed("given_task_role_fixed", "assignee_role", &role.to_string());
+    }
+    let usual = catervas_roles::default_reviewer_role(&call.team, TaskKind::Task, role)
+        .map(|reviewer| reviewer.to_string())
+        .or_else(|| before["reviewer_role"].as_str().map(str::to_string))
+        .unwrap_or_default();
+    if after["reviewer_role"] != before["reviewer_role"]
+        && after["reviewer_role"].as_str() != Some(usual.as_str())
+    {
+        return fixed("given_task_reviewer_fixed", "reviewer_role", &usual);
+    }
+    if after["intent"] != before["intent"] {
+        return Err(Refusal::GivenTaskFixed {
+            kind: "given_task_intent_fixed",
+            detail: format!(
+                "{task} was given to {given} in its chat, so its intent stays the owner's words"
+            ),
+        }
+        .into());
+    }
+    Ok(())
 }
 
 /// Whether a question about `task` is still open: asked, and named by no `question.answered`
@@ -712,6 +786,83 @@ mod tests {
             project.file(&task)["reviewer_role"],
             "architect",
             "kept as given"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn only_its_agent_writes_a_given_task() {
+        let project = a_project("tools-write-given");
+        project.filed_given_to("CTV-1", "refining", "dev-a", |wire| {
+            wire["assignee_role"] = json!("software_developer");
+        });
+        let write = |agent: &str, fields: Value| {
+            project.call_in(
+                SessionPurpose::Refine,
+                agent,
+                Some("CTV-1"),
+                "catervas_write_contract",
+                json!({ "fields": fields }),
+            )
+        };
+        let scope =
+            json!({ "scope": { "in_scope": ["the settings page"], "out_of_scope": ["the rest"] } });
+        write("dev-a", scope.clone()).expect("the given agent writes its contract");
+        assert_eq!(project.events(&[EventKind::ContractWritten]).len(), 1);
+        refused_with(write("dev-b", scope.clone()), "not_a_contract_writer");
+
+        let fixed = |result: Result<Value, ToolError>, code: &str, words: &str| match result {
+            Err(ToolError::Refused { reason }) => {
+                assert_eq!(
+                    reason,
+                    format!("{code}: CTV-1 was given to dev-a in its chat, so {words}")
+                );
+            }
+            other => panic!("expected {code}, got {other:?}"),
+        };
+        fixed(
+            write("dev-a", json!({ "assignee_role": "product_manager" })),
+            "given_task_role_fixed",
+            "its assignee_role stays software_developer",
+        );
+        fixed(
+            write("pm", json!({ "assignee_role": "architect" })),
+            "given_task_role_fixed",
+            "its assignee_role stays software_developer",
+        );
+        fixed(
+            write("dev-a", json!({ "reviewer_role": "product_manager" })),
+            "given_task_reviewer_fixed",
+            "its reviewer_role stays software_developer",
+        );
+        fixed(
+            write(
+                "dev-a",
+                json!({ "intent": "Something else entirely, and longer." }),
+            ),
+            "given_task_intent_fixed",
+            "its intent stays the owner's words",
+        );
+        fixed(
+            write(
+                "pm",
+                json!({ "intent": "Something else entirely, and longer." }),
+            ),
+            "given_task_intent_fixed",
+            "its intent stays the owner's words",
+        );
+        assert_eq!(project.events(&[EventKind::ContractWritten]).len(), 1);
+
+        project.filed_given_to("CTV-2", "ready", "dev-a", |_| {});
+        refused_with(
+            project.call_in(
+                SessionPurpose::Refine,
+                "dev-a",
+                Some("CTV-2"),
+                "catervas_write_contract",
+                json!({ "fields": scope }),
+            ),
+            "not_a_contract_writer",
         );
     }
 

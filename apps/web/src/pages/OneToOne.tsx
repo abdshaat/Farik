@@ -1,5 +1,5 @@
 import type { Event } from "@catervas/protocol-client";
-import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
+import { Avatar, type AvatarKey, Button, InfoTip, RoleTag } from "@catervas/ui";
 import {
 	type FormEvent,
 	type ReactNode,
@@ -224,6 +224,7 @@ export function OneToOne({ agent, agents }: { agent: Agent; agents: Agent[] }) {
 							key={m.seq}
 							message={m}
 							agents={agents}
+							name={name}
 							onSent={(taskId) => markSent(m.seq, taskId)}
 							action={
 								interviewing && m.seq === newestOfHers ? (
@@ -324,11 +325,14 @@ function waitingWords(
 function Row({
 	message,
 	agents,
+	name,
 	onSent,
 	action,
 }: {
 	message: ChatMessage;
 	agents: Agent[];
+	/** The display name of the agent whose chat this is. */
+	name: string;
 	onSent: (taskId: string) => void;
 	/** What the owner can do about this reply: it sits inside "What I heard", else under the text. */
 	action?: ReactNode;
@@ -360,9 +364,18 @@ function Row({
 					</time>
 				</p>
 				{mine ? (
-					<p className={`${channel.text} ${styles.lines}`}>
-						{renderMessageText(message.text, agents, [])}
-					</p>
+					<>
+						<p className={`${channel.text} ${styles.lines}`}>
+							{renderMessageText(message.text, agents, [])}
+						</p>
+						{message.sentAs && (
+							<p className={channel.muted}>
+								<Link to={`/tasks/${message.sentAs}`}>
+									{t("chatsGivenAs", { name, id: message.sentAs })}
+								</Link>
+							</p>
+						)}
+					</>
 				) : (
 					// biome-ignore lint/a11y/useKeyWithClickEvents lint/a11y/noStaticElementInteractions: the links inside are the interactive elements and keep their keyboard behaviour
 					<div
@@ -517,8 +530,7 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
-	const post = async (e: FormEvent) => {
-		e.preventDefault();
+	const send = async (asTask: boolean) => {
 		if (!client) return;
 		// Counted in code points, as the runtime's `chars().count()`.
 		const length = [...text].length;
@@ -528,7 +540,9 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 		try {
 			const reply = await client.command({
 				command: "chat_message_post",
-				body: { agentId: agent.id, text },
+				body: asTask
+					? { agentId: agent.id, text, asTask: true }
+					: { agentId: agent.id, text },
 			});
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));
 			else setText("");
@@ -537,6 +551,10 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 		} finally {
 			setBusy(false);
 		}
+	};
+	const post = (e: FormEvent) => {
+		e.preventDefault();
+		void send(false);
 	};
 	return (
 		<form className={channel.composer} onSubmit={post}>
@@ -556,9 +574,24 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 					onChange={(e) => setText(e.target.value)}
 					onKeyDown={sendOnEnter}
 				/>
-				<Button kind="primary" type="submit" busy={busy}>
-					{t("chatsSend")}
-				</Button>
+				<div className={styles.actions}>
+					<Button kind="primary" type="submit" busy={busy}>
+						{t("chatsSend")}
+					</Button>
+					<span className={styles.task}>
+						<Button
+							kind="secondary"
+							type="button"
+							busy={busy}
+							onClick={() => void send(true)}
+						>
+							{t("chatsSendTask")}
+						</Button>
+						<InfoTip id="chat-task-info">
+							{t("chatsTaskInfo", { name: agent.displayName })}
+						</InfoTip>
+					</span>
+				</div>
 			</div>
 			<p id="chat-enter" className={wide ? channel.muted : channel.hidden}>
 				{t("chatsEnterSends")}

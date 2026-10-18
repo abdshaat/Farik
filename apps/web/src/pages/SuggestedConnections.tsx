@@ -9,21 +9,29 @@ import type { Team } from "./setup/TeamSetup.tsx";
 import type { KitService, RoleKit } from "./Team.tsx";
 import styles from "./Today.module.css";
 
-export type Suggestion = { agent: Team["agents"][number]; service: KitService };
+export type Suggestion = {
+	agent: Team["agents"][number];
+	service: KitService;
+	/** The agent's own reason, when it asked for this service (ADR 0063). */
+	why?: string;
+};
 export const SUGGESTIONS_SHOWN = 4;
 
 type Pair = { agent: string; server: string };
+type Requested = Pair & { why: string };
 
 /**
  * The kit services an active agent lacks, in the team's order and each kit's order: not one the
  * agent holds under any source, not one signed in at launch only, not one the user said Not now to.
+ * The ones an agent asked for come first, in the order asked, with its reason.
  */
 export function suggestedConnections(
 	team: Team,
 	kits: RoleKit[],
 	hidden: Pair[],
+	requested: Requested[] = [],
 ): Suggestion[] {
-	return team.agents
+	const candidates = team.agents
 		.filter((agent) => agent.status === "active")
 		.flatMap((agent) =>
 			(kits.find((k) => k.role === agent.role)?.connectors ?? [])
@@ -37,6 +45,18 @@ export function suggestedConnections(
 				)
 				.map((service) => ({ agent, service })),
 		);
+	const asked = requested.flatMap((r) => {
+		const found = candidates.find(
+			(c) => c.agent.id === r.agent && c.service.name === r.server,
+		);
+		return found ? [{ ...found, why: r.why }] : [];
+	});
+	return [
+		...asked,
+		...candidates.filter(
+			(c) => !asked.some((a) => a.agent === c.agent && a.service === c.service),
+		),
+	];
 }
 
 /** Today's "Suggested connections": nothing at all when there is nothing to suggest. */
@@ -44,16 +64,19 @@ export function SuggestedConnections(props: {
 	team: Team;
 	kits: RoleKit[];
 	hidden: Pair[];
+	requested?: Requested[];
 }) {
 	const { client } = useConnection();
 	const [gone, setGone] = useState<Pair[]>([]);
 	const [open, setOpen] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
 	const heading = useRef<HTMLHeadingElement>(null);
-	const all = suggestedConnections(props.team, props.kits, [
-		...props.hidden,
-		...gone,
-	]);
+	const all = suggestedConnections(
+		props.team,
+		props.kits,
+		[...props.hidden, ...gone],
+		props.requested,
+	);
 	if (all.length === 0) return null;
 	const shown = open ? all : all.slice(0, SUGGESTIONS_SHOWN);
 
@@ -82,7 +105,7 @@ export function SuggestedConnections(props: {
 				className={styles.rows}
 				aria-label={t("suggestionsTitle")}
 			>
-				{shown.map(({ agent, service }) => {
+				{shown.map(({ agent, service, why }) => {
 					const id = `suggestion-${agent.id}-${service.name}`;
 					return (
 						<li key={id} className={styles.row}>
@@ -90,10 +113,12 @@ export function SuggestedConnections(props: {
 							<div className={styles.rowText}>
 								<strong id={id}>{service.title}</strong>
 								<span>
-									{t("suggestionsLine", {
-										agent: agent.displayName,
-										about: service.about,
-									})}{" "}
+									{why
+										? t("suggestionsAsked", { agent: agent.displayName, why })
+										: t("suggestionsLine", {
+												agent: agent.displayName,
+												about: service.about,
+											})}{" "}
 									<InfoTip id={`${id}-info`}>{service.why}</InfoTip>
 								</span>
 							</div>

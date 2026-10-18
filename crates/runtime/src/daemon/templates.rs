@@ -1237,6 +1237,7 @@ mod tests {
                 in_reply_to: None,
                 request: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("posted");

@@ -174,7 +174,8 @@
         "repo.moved",
         "document_rewrite.started",
         "delivery.closed",
-        "task.reassigned"
+        "task.reassigned",
+        "connection.requested"
       ]
     },
     "eventBodyWire": {
@@ -288,7 +289,8 @@
         { "$ref": "#/$defs/repoMovedBody" },
         { "$ref": "#/$defs/documentRewriteStartedBody" },
         { "$ref": "#/$defs/deliveryClosedBody" },
-        { "$ref": "#/$defs/taskReassignedBody" }
+        { "$ref": "#/$defs/taskReassignedBody" },
+        { "$ref": "#/$defs/connectionRequestedBody" }
       ]
     },
     "contractSummary": {
@@ -310,7 +312,7 @@
     },
     "taskCreatedBody": {
       "title": "Task Created Body",
-      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request is worked on as filed.",
+      "description": "A request was filed as a draft contract (docs/SPEC.md section 5.16 item 1). from_chat_message is the seq of the agent's chat_message.posted whose proposed request the user sent (ADR 0026); created_by is then human, since the user sent it, and one proposal is sent once. With given_to, from_chat_message is the owner's own message in that chat, and created_by is human or that agent. raises names the marketing plan whose budget the request raises (docs/SPEC.md 6.7; ADR 0042, step 08g): such a request is worked on as filed.",
       "type": "object",
       "additionalProperties": false,
       "required": ["summary", "created_by"],
@@ -319,6 +321,17 @@
         "created_by": { "type": "string", "description": "The agent id that filed the request, or human." },
         "from_chat_message": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "raises": { "$ref": "#/$defs/marketingPlanId" },
+        "found_by": {
+          "type": "string",
+          "pattern": "^CTV-[0-9]{1,6}$",
+          "description": "The hunt that found this bug (ADR 0063); written by catervas_file_bug alone."
+        },
+        "given_to": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "The agent the owner gave this task to in its one-to-one chat (ADR 0063): from_chat_message names that message, the agent writes the contract and is assigned it."
+        },
         "product_plan": {
           "type": "boolean",
           "const": true,
@@ -966,7 +979,8 @@
         "text": { "type": "string" },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
         "request": { "$ref": "#/$defs/proposedRequest" },
-        "heard": { "$ref": "#/$defs/heard" }
+        "heard": { "$ref": "#/$defs/heard" },
+        "as_task": { "type": "boolean", "const": true, "description": "The owner sent this message as a task for the chat's agent (ADR 0063); the chat does not answer it." }
       }
     },
     "heard": {
@@ -1961,6 +1975,17 @@
         "from": { "type": "string" },
         "to": { "type": "string" },
         "reason": { "type": "string", "enum": ["resumed"] }
+      }
+    },
+    "connectionRequestedBody": {
+      "title": "Connection Requested Body",
+      "description": "An agent's ask for a service of its own kit (ADR 0063), shown on Today. The envelope names the agent, the session and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "why"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "why": { "type": "string", "minLength": 1, "maxLength": 300 }
       }
     },
     "connectorTag": {

@@ -11,7 +11,7 @@ use catervas_core::folders::{is_plan_task, plan_stem, with_format};
 use catervas_core::governor::done::{CriterionResult, RunBy, catervas_verifies_alone};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_core::team::{Agent, Team, changes_code, task_private_folder};
+use catervas_core::team::{Agent, AgentStatus, Team, changes_code, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
     EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
@@ -24,7 +24,7 @@ use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
-    plan_task_message, plan_tasks_message, refine_message, triage_message,
+    given_task_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
 };
 use super::rules::{Waiting, acted, active, asleep, has_room, refused_since_entering, spent};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
@@ -137,10 +137,11 @@ pub(super) async fn refining(
     row: &TaskProjection,
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    let Some(pm) = product_manager(team) else {
-        return Ok(None);
-    };
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let given = given_agent(deps, team, &contract)?;
+    if matches!(given, Given::No) && product_manager(team).is_none() {
+        return Ok(None);
+    }
     let history = history(deps, &row.task_id)?;
     // A new project plans nothing but its product plan until the plan is approved (5.3): the
     // contract waits, with no session and no governor ask to spend an attempt or escalate.
@@ -151,7 +152,18 @@ pub(super) async fn refining(
     if is_to_be_judged(&contract, &history, began) {
         return judge(deps, team, row).map(Some);
     }
-    if spent(deps, team, &contract, &mut waiting.day_spent)? | asleep(deps, pm, &mut waiting.slept)?
+    // The agent a task was given to in its chat writes its contract (ADR 0063); a paused one's
+    // task waits.
+    let (writer, lead) = match given {
+        Given::Active(agent) => (agent, Some(agent)),
+        Given::Waits => return Ok(None),
+        Given::No => match product_manager(team) {
+            Some(pm) => (pm, None),
+            None => return Ok(None),
+        },
+    };
+    if spent(deps, team, &contract, &mut waiting.day_spent)?
+        | asleep(deps, writer, &mut waiting.slept)?
     {
         return Ok(None);
     }
@@ -159,11 +171,15 @@ pub(super) async fn refining(
         .iter()
         .any(|event| event.envelope.seq > began && event.body.kind() == EventKind::QuestionAsked);
     let failures = last_readiness_failures(&history, began);
+    let initial_prompt = match lead {
+        Some(agent) => given_task_message(&contract, agent, !asked, &failures),
+        None => refine_message(&contract, !asked, &failures),
+    };
     let end = run_session(
         deps,
         team,
         SessionAsk {
-            agent: pm,
+            agent: writer,
             contract: Some(&contract),
             purpose: SessionPurpose::Refine,
             cwd: deps.tools.files.root().to_path_buf(),
@@ -173,11 +189,48 @@ pub(super) async fn refining(
             tools: None,
             in_reply_to: None,
             thread: None,
-            initial_prompt: refine_message(&contract, !asked, &failures),
+            initial_prompt,
         },
     )
     .await?;
-    Ok(Some(acted(row, pm, "refine", &end)))
+    Ok(Some(acted(row, writer, "refine", &end)))
+}
+
+/// Whose task a contract is, when the owner gave it to an agent in its chat (ADR 0063).
+pub(super) enum Given<'a> {
+    /// Not given to an agent, or no longer: the agent is not on the team or has retired, or the
+    /// human changed the contract's assignee role.
+    No,
+    /// Given to this active agent.
+    Active(&'a Agent),
+    /// Given to a paused agent, whose task waits.
+    Waits,
+}
+
+/// Whose task `contract` is: the agent its `task.created` names in `given_to`, while that agent is
+/// on the team, has not retired, and is still the contract's assignee role.
+pub(super) fn given_agent<'a>(
+    deps: &OrchestratorDeps,
+    team: &'a Team,
+    contract: &TaskContract,
+) -> Result<Given<'a>, OrchestratorError> {
+    let Some(given) = catervas_store::requests::given_to(&deps.tools.log, &contract.id)? else {
+        return Ok(Given::No);
+    };
+    let Some(agent) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == given && agent.status != AgentStatus::Retired)
+    else {
+        return Ok(Given::No);
+    };
+    if Role::from(agent.role) != contract.assignee_role {
+        return Ok(Given::No);
+    }
+    Ok(match agent.status {
+        AgentStatus::Active => Given::Active(agent),
+        _ => Given::Waits,
+    })
 }
 
 /// Asks the governor to judge a contract: `escalated` first, because asking for `ready` on a
@@ -1211,6 +1264,54 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_given_agent_refines_its_own_task() {
+        use crate::orchestrator::messages::GIVEN_TASK_LEAD;
+        use crate::recorded::fixtures::implement_stops_early;
+
+        let harness = Harness::with_the_suggested_six("req-given-refine");
+        harness.file_given("CTV-1", "refining", "dev", |_| {});
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let who: Vec<_> = started
+            .iter()
+            .map(|spec| (spec.agent_id.as_str(), spec.purpose))
+            .collect();
+        assert_eq!(who, [("dev", SessionPurpose::Refine)]);
+        let lead = GIVEN_TASK_LEAD
+            .replace("{name}", "dev")
+            .replace("{role}", "software_developer");
+        assert!(
+            started[0].initial_prompt.starts_with(&lead),
+            "{}",
+            started[0].initial_prompt
+        );
+
+        // A paused agent's task waits: no session starts.
+        let harness = Harness::with_the_suggested_six("req-given-refine-paused");
+        harness.file_given("CTV-1", "refining", "dev", |_| {});
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+        orchestrator
+            .handle(Command::AgentUpdate {
+                agent_id: "dev".to_string(),
+                status: AgentStatus::Paused,
+            })
+            .await
+            .expect("the agent is paused");
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn triages_a_request_on_the_cheaper_model() {
         let harness = Harness::new("req-triage", |_| {});
         harness.a_request("Add done.txt and its check");
@@ -1423,6 +1524,7 @@ mod tests {
                 request: None,
                 heard: None,
                 session_id: None,
+                as_task: false,
             },
         )
         .expect("the greeting is recorded");
@@ -1989,6 +2091,7 @@ mod tests {
                 Project::New,
                 2.0,
                 catervas_core::folders::DocumentFormat::Markdown,
+                1,
             ),
             "catervas",
             Project::New,
@@ -2057,7 +2160,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_one_task_per_role_with_a_folder() {
+    async fn files_every_task_in_the_first_tick() {
         let harness = Harness::with_the_suggested_six("req-catervafication-files");
         let (orchestrator, adapter) = a_catervafication_in_progress(&harness).await;
 
@@ -2067,7 +2170,7 @@ mod tests {
             report,
             TickReport::Acted {
                 task_id: task("CTV-1"),
-                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5, CTV-6"
+                what: "filed the Catervafication's tasks: CTV-2, CTV-3, CTV-4, CTV-5, CTV-6, CTV-7, CTV-8"
                     .to_string()
             }
         );
@@ -2078,13 +2181,16 @@ mod tests {
                 "architect",
                 "software_developer",
                 "ui_ux_designer",
-                "marketing_specialist"
+                "marketing_specialist",
+                "software_developer",
+                "ui_ux_designer"
             ]
         );
-        for id in ["CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6"] {
+        for id in [
+            "CTV-2", "CTV-3", "CTV-4", "CTV-5", "CTV-6", "CTV-7", "CTV-8",
+        ] {
             let row = harness.row(id);
             assert_eq!(row.parent, Some(task("CTV-1")), "{id}");
-            assert_eq!(row.sprint, None, "{id}");
             let created = harness
                 .events(&[EventKind::TaskCreated])
                 .into_iter()
@@ -2095,23 +2201,34 @@ mod tests {
                 "{id}"
             );
         }
-        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
-        // The team writes HTML (the default): the Architect is asked for pages, a diagram among them.
-        let architects = serde_json::to_string(
-            &harness
+        let contract = |id: &str| {
+            harness
                 .project
                 .deps
                 .files
-                .read_contract(&task("CTV-3"))
-                .expect("the Architect's task"),
-        )
-        .expect("a contract is json");
+                .read_contract(&task(id))
+                .expect("a contract")
+        };
+        assert!(contract("CTV-6").dependencies.is_empty());
+        assert!(catervas_core::folders::is_hunt(&contract("CTV-7")));
+        assert!(catervas_core::folders::is_hunt(&contract("CTV-8")));
+        assert!(!catervas_core::folders::is_hunt(&contract("CTV-4")));
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+        // The team writes HTML (the default): the Architect is asked for pages, a diagram among them.
+        let architects = serde_json::to_string(&contract("CTV-3")).expect("a contract is json");
         assert!(
             architects.contains("architecture/overview.html") && !architects.contains(".md"),
             "{architects}"
         );
+        // A second tick files nothing.
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            !matches!(&report, TickReport::Acted { what, .. } if what.starts_with("filed the Catervafication")),
+            "{report:?}"
+        );
+        assert_eq!(roles_under_the_epic(&harness).len(), 7);
 
-        // A Designer whose browser is not ready (no preview can run) gets no task.
+        // A Designer whose browser is not ready (no preview can run) gets no task and no hunt.
         let unready = Harness::new(
             "req-catervafication-files-unready",
             crate::tools::fixtures::with_the_suggested_six,
@@ -2124,75 +2241,127 @@ mod tests {
                 "product_manager",
                 "architect",
                 "software_developer",
-                "marketing_specialist"
+                "marketing_specialist",
+                "software_developer"
             ]
         );
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_the_marketing_task_with_the_others_depending_on_the_plan() {
-        let harness = Harness::with_the_suggested_six("req-catervafication-marketing");
-        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
-        orchestrator.tick().await.expect("the tick files the tasks");
-
-        assert_eq!(
-            roles_under_the_epic(&harness).last().map(String::as_str),
-            Some("marketing_specialist")
+    async fn files_a_hunt_per_member_in_the_first_tick() {
+        let (mut harness, members) = Harness::project_folder_with(
+            "req-catervafication-folder",
+            &["api", "web"],
+            crate::tools::fixtures::with_the_suggested_six,
         );
-        let marketing = harness
+        harness.previews = Arc::new(crate::preview::fixtures::FakePreviews::ready());
+        // `web` can start its app; `api` cannot.
+        members[1].write("package.json", r#"{ "scripts": { "dev": "vite" } }"#);
+        // The scan names the package manager by its lock file.
+        members[1].write("package-lock.json", "{}");
+        members[1].commit("add the package");
+        let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let under_the_epic = |harness: &Harness| -> Vec<(String, Option<String>)> {
+            let files = &harness.project.deps.files;
+            files
+                .list_contracts()
+                .expect("the contracts list")
+                .iter()
+                .map(|id| files.read_contract(id).expect("a contract"))
+                .filter(|contract| contract.parent.as_ref().map(|p| p.as_str()) == Some("CTV-1"))
+                .map(|contract| {
+                    (
+                        contract.assignee_role.to_string(),
+                        contract.repo.as_ref().map(|repo| repo.as_str().to_string()),
+                    )
+                })
+                .collect()
+        };
+        let hunt = |role: &str, repo: &str| (role.to_string(), Some(repo.to_string()));
+        let filed = under_the_epic(&harness);
+        assert_eq!(filed.len(), 8, "{filed:?}");
+        assert_eq!(
+            filed[5..],
+            [
+                hunt("software_developer", "api"),
+                hunt("software_developer", "web"),
+                hunt("ui_ux_designer", "web"),
+            ]
+        );
+        let notes = |harness: &Harness| -> Vec<String> {
+            harness
+                .events(&[EventKind::NoteWritten])
+                .iter()
+                .filter_map(|event| match &event.body {
+                    EventBody::NoteWritten(body)
+                        if body.kind == NoteWrittenBodyKind::Progress
+                            && event.envelope.ids.task_id == Some(task("CTV-1")) =>
+                    {
+                        assert_eq!(body.written_by, "catervas");
+                        Some(body.text.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            notes(&harness),
+            ["No UI bug hunt for api: Catervas found no way to start its app."]
+        );
+        let budget = harness
             .project
             .deps
             .files
-            .read_contract(&task("CTV-6"))
-            .expect("the Marketing task");
-        assert_eq!(
-            marketing
-                .dependencies
-                .iter()
-                .map(|dependency| dependency.as_str())
-                .collect::<Vec<_>>(),
-            ["CTV-2"],
-            "it reads the Product Manager's task, and starts from its branch once accepted"
+            .read_contract(&task("CTV-1"))
+            .expect("the epic")
+            .budget
+            .max_cost_usd;
+        assert!(
+            (budget
+                - 9.0
+                    * catervas_store::requests::placeholder_budget_usd(
+                        &harness
+                            .project
+                            .deps
+                            .files
+                            .read_team()
+                            .expect("a team")
+                            .rules()
+                    ))
+            .abs()
+                < 1e-9,
+            "{budget}"
         );
+
+        // A second tick files nothing and writes no second note.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(under_the_epic(&harness).len(), 8);
+        assert_eq!(notes(&harness).len(), 1);
     }
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn files_no_marketing_task_for_a_cancelled_product_plan() {
-        let harness = Harness::with_the_suggested_six("req-catervafication-no-plan");
-        // The Marketing Specialist is paused at first, so its task is not filed with the others.
-        let team = harness
-            .project
-            .deps
-            .files
-            .read_team()
-            .expect("the team reads");
-        let mut wire = serde_json::to_value(&team).expect("the team is JSON");
-        wire["agents"][5]["status"] = json!("paused");
-        harness
-            .project
-            .deps
-            .files
-            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
-            .expect("the team is written");
+    async fn an_epic_without_the_hunts_requirement_files_no_hunt() {
+        let harness = Harness::with_the_suggested_six("req-catervafication-no-hunts");
         let (orchestrator, _adapter) = a_catervafication_in_progress(&harness).await;
-        orchestrator.tick().await.expect("the tick files the tasks");
-        assert_eq!(roles_under_the_epic(&harness).len(), 4);
-        harness
-            .project
-            .moved("CTV-2", "draft", "cancelled", &json!({}));
-        wire["agents"][5]["status"] = json!("active");
-        harness
-            .project
-            .deps
-            .files
-            .write_team(&catervas_core::team::validate_team(&wire).expect("a team"))
-            .expect("the team is written");
+        // An epic filed before hunts existed: R1 alone.
+        let files = &harness.project.deps.files;
+        let mut wire = serde_json::to_value(files.read_contract(&task("CTV-1")).expect("the epic"))
+            .expect("a contract is json");
+        wire["requirements"] = json!([wire["requirements"][0].clone()]);
+        wire["exit_criteria"][0]["satisfies"] = json!(["R1"]);
+        files
+            .write_contract(&catervas_core::contract::validate_contract(&wire).expect("a contract"))
+            .expect("the epic is written");
 
         orchestrator.tick().await.expect("the tick runs");
 
-        assert_eq!(roles_under_the_epic(&harness).len(), 4, "no Marketing task");
+        assert_eq!(roles_under_the_epic(&harness).len(), 5);
+        assert!(!roles_under_the_epic(&harness).iter().skip(5).any(|_| true));
     }
 
     #[tokio::test]
@@ -2229,7 +2398,8 @@ mod tests {
                 "product_manager",
                 "architect",
                 "software_developer",
-                "marketing_specialist"
+                "marketing_specialist",
+                "software_developer"
             ]
         );
 
@@ -2245,7 +2415,7 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(is_idle(&report), "{report:?}");
-        assert_eq!(roles_under_the_epic(&harness).len(), 4);
+        assert_eq!(roles_under_the_epic(&harness).len(), 5);
 
         // A Designer who joins later gets its task on the next tick.
         wire["agents"][4]["status"] = json!("active");
@@ -2260,13 +2430,14 @@ mod tests {
             .await
             .expect("the tick runs");
         assert!(
-            matches!(&report, TickReport::Acted { what, .. } if what.ends_with("CTV-6")),
+            matches!(&report, TickReport::Acted { what, .. } if what == "filed the Catervafication's tasks: CTV-7, CTV-8"),
             "{report:?}"
         );
         assert_eq!(
             roles_under_the_epic(&harness).last().map(String::as_str),
             Some("ui_ux_designer")
         );
+        assert_eq!(roles_under_the_epic(&harness).len(), 7);
     }
 
     #[tokio::test]
