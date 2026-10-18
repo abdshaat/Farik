@@ -22,8 +22,8 @@ The founder's brief of 2026-10-18 (design, "The brief"). When done: setup's team
 
 - [x] **Task 1 (Rust).** Effort levels; model names; `suggested_teams` (`catervas_core::team::suggest_teams(tracked: &[String], language: Option<&str>, tests: bool) -> Vec<SuggestedTeam>`, the rules of design section 5); "Software product" gains Iris, the UI/UX Designer (`avatar: extra-1`, the Playwright connector as `suggested()` gives it). One test per functionality: suggestion order for code, money, shop and new folders; names from ids; five efforts accepted and passed to `--effort`.
 - [x] **Task 2 (Rust).** Solo mode, design section 6, every hook the map names (`docs/design/team-picker.md` section 6). One test: a solo team of one Developer files a request through `request.file` and the task reaches `accepted` with no Product Manager session and no review session (the orchestrator harness's recorded sessions); plus validation's refusals.
-- [ ] **Task 3 (web).** Setup's team step as cards and the agent sheet; the Team page's agent editor's model, effort and temperature rows; the Team page in solo. Iterated against screenshots at 1280 and 390 px.
-- [ ] **Task 4.** `docs/SPEC.md` 0.125; `e2e/setup-team.spec.ts` and the web tests updated to the new screen.
+- [x] **Task 3 (web).** Setup's team step as cards and the agent sheet; the Team page's agent editor's model, effort and temperature rows; the Team page in solo. Iterated against screenshots at 1280 and 390 px.
+- [x] **Task 4.** `docs/SPEC.md` 0.125; `e2e/setup-team.spec.ts` and the web tests updated to the new screen.
 
 ## Verification
 

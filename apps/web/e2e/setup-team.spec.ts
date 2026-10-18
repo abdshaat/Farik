@@ -53,16 +53,7 @@ test("the team's setup starts the suggested team this computer can run, sets the
 		await page.getByRole("button", { name: "Done" }).click();
 		await page.getByRole("button", { name: "Continue with this team" }).click();
 
-		await expect(page).toHaveURL(/\/setup\/permissions$/);
-		await expect(
-			page.getByLabel(/^Yes, the Developer and Architect may/),
-		).toBeChecked();
-		await expect(
-			page.getByLabel(/^No, keep work in progress on this computer/),
-		).toBeChecked();
-		await screenshots(page, "setup-permissions");
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-
+		// A ready-made team carries its answers about what it may do, so that step is not asked.
 		await expect(page).toHaveURL(/\/setup\/spending$/);
 		await page.getByLabel(/^Stop the team after a set amount each day/).check();
 		await page.getByLabel("Limit per day, in US dollars").fill("10");
