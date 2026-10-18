@@ -60,7 +60,7 @@ Tests: none of code (a documentation change). The check:
 
 - `grep -c "Revision 0.123" docs/SPEC.md` is 1; `grep -n "Four rows show at first" docs/SPEC.md` prints nothing; `grep -n "added in 0.123" docs/SPEC.md` prints the two 4.2 paragraphs.
 
-- [ ] `docs(spec): the UX pass, revision 0.123`
+- [x] `docs(spec): the UX pass, revision 0.123`
 
 ## Verification
 

@@ -142,8 +142,8 @@ test("the user chats with an agent, and sends her proposal as a request, through
 			.reduce((sum, e) => sum + Number(e.body.cost_usd), 0);
 		expect(chatCost).toBeGreaterThan(0);
 		await expect(
-			page.getByText("Conversations today:").locator(".."),
-		).toContainText(`Conversations today: $${chatCost.toFixed(2)}.`);
+			page.getByRole("row", { name: /Your chats with the team/ }),
+		).toContainText(`$${chatCost.toFixed(2)}`);
 		await shots(page, "chats-costs");
 	} finally {
 		await serve.stop();

@@ -30,4 +30,4 @@ Checklist (ticked in the commits that do them):
 - [x] Plan 5
 - [x] Plan 6
 - [x] Plan 7
-- [ ] Plan 8
+- [x] Plan 8
