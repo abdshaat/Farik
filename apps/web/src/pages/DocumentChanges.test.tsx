@@ -150,25 +150,22 @@ describe("the product plan's changes on Today", () => {
 		expect(refusedBy("folderDocDecideBody", bodyOf(sent))).toEqual([]);
 	});
 
-	it("says_what_approving_does_under_the_policy", async () => {
-		for (const [integration, words] of [
-			["auto_merge", en.docChangesNothingYet],
-			["pull_request", en.docChangesPullRequest],
-			["manual", en.docChangesManual],
+	it("says_what_approving_does", async () => {
+		// Catervas never merges (ADR 0061): approving always opens a pull request.
+		for (const integration of [
+			"auto_merge",
+			"pull_request",
+			"manual",
 		] as const) {
 			await todayWithDocs({ docs: docs([CARD], integration) });
 			const region = await card();
-			const note = within(region).getByText(words);
+			const note = within(region).getByText(en.docChangesPullRequest);
 			expect(note.textContent).not.toContain("at once");
 			expect(region.textContent).not.toContain("at once");
 			cleanup();
 		}
-		expect(en.docChangesNothingYet).toBe("Nothing changes until you approve.");
 		expect(en.docChangesPullRequest).toBe(
 			"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
-		);
-		expect(en.docChangesManual).toBe(
-			"Nothing changes until you approve. Then it waits under Waiting on you for you to add it to your project.",
 		);
 	});
 

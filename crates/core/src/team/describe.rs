@@ -1,7 +1,7 @@
 //! Each effect of a change to a team in plain words (`docs/SPEC.md` section 10), shown before the
 //! change is saved.
 
-use super::{Agent, Effort, Integration, JudgeChoice, JudgmentRequired, Team};
+use super::{Agent, Effort, Integration, Team};
 use crate::governor::permissions::PermissionTier;
 
 /// The work a switch of the sprint policy touches (ADR 0028).
@@ -49,9 +49,9 @@ pub fn describe_change(old: &Team, new: &Team, work: &SprintWork<'_>) -> Vec<Str
     if old.policy.integration != new.policy.integration {
         said.push(
             match new.policy.integration {
-                Integration::AutoMerge => "Finished work is merged on its own.",
-                Integration::PullRequest => "Finished work opens a pull request for you.",
-                Integration::Manual => "Finished work waits for you to merge it.",
+                Integration::PullRequest | Integration::AutoMerge | Integration::Manual => {
+                    "Finished work opens a pull request for you to merge."
+                }
             }
             .to_string(),
         );
@@ -77,36 +77,6 @@ pub fn describe_change(old: &Team, new: &Team, work: &SprintWork<'_>) -> Vec<Str
             }
             .to_string(),
         );
-    }
-    let (was, is) = (old.judgment(), new.judgment());
-    if was.required != is.required {
-        said.push(
-            match is.required {
-                JudgmentRequired::Always => "Every plan is checked before work starts.",
-                JudgmentRequired::Never => "Plans are no longer checked before work starts.",
-            }
-            .to_string(),
-        );
-    }
-    if is.required == JudgmentRequired::Always {
-        if was.questions != is.questions {
-            let count = is.questions.len();
-            let noun = if count == 1 { "question" } else { "questions" };
-            said.push(format!("Plans are checked against {count} {noun}."));
-        }
-        if was.judge != is.judge {
-            said.push(
-                match is.judge {
-                    JudgeChoice::Architect => "The Architect checks every plan.",
-                    JudgeChoice::ScrumMaster => "The Scrum Master checks every plan.",
-                    JudgeChoice::Auto => {
-                        "The Architect checks every plan, or the Scrum Master when there is \
-                         none, or else the Product Manager."
-                    }
-                }
-                .to_string(),
-            );
-        }
     }
     said.extend(sprint_change(old, new, work));
     said
@@ -357,9 +327,9 @@ mod tests {
         new["agents"][1]["grants"] = json!(["network"]);
         new["agents"][0]["revokes"] = json!(["network"]);
         new["budgets"]["daily_usd"] = json!(10);
+        // Every team integrates by pull request (ADR 0061): a change of the answer says nothing.
         new["policy"]["integration"] = json!("auto_merge");
         new["policy"]["permissions"] = json!({ "run_commands": false, "push": true });
-        new["policy"]["judgment"] = json!({ "required": "always", "judge": "architect", "questions": ["Does the task fit its budget?"] });
         let new = team(&new);
         assert_eq!(
             describe_change(&old, &new, &SprintWork::default()),
@@ -367,15 +337,10 @@ mod tests {
                 "Ada may no longer use the internet.",
                 "Linus's model changes from the role's model to the everyday model.",
                 "Linus now works carefully.",
-                "Linus may now use the internet.",
                 "The team may spend up to $10 a day.",
-                "Finished work is merged on its own.",
                 "Developers and Architects may no longer run commands.",
                 "Catervas still runs every check itself; the agents cannot run commands.",
                 "Developers may now push their work and open pull requests.",
-                "Every plan is checked before work starts.",
-                "Plans are checked against 1 question.",
-                "The Architect checks every plan.",
             ]
         );
 
@@ -388,7 +353,6 @@ mod tests {
         back["budgets"]["daily_usd"] = json!(20.5);
         back["policy"]["integration"] = json!("pull_request");
         back["policy"]["permissions"] = json!({ "run_commands": true, "push": false });
-        back["policy"]["judgment"] = json!({ "required": "never", "judge": "scrum_master" });
         back["agents"]
             .as_array_mut()
             .expect("the agents are a list")
@@ -400,12 +364,9 @@ mod tests {
                 "Ada may now use the internet.",
                 "Linus now works as its role usually does.",
                 "The team may spend up to $20.50 a day.",
-                "Finished work opens a pull request for you.",
                 "Developers and Architects may run commands.",
                 "Developers may no longer push their work or open pull requests.",
-                "Plans are no longer checked before work starts.",
-            ],
-            "who checks, and by what, says nothing while nobody checks"
+            ]
         );
 
         let mut cleared = serde_json::to_value(&back).expect("a team is JSON");
@@ -418,17 +379,12 @@ mod tests {
             .expect("the budgets are an object")
             .remove("daily_usd");
         cleared["policy"]["integration"] = json!("manual");
-        cleared["policy"]["judgment"] = json!({ "required": "always", "judge": "auto" });
         let cleared = team(&cleared);
         assert_eq!(
             describe_change(&back, &cleared, &SprintWork::default()),
             [
                 "Linus's model changes from the everyday model to the role's model.",
                 "The team has no daily spending limit.",
-                "Finished work waits for you to merge it.",
-                "Every plan is checked before work starts.",
-                "The Architect checks every plan, or the Scrum Master when there is none, or \
-                 else the Product Manager.",
             ]
         );
     }

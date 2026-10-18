@@ -15,8 +15,9 @@ Buffer is for reading.
   key. Catervas shows it on Today under "Going out", with a Stop button, and an hour before its time
   hands it to Buffer. The owner may stop it until the post's time; once it is with Buffer, Catervas
   takes it back from Buffer.
-- A post with no slot is outside the plan. It waits for the owner's yes, and Catervas sends it only if
-  they allow it. You never wait for either: write the post and carry on.
+- A post with no slot is outside the plan. A post costs nothing, so it goes out the same way, with a
+  Stop on Today, and at least three hours after you write it. You never wait for either: write the
+  post and carry on.
 
 ## 2. Find the channel
 
@@ -64,7 +65,7 @@ and never claim a cause the numbers do not show.
 
 A refusal carries a code (`post_too_soon`, `slot_used`, `post_off_its_day`, `post_too_long`, and
 others): fix what it names and write the post again, or say in your note why you could not. Never
-get a post out another way. When a post was not sent, or the owner stopped or did not allow it, your
+get a post out another way. When a post was not sent, or the owner stopped it, your
 next session is told: read it, and do not write the same post again unless the task asks.
 
 ## 8. Never use a person's data

@@ -103,7 +103,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 22] = {
+pub static TRANSITION_TABLE: [TransitionRow; 24] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -175,8 +175,20 @@ pub static TRANSITION_TABLE: [TransitionRow; 22] = {
         ),
         row(
             Is(S::Verifying),
+            Is(S::Accepted),
+            A::Governor,
+            G::DefinitionOfDone,
+        ),
+        row(
+            Is(S::Verifying),
             Is(S::Rejected),
             A::Reviewer,
+            G::RejectionReasons,
+        ),
+        row(
+            Is(S::Verifying),
+            Is(S::Rejected),
+            A::Governor,
             G::RejectionReasons,
         ),
         row(
@@ -252,22 +264,22 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_twenty_two_distinct_rows() {
+    fn has_exactly_twenty_four_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 22);
-        assert_eq!(distinct.len(), 22);
+        assert_eq!(TRANSITION_TABLE.len(), 24);
+        assert_eq!(distinct.len(), 24);
     }
 
     #[test]
-    fn has_eighteen_specific_rows_and_four_any_rows() {
+    fn has_twenty_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 18);
+        assert_eq!(specific, 20);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
@@ -320,13 +332,17 @@ mod tests {
             (
                 S::Verifying,
                 S::Accepted,
-                &[(A::ProductManager, G::DefinitionOfDone)],
+                &[
+                    (A::ProductManager, G::DefinitionOfDone),
+                    (A::Governor, G::DefinitionOfDone),
+                ],
             ),
             (
                 S::Verifying,
                 S::Rejected,
                 &[
                     (A::Reviewer, G::RejectionReasons),
+                    (A::Governor, G::RejectionReasons),
                     (A::Human, G::HumanRejection),
                 ],
             ),

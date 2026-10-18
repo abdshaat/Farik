@@ -1,15 +1,16 @@
-//! Rule 6 for a UI/UX Designer's task (ADR 0026): explore, plan, the Product Manager's approval,
+//! Rule 6 for a UI/UX Designer's task (ADR 0026): explore, plan, Catervas's approval (ADR 0061),
 //! then implement. The task's latest `design_plan.*` event decides which session runs, read afresh
 //! at every tick, so that a session which ends without its one answer is simply started again.
 
-use catervas_core::contract::{Role, TaskContract, TaskStatus};
+use catervas_core::contract::{TaskContract, TaskStatus};
 use catervas_core::team::{Agent, Team};
-use catervas_protocol::event::EventKind;
+use catervas_protocol::event::{EventBody, EventKind, ReasonBody};
 use catervas_store::{EventQuery, TaskProjection};
 
-use super::messages::{decide_design_plan_message, explore_message};
+use super::messages::explore_message;
 use super::rules::{Waiting, acted, asleep, governor_moves, refused_since_entering, spent};
 use super::session::{SessionAsk, run_session};
+use super::verify::append;
 use super::{Orchestrator, OrchestratorError, TickReport, worktree};
 use crate::cost::extra_tries;
 use crate::session::SessionPurpose;
@@ -43,8 +44,9 @@ pub(super) const DESIGN_REVIEW_TOOLS: &[&str] = &[
 /// The design review's one answer, offered to that session alone.
 pub(super) const RECORD_DESIGN_REVIEW_TOOL: &str = "catervas_record_design_review";
 
-/// The one tool the Product Manager's decision session is given.
-pub(super) const DECIDE_TOOL: &str = "catervas_decide_design_plan";
+/// Why Catervas approves every proposed plan.
+const APPROVED_REASON: &str = "Catervas approved it: no agent approves a design plan, and the \
+     finished change is reviewed (ADR 0061).";
 
 /// Where a Designer's task stands before its implement session.
 pub(super) enum Stage {
@@ -55,8 +57,8 @@ pub(super) enum Stage {
 }
 
 /// The Designer's task by its latest plan: none or returned, an explore session, unless the
-/// returns reached the task's tries, when the governor escalates it (`iterations`); proposed, the
-/// Product Manager's decision session; approved, the plan for the implement session.
+/// returns reached the task's tries, when the governor escalates it (`iterations`); proposed, approved by Catervas
+/// at once; approved, the plan for the implement session.
 pub(super) async fn stage(
     orchestrator: &Orchestrator,
     team: &Team,
@@ -77,7 +79,20 @@ pub(super) async fn stage(
             state: PlanState::Proposed,
             plan,
             ..
-        }) => decide(orchestrator, team, row, contract, &plan, waiting).await?,
+        }) => {
+            // Nobody approves a plan (ADR 0061): Catervas records the approval, and the implement
+            // session follows in this tick.
+            append(
+                &deps.tools,
+                &row.task_id,
+                None,
+                None,
+                EventBody::DesignPlanApproved(ReasonBody {
+                    reason: APPROVED_REASON.to_string(),
+                }),
+            )?;
+            return Ok(Stage::Approved(plan));
+        }
         latest => {
             let resolved = deps.tools.log.read(&EventQuery {
                 task_id: Some(row.task_id.clone()),
@@ -153,55 +168,10 @@ async fn explore(
             in_reply_to: None,
             thread: None,
             initial_prompt: explore_message(contract, returned.as_deref()),
-            pipeline: None,
         },
     )
     .await?;
     Ok(Some(acted(row, designer, "explore", &end)))
-}
-
-/// The active Product Manager's `verify` session of the task, given `DECIDE_TOOL` alone and the
-/// plan in its message; nothing when the team has no active Product Manager.
-async fn decide(
-    orchestrator: &Orchestrator,
-    team: &Team,
-    row: &TaskProjection,
-    contract: &TaskContract,
-    plan: &str,
-    waiting: &mut Waiting,
-) -> Result<Option<TickReport>, OrchestratorError> {
-    let deps = &orchestrator.deps;
-    let Some(manager) = team
-        .active_agents()
-        .find(|agent| Role::from(agent.role) == Role::ProductManager)
-    else {
-        return Ok(None);
-    };
-    if spent(deps, team, contract, &mut waiting.day_spent)?
-        | asleep(deps, manager, &mut waiting.slept)?
-    {
-        return Ok(None);
-    }
-    let end = run_session(
-        deps,
-        team,
-        SessionAsk {
-            agent: manager,
-            contract: Some(contract),
-            purpose: SessionPurpose::Verify,
-            cwd: deps.tools.files.root().to_path_buf(),
-            executor: None,
-            read_only: true,
-            only_tool: Some(DECIDE_TOOL),
-            tools: None,
-            in_reply_to: None,
-            thread: None,
-            initial_prompt: decide_design_plan_message(contract, plan),
-            pipeline: None,
-        },
-    )
-    .await?;
-    Ok(Some(acted(row, manager, "plan decision", &end)))
 }
 
 #[cfg(test)]
@@ -217,11 +187,9 @@ mod tests {
     use crate::claude::allowed_builtins;
     use crate::orchestrator::fixtures::{ExecutorWitness, Harness};
     use crate::preview::fixtures::FakePreviews;
-    use crate::prompt::DESIGN_DECISION_INSTRUCTION;
     use crate::recorded::Transcript;
     use crate::recorded::fixtures::{
-        decide_design_plan_approves_ctv_1, decide_design_plan_returns_ctv_1, explore_plans_ctv_1,
-        implement_by_iris_ctv_1, replays_catervas_read_board, review_writes_note,
+        explore_plans_ctv_1, implement_by_iris_ctv_1, review_writes_note,
     };
     use crate::session::{SessionPurpose, SessionSpec};
     use crate::tools::fixtures::{browsing, with_the_designer};
@@ -297,11 +265,11 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn explores_first_then_asks_the_product_manager() {
+    async fn catervas_approves_a_proposed_plan_and_the_designer_implements() {
         let harness = a_designers_task("design-flow-order", |_| {});
         let started = ticked(
             &harness,
-            vec![explore_plans_ctv_1(), decide_design_plan_approves_ctv_1()],
+            vec![explore_plans_ctv_1(), implement_by_iris_ctv_1()],
             2,
         )
         .await;
@@ -310,7 +278,7 @@ mod tests {
             who(&started),
             [
                 ("iris", SessionPurpose::Explore),
-                ("pm", SessionPurpose::Verify)
+                ("iris", SessionPurpose::Implement)
             ]
         );
         let explore = &started[0];
@@ -327,29 +295,39 @@ mod tests {
         );
         assert_eq!(
             explore.builtin_tools,
-            allowed_builtins(&BTreeSet::from([PermissionTier::Read]))
+            allowed_builtins(&BTreeSet::from([
+                PermissionTier::Read,
+                PermissionTier::Network
+            ]))
         );
         assert_eq!(explore.cwd, harness.worktree("CTV-1"));
-        let decision = &started[1];
-        assert_eq!(decision.catervas_tools, ["catervas_decide_design_plan"]);
         assert!(
-            decision.system_prompt.contains(DESIGN_DECISION_INSTRUCTION),
+            started[1].initial_prompt.contains(PLAN_WORDS),
             "{}",
-            decision.system_prompt
+            started[1].initial_prompt
         );
-        assert!(
-            decision.builtin_tools.is_empty(),
-            "{:?}",
-            decision.builtin_tools
-        );
-        assert!(
-            decision.initial_prompt.contains(PLAN_WORDS),
-            "{}",
-            decision.initial_prompt
-        );
+        assert!(!explore.initial_prompt.contains(PLAN_WORDS));
         assert_eq!(harness.events(&[EventKind::DesignPlanProposed]).len(), 1);
-        assert_eq!(harness.events(&[EventKind::DesignPlanApproved]).len(), 1);
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        let approved = harness.events(&[EventKind::DesignPlanApproved]);
+        assert_eq!(approved.len(), 1);
+        assert_eq!(approved[0].envelope.ids.agent_id, None);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
+
+        // An older log's returned plan still reads as returned: the Designer explores again.
+        let again = a_designers_task("design-flow-returned", |_| {});
+        again.project.record(
+            "CTV-1",
+            "design_plan.proposed",
+            &json!({ "plan": "A plan." }),
+        );
+        again.project.record(
+            "CTV-1",
+            "design_plan.returned",
+            &json!({ "reason": RETURNED }),
+        );
+        let started = ticked(&again, vec![explore_plans_ctv_1()], 1).await;
+        assert_eq!(who(&started), [("iris", SessionPurpose::Explore)]);
+        assert!(started[0].initial_prompt.contains(RETURNED));
     }
 
     #[tokio::test]
@@ -395,7 +373,8 @@ mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn holds_the_explore_session_to_the_read_tier() {
         // The hook judges every call by the registration's tiers, so an explore session is held
-        // to reading there too, not by its offered tools alone, whatever the Designer's grants.
+        // to reading and researching there too, not by its offered tools alone, whatever the
+        // Designer's grants.
         let harness = a_designers_task_in(
             "design-flow-explore-tiers",
             |wire| {
@@ -413,72 +392,10 @@ mod tests {
         orchestrator.tick().await.expect("the tick runs");
 
         assert_eq!(who(&adapter.started()), [("iris", SessionPurpose::Explore)]);
-        assert_eq!(witness.given_tiers(), [vec![PermissionTier::Read]]);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn implements_only_after_approval() {
-        let harness = a_designers_task("design-flow-implement", |_| {});
-        let started = ticked(
-            &harness,
-            vec![
-                explore_plans_ctv_1(),
-                decide_design_plan_approves_ctv_1(),
-                implement_by_iris_ctv_1(),
-            ],
-            3,
-        )
-        .await;
-
         assert_eq!(
-            who(&started),
-            [
-                ("iris", SessionPurpose::Explore),
-                ("pm", SessionPurpose::Verify),
-                ("iris", SessionPurpose::Implement),
-            ]
+            witness.given_tiers(),
+            [vec![PermissionTier::Read, PermissionTier::Network]]
         );
-        let implement = &started[2];
-        assert!(
-            implement.initial_prompt.contains(PLAN_WORDS),
-            "{}",
-            implement.initial_prompt
-        );
-        assert!(!started[0].initial_prompt.contains(PLAN_WORDS));
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Verifying);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn explores_again_with_the_returned_reason() {
-        let harness = a_designers_task("design-flow-returned", |_| {});
-        let started = ticked(
-            &harness,
-            vec![
-                explore_plans_ctv_1(),
-                decide_design_plan_returns_ctv_1(),
-                explore_plans_ctv_1(),
-            ],
-            3,
-        )
-        .await;
-
-        assert_eq!(
-            who(&started),
-            [
-                ("iris", SessionPurpose::Explore),
-                ("pm", SessionPurpose::Verify),
-                ("iris", SessionPurpose::Explore),
-            ]
-        );
-        assert!(!started[0].initial_prompt.contains(RETURNED));
-        assert!(
-            started[2].initial_prompt.contains(RETURNED),
-            "{}",
-            started[2].initial_prompt
-        );
-        assert_eq!(harness.events(&[EventKind::DesignPlanReturned]).len(), 1);
     }
 
     #[tokio::test]
@@ -564,97 +481,16 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn asks_the_active_product_manager_not_a_paused_one() {
-        // A team always keeps an active Product Manager (pausing the last is refused), so a paused
-        // one is passed over for the one that is active.
-        let harness = a_designers_task_in(
-            "design-flow-pm-paused",
-            |wire| {
-                with_the_designer(wire);
-                wire["agents"][0]["status"] = json!("paused");
-                wire["agents"]
-                    .as_array_mut()
-                    .expect("a list of agents")
-                    .push(json!({
-                        "id": "pm-2",
-                        "display_name": "pm-2",
-                        "role": "product_manager",
-                        "status": "active"
-                    }));
-            },
-            |_| {},
-        );
-        harness.project.record(
-            "CTV-1",
-            "design_plan.proposed",
-            &json!({ "plan": "A plan." }),
-        );
-        let started = ticked(&harness, vec![decide_design_plan_approves_ctv_1()], 1).await;
-
-        assert_eq!(who(&started), [("pm-2", SessionPurpose::Verify)]);
-        let approved = harness.events(&[EventKind::DesignPlanApproved]);
-        assert_eq!(approved.len(), 1);
-        assert_eq!(approved[0].envelope.ids.agent_id.as_deref(), Some("pm-2"));
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn starts_again_without_an_answer() {
-        let harness = a_designers_task("design-flow-unanswered", |wire| {
-            wire["budget"]["max_sessions"] = json!(4);
-        });
-        let adapter = harness.recorded(vec![
-            replays_catervas_read_board(),
-            replays_catervas_read_board(),
-            replays_catervas_read_board(),
-            replays_catervas_read_board(),
-        ]);
-        let orchestrator = harness.orchestrator(adapter.clone());
-
-        for _ in 0..2 {
-            orchestrator.tick().await.expect("the tick runs");
-        }
-        harness.project.record(
-            "CTV-1",
-            "design_plan.proposed",
-            &json!({ "plan": "A plan." }),
-        );
-        for _ in 0..2 {
-            orchestrator.tick().await.expect("the tick runs");
-        }
-        assert_eq!(
-            who(&adapter.started()),
-            [
-                ("iris", SessionPurpose::Explore),
-                ("iris", SessionPurpose::Explore),
-                ("pm", SessionPurpose::Verify),
-                ("pm", SessionPurpose::Verify),
-            ]
-        );
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
-
-        orchestrator.tick().await.expect("the tick runs");
-        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
-        assert_eq!(
-            escalation_reasons(&harness),
-            [EscalationRaisedBodyReason::Sessions]
-        );
-        assert_eq!(adapter.started().len(), 4);
-    }
-
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn sends_the_designers_work_to_the_architect() {
         let harness = a_designers_task("design-flow-review", |_| {});
         let started = ticked(
             &harness,
             vec![
                 explore_plans_ctv_1(),
-                decide_design_plan_approves_ctv_1(),
                 implement_by_iris_ctv_1(),
                 review_writes_note(),
             ],
-            4,
+            3,
         )
         .await;
 
@@ -662,7 +498,6 @@ mod tests {
             who(&started),
             [
                 ("iris", SessionPurpose::Explore),
-                ("pm", SessionPurpose::Verify),
                 ("iris", SessionPurpose::Implement),
                 ("ada", SessionPurpose::Verify),
             ]

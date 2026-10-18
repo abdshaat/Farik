@@ -29,7 +29,7 @@ use crate::{CliIo, Report};
 const CODE_WARNING: &str =
     "Only enter a code that this page shows you. Catervas never sends you a code in a chat.";
 /// The labels a tool can be given.
-const TAGS: [&str; 3] = ["network", "external_effect", "denied"];
+const TAGS: [&str; 4] = ["network", "paid", "external_effect", "denied"];
 
 /// What `catervas connect` was asked, as typed.
 pub(crate) struct Asked<'a> {
@@ -699,8 +699,8 @@ fn tags_of(tags: &[String]) -> Result<Value, String> {
             }
             _ => {
                 return Err(format!(
-                    "--tag {tag}: write it as <tool>=network, <tool>=external_effect or \
-                     <tool>=denied"
+                    "--tag {tag}: write it as <tool>=network, <tool>=paid, <tool>=external_effect \
+                     or <tool>=denied"
                 ));
             }
         }

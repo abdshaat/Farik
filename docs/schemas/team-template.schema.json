@@ -91,7 +91,6 @@
       "additionalProperties": false,
       "required": [
         "permissions",
-        "judgment",
         "integration"
       ],
       "properties": {
@@ -192,7 +191,7 @@
             "never"
           ],
           "default": "always",
-          "description": "Whether every contract's plan is checked before work starts (spec 5.3). Left out, always."
+          "description": "Ignored since ADR 0061."
         },
         "questions": {
           "type": "array",
@@ -206,7 +205,7 @@
             "Does the task fit its budget?",
             "Would its checks notice if the work went wrong the way its intent worries about?"
           ],
-          "description": "What the judge answers about each plan, one answer per question. Left out, the two of spec 5.3. validate_team refuses none while required is always."
+          "description": "What the judge answers about each plan, one answer per question. Ignored since ADR 0061."
         },
         "judge": {
           "type": "string",
@@ -216,10 +215,10 @@
             "scrum_master"
           ],
           "default": "auto",
-          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). A named judge must be an active agent (validate_team)."
+          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). Ignored since ADR 0061."
         }
       },
-      "description": "The plan check (spec 5.3). Left out, every plan is checked by the defaults."
+      "description": "Ignored since ADR 0061: no agent judges a contract. Older team files may carry it."
     },
     "integration": {
       "type": "string",

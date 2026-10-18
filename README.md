@@ -126,6 +126,15 @@ On your first visit, follow the setup screens to:
 
 Catervas remembers your project. To use it again, open Terminal in the `Catervas` folder and run the same `serve` command. Keep that Terminal window open while using Catervas. To stop it, return to Terminal and press **Ctrl+C**.
 
+To run Catervas in the background instead, use the two scripts in `scripts/`:
+
+```bash
+scripts/catervas-start.sh   # starts it, prints the link to open
+scripts/catervas-stop.sh    # stops it and everything it started
+```
+
+The stop script ends Catervas, every process it started (the agents' sessions and connector servers), and the containers it started. It leaves your other containers alone. Its log is in `~/.local/state/catervas/serve.log`.
+
 ### Command-line reference
 
 The browser is the main way to use Catervas. The commands below are also available for people who prefer Terminal. Examples use `catervas` as shorthand for the executable built above; run project commands from the folder of the project you want the team to work on.

@@ -125,7 +125,7 @@ pub(crate) fn a_developer_kit(
                 "why": "Lets the Developer read issues.",
                 "setup": "Make a key on GitHub's page and paste it.",
                 "key_page": "https://github.example/keys",
-                "tools": { "search": tag, "create_issue": "external_effect", "delete_repo": "denied" }
+                "tools": { "search": tag, "create_issue": "paid", "delete_repo": "denied" }
             })
         })
         .into_iter()
@@ -167,7 +167,7 @@ pub(crate) fn a_kit_server() -> Value {
     json!({
         "name": "github", "source": "kit", "transport": "stdio",
         "command": "github-mcp", "args": ["stdio"], "credential_keys": ["API_KEY"],
-        "tools": { "search": "network", "create_issue": "external_effect", "delete_repo": "denied" }
+        "tools": { "search": "network", "create_issue": "paid", "delete_repo": "denied" }
     })
 }
 

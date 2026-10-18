@@ -167,7 +167,9 @@ export function PlanPage() {
 			<Link to="/">{t("backToToday")}</Link>
 			<div className={styles.section}>
 				<h1 className={styles.title}>
-					{t("approveTitle", { title: contract.title })}
+					{t(awaiting ? "approveTitle" : "planTitle", {
+						title: contract.title,
+					})}
 				</h1>
 				<p className={styles.muted}>
 					{t(

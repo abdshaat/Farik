@@ -39,21 +39,20 @@ pub enum PermissionTier {
 pub fn default_tiers(role: Role) -> &'static [PermissionTier] {
     use PermissionTier as T;
     match role {
-        Role::SoftwareDeveloper | Role::UiUxDesigner => {
-            &[T::Read, T::WriteWorkspace, T::Execute, T::GitLocal]
-        }
-        Role::Architect => &[
+        Role::SoftwareDeveloper | Role::UiUxDesigner | Role::Architect => &[
             T::Read,
             T::WriteWorkspace,
             T::Execute,
             T::Network,
             T::GitLocal,
         ],
-        Role::FinanceSpecialist | Role::ProcurementSpecialist => &[T::Read, T::Network],
+        Role::FinanceSpecialist | Role::ProcurementSpecialist | Role::ScrumMaster => {
+            &[T::Read, T::Network]
+        }
         Role::ProductManager | Role::MarketingSpecialist => {
             &[T::Read, T::Network, T::WriteWorkspace, T::GitLocal]
         }
-        Role::ScrumMaster | Role::Human => &[T::Read],
+        Role::Human => &[T::Read],
     }
 }
 
@@ -154,8 +153,11 @@ pub enum ToolRefusal {
 pub enum ConnectorTag {
     /// Reaches only the preview and changes nothing outside the sandbox.
     Network,
-    /// Changes state outside the sandbox; runs once for each call the human allows.
+    /// Changes state outside the sandbox and costs nothing at the service; runs without asking and
+    /// is recorded as every call is (ADR 0061).
     ExternalEffect,
+    /// Costs money at the service; runs once for each call the human allows (ADR 0061).
+    Paid,
     /// Never offered and always refused.
     Denied,
 }
@@ -171,10 +173,10 @@ pub struct SessionConnector {
     pub origin: Option<String>,
     /// Every tool the connector's pinned list tags.
     pub tools: std::collections::BTreeMap<String, ConnectorTag>,
-    /// For each `external_effect` tool with one, how many calls the agent makes each period
+    /// For each `paid` tool with one, how many calls the agent makes each period
     /// without asking (ADR 0037), by the bare tool name.
     pub allowances: std::collections::BTreeMap<String, u32>,
-    /// The `external_effect` tools the kit marks as approved by the owner's marketing plan (ADR
+    /// The `paid` tools the kit marks as approved by the owner's marketing plan (ADR
     /// 0042), by the bare tool name: only a kit's entry of Catervas's own connector has any.
     pub plan_tools: std::collections::BTreeSet<String>,
 }
@@ -232,9 +234,9 @@ pub enum ConnectorRefusal {
     ToolNotTagged,
     /// The tool is tagged `denied`.
     ToolDenied,
-    /// The tool is tagged `external_effect` and the human has not allowed this call: it waits.
+    /// The tool is tagged `paid` and the human has not allowed this call: it waits.
     ApprovalNeeded,
-    /// The tool is tagged `external_effect` and its input is over `MAX_APPROVAL_INPUT`, too long
+    /// The tool is tagged `paid` and its input is over `MAX_APPROVAL_INPUT`, too long
     /// to show the human, so it is refused without asking.
     InputTooLarge,
     /// The tool is marked as approved by the marketing plan and no plan is active: it runs only
@@ -248,10 +250,10 @@ pub enum ConnectorRefusal {
 }
 
 /// Decides one connector call (`docs/SPEC.md` sections 5.6 and 8.6): the session must have the
-/// connector, the tool must be tagged `network` or `external_effect`, and, for a connector with an
-/// origin, every field named `url`, at any depth of the input, must be a string naming the
-/// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call also
-/// needs `granted`, the seq of the human's open grant for exactly this call, which the caller
+/// connector, the tool must be tagged `network`, `external_effect` or `paid`, and, for a connector
+/// with an origin, every field named `url`, at any depth of the input, must be a string naming the
+/// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call then
+/// runs without asking (ADR 0061); a `paid` call also needs `granted`, the seq of the human's open grant for exactly this call, which the caller
 /// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
 /// Failing that, a tool with an allowance runs while `used`, the agent's calls to it this period
 /// before this one, is under it (ADR 0037): the grant is for exactly this call, so it comes
@@ -263,8 +265,8 @@ pub enum ConnectorRefusal {
 /// # Errors
 ///
 /// `ConnectorNotInSession`, then `ToolNotTagged`, then `ToolDenied` for a `denied` tool, then
-/// `UrlOutsidePreview` with the first `url` found outside the origin, then, for an
-/// `external_effect` tool, `InputTooLarge` for an input over `MAX_APPROVAL_INPUT`, grant or not,
+/// `UrlOutsidePreview` with the first `url` found outside the origin, then, for a
+/// `paid` tool, `InputTooLarge` for an input over `MAX_APPROVAL_INPUT`, grant or not,
 /// then `NoActivePlan` for a marked tool while no plan is active, grant or not, and
 /// `ApprovalNeeded` without a grant or an allowance with a place left.
 pub fn evaluate_connector_call(
@@ -291,6 +293,12 @@ pub fn evaluate_connector_call(
         plan_approved: false,
     };
     if tag == ConnectorTag::Network {
+        return Ok(pass(None, None));
+    }
+    // Only a call that costs money asks (ADR 0061): an `external_effect` call runs, and is recorded
+    // as every call is, unless the connector marks it as the owner's plan's, which only a plan
+    // approves.
+    if tag == ConnectorTag::ExternalEffect && !connector.plan_tools.contains(tool) {
         return Ok(pass(None, None));
     }
     if canonical_json(input).len() > MAX_APPROVAL_INPUT {
@@ -582,7 +590,7 @@ mod tests {
                 ("browser_navigate", ConnectorTag::Network),
                 ("browser_click", ConnectorTag::Network),
                 ("browser_evaluate", ConnectorTag::Denied),
-                ("browser_send_email", ConnectorTag::ExternalEffect),
+                ("browser_send_email", ConnectorTag::Paid),
             ]
             .into_iter()
             .map(|(tool, tag)| (tool.to_string(), tag))
@@ -703,7 +711,7 @@ mod tests {
             origin: None,
             tools: [
                 ("search_issues", ConnectorTag::Network),
-                ("create_issue", ConnectorTag::ExternalEffect),
+                ("create_issue", ConnectorTag::Paid),
                 ("delete_repository", ConnectorTag::Denied),
             ]
             .into_iter()
@@ -712,6 +720,74 @@ mod tests {
             allowances: std::collections::BTreeMap::new(),
             plan_tools: std::collections::BTreeSet::new(),
         }
+    }
+
+    #[test]
+    fn only_a_paid_call_asks() {
+        let connector = SessionConnector {
+            tools: [
+                ("send_note", ConnectorTag::ExternalEffect),
+                ("generate_image", ConnectorTag::Paid),
+            ]
+            .into_iter()
+            .map(|(tool, tag)| (tool.to_string(), tag))
+            .collect(),
+            allowances: [("generate_image".to_string(), 3)].into(),
+            ..github()
+        };
+        // An `external_effect` call with no grant runs, recorded as every call is, with no approval.
+        assert_eq!(
+            evaluate_connector_call("send_note", &json!({}), Some(&connector), None, 0, false),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::ExternalEffect,
+                approval: None,
+                allowance: None,
+                plan_approved: false
+            })
+        );
+        // A `paid` call with no grant and no allowance asks.
+        assert_eq!(
+            evaluate_connector_call(
+                "generate_image",
+                &json!({}),
+                Some(&SessionConnector {
+                    allowances: std::collections::BTreeMap::new(),
+                    ..connector.clone()
+                }),
+                None,
+                0,
+                false
+            ),
+            Err(Refused::ApprovalNeeded)
+        );
+        // Within its allowance it runs; beyond it, it asks.
+        assert_eq!(
+            evaluate_connector_call(
+                "generate_image",
+                &json!({}),
+                Some(&connector),
+                None,
+                2,
+                false
+            ),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Paid,
+                approval: None,
+                allowance: Some(3),
+                plan_approved: false
+            })
+        );
+        assert_eq!(
+            evaluate_connector_call(
+                "generate_image",
+                &json!({}),
+                Some(&connector),
+                None,
+                3,
+                false
+            ),
+            Err(Refused::ApprovalNeeded)
+        );
     }
 
     #[test]
@@ -736,7 +812,7 @@ mod tests {
                 Some(&github()),
                 Some(7)
             ),
-            Ok((ConnectorTag::ExternalEffect, Some(7)))
+            Ok((ConnectorTag::Paid, Some(7)))
         );
     }
 
@@ -820,7 +896,7 @@ mod tests {
                 false
             ),
             Ok(ConnectorPass {
-                tag: ConnectorTag::ExternalEffect,
+                tag: ConnectorTag::Paid,
                 approval: None,
                 allowance: Some(20),
                 plan_approved: false
@@ -881,7 +957,7 @@ mod tests {
                 false
             ),
             Ok(ConnectorPass {
-                tag: ConnectorTag::ExternalEffect,
+                tag: ConnectorTag::Paid,
                 approval: Some(7),
                 allowance: None,
                 plan_approved: false
@@ -957,7 +1033,7 @@ mod tests {
             assert_eq!(
                 call(&json!({}), granted, used, true),
                 Ok(ConnectorPass {
-                    tag: ConnectorTag::ExternalEffect,
+                    tag: ConnectorTag::Paid,
                     approval: None,
                     allowance: None,
                     plan_approved: true
@@ -994,7 +1070,7 @@ mod tests {
                     active
                 ),
                 Ok(ConnectorPass {
-                    tag: ConnectorTag::ExternalEffect,
+                    tag: ConnectorTag::Paid,
                     approval: None,
                     allowance: Some(5),
                     plan_approved: false
@@ -1115,7 +1191,13 @@ mod tests {
         let expected = [
             (
                 Role::SoftwareDeveloper,
-                vec![T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
+                vec![
+                    T::Read,
+                    T::WriteWorkspace,
+                    T::Execute,
+                    T::Network,
+                    T::GitLocal,
+                ],
             ),
             (
                 Role::Architect,
@@ -1137,9 +1219,15 @@ mod tests {
             ),
             (
                 Role::UiUxDesigner,
-                vec![T::Read, T::WriteWorkspace, T::Execute, T::GitLocal],
+                vec![
+                    T::Read,
+                    T::WriteWorkspace,
+                    T::Execute,
+                    T::Network,
+                    T::GitLocal,
+                ],
             ),
-            (Role::ScrumMaster, vec![T::Read]),
+            (Role::ScrumMaster, vec![T::Read, T::Network]),
             (Role::Human, vec![T::Read]),
         ];
         for (role, tiers) in expected {
@@ -1225,12 +1313,10 @@ mod tests {
 
     #[test]
     fn refuses_a_call_whose_tier_the_agent_lacks() {
+        let mut grants = developer_grants();
+        grants.tiers.remove(&T::Network);
         assert_eq!(
-            evaluate_tool_call(
-                &a_call("web_fetch", T::Network, &[]),
-                &developer_grants(),
-                &a_context()
-            ),
+            evaluate_tool_call(&a_call("web_fetch", T::Network, &[]), &grants, &a_context()),
             Err(ToolRefusal::TierNotGranted { tier: T::Network })
         );
     }

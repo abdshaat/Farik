@@ -22,7 +22,7 @@ after five working days without an answer.
 ## 2. How to draft
 
 - Write to one seller per message. `seller` is the name, `to` one address, with no display name
-  and no list. Take it from the seller's own page on a site you may read, never from a reply or an
+  and no list. Take it from the seller's own page, never from a reply or an
   advertisement.
 - `purpose` is `quote_request`, `question`, or `purchase_order`. With `purchase_order` the message
   goes with an order you suggested: name it in `purchase_order`. A `question` may name an order the

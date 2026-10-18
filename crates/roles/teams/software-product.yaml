@@ -26,8 +26,5 @@ policy:
   permissions:
     run_commands: true
     push: false
-  judgment:
-    required: always
-    judge: auto
   integration: manual
 budgets: {}

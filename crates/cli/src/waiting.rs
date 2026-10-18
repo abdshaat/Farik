@@ -1,8 +1,7 @@
 //! What waits on the human when a process driving the project ends (`docs/SPEC.md` 5.7): the
 //! questions nobody answered, the contracts awaiting approval, the escalations, the results that
 //! may need the human's acceptance, the tasks waiting to be integrated by hand, the posts outside
-//! the plan that wait for the owner, the sites the Procurement Specialist asked to read, the
-//! purchase orders it set up and the data sources it asked for.
+//! the plan that wait for the owner, the purchase orders the Procurement Specialist set up and the data sources it asked for.
 
 use catervas_core::team::Team;
 use catervas_store::files::ProjectFiles;
@@ -26,8 +25,6 @@ pub(crate) struct Waiting {
     plan: Option<String>,
     /// The number of the post that waits, for a script to act on.
     post: Option<u64>,
-    /// The number of the site request that waits, for a script to act on.
-    request: Option<u64>,
     /// The number of the purchase order that waits, for a script to act on.
     order: Option<u64>,
     /// The number of the data pipeline request that waits, for a script to act on.
@@ -58,9 +55,6 @@ impl Waiting {
         }
         if let Some(post) = self.post {
             item["post"] = json!(post);
-        }
-        if let Some(request) = self.request {
-            item["request"] = json!(request);
         }
         if let Some(order) = self.order {
             item["order"] = json!(order);
@@ -146,13 +140,6 @@ fn describe(item: &catervas_store::waiting::Waiting) -> Waiting {
                 ),
             )
         }
-        WaitingKind::SiteRequest => {
-            let request = item.site.as_ref().map_or(0, |ask| ask.request);
-            (
-                format!("waits: {}", item.line),
-                format!("catervas site approve {request}, or catervas site decline {request}"),
-            )
-        }
         WaitingKind::PurchaseOrder => {
             let order = item.order.as_ref().map_or(0, |ask| ask.order);
             (
@@ -182,7 +169,6 @@ fn describe(item: &catervas_store::waiting::Waiting) -> Waiting {
         input: item.approval.as_ref().map(|ask| ask.input.clone()),
         plan: item.plan.as_ref().map(|ask| ask.plan.clone()),
         post: item.post.as_ref().map(|ask| ask.post),
-        request: item.site.as_ref().map(|ask| ask.request),
         order: item.order.as_ref().map(|ask| ask.order),
         pipeline: item.pipeline.as_ref().map(|ask| ask.pipeline),
     }
@@ -191,9 +177,7 @@ fn describe(item: &catervas_store::waiting::Waiting) -> Waiting {
 #[cfg(test)]
 mod tests {
     use catervas_core::contract::TaskId;
-    use catervas_store::waiting::{
-        OrderAsk, PlanAsk, PostAsk, SiteAsk, Waiting as Listed, WaitingKind,
-    };
+    use catervas_store::waiting::{OrderAsk, PlanAsk, PostAsk, Waiting as Listed, WaitingKind};
     use chrono::NaiveDate;
 
     use super::describe;
@@ -217,24 +201,8 @@ mod tests {
                 ends_on: NaiveDate::from_ymd_opt(2026, 11, 15).expect("a date"),
             }),
             post: None,
-            site: None,
             order: None,
             pipeline: None,
-        }
-    }
-
-    fn a_site_waiting() -> Listed {
-        Listed {
-            kind: WaitingKind::SiteRequest,
-            line: "Kai asks to read shop.example".to_string(),
-            plan: None,
-            site: Some(SiteAsk {
-                request: 17,
-                host: "shop.example".to_string(),
-                url: "https://shop.example/boxes".to_string(),
-                why: "It sells the boxes.".to_string(),
-            }),
-            ..a_plan_waiting()
         }
     }
 
@@ -301,10 +269,9 @@ mod tests {
             json["command"],
             "catervas order approve 23, or catervas order reject 23"
         );
-        assert!(json.get("request").is_none(), "an order names no request");
         assert!(
-            describe(&a_site_waiting()).json().get("order").is_none(),
-            "a request names no order"
+            describe(&a_post_waiting()).json().get("order").is_none(),
+            "a post names no order"
         );
     }
 
@@ -350,22 +317,5 @@ mod tests {
             "catervas marketing post send 42, or catervas marketing post decline 42"
         );
         assert!(json.get("plan").is_none(), "a post names no plan");
-    }
-
-    #[test]
-    fn a_run_says_which_site_request_waits() {
-        let waiting = describe(&a_site_waiting());
-
-        assert_eq!(
-            waiting.lines(),
-            [
-                "CTV-1 waits: Kai asks to read shop.example: catervas site approve 17, or catervas site decline 17"
-            ]
-        );
-        let json = waiting.json();
-        assert_eq!(json["request"], 17);
-        assert_eq!(json["task_id"], "CTV-1");
-        assert!(json.get("plan").is_none(), "a request names no plan");
-        assert!(describe(&a_post_waiting()).json().get("request").is_none());
     }
 }

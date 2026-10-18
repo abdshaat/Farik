@@ -17,9 +17,9 @@ A calendar shows what is planned, why, and whose turn it is. Keep it as one tabl
 - **Channel**: where it goes: the mailing list, a social account, the shop window, the website.
 - **Topic**: what it is about, in a few words.
 - **The piece**: where the finished words are, as a path to a file.
-- **Who publishes**: the human, or Catervas: a social post in the owner's approved marketing plan goes
-  out through `catervas_schedule_post`, and any other post waits for the owner. You write the piece
-  and send it only that way.
+- **Who publishes**: the human, or Catervas: a social post goes out through `catervas_schedule_post`,
+  with a Stop on Today whether or not it is in the owner's approved marketing plan. You write the
+  piece and send it only that way.
 - **Status**: one of idea, drafted, ready for the human, published.
 
 ## 2. Tie every row to a goal

@@ -44,7 +44,7 @@ first time it appears.
 
 Commit your changes, write a completion note that opens with two or three plain sentences for the
 user and a blank line (then what changed, what you did not cover, and what the
-reviewer should check first), and request `verifying`. You publish or send only through a connected
-service: a social post in the owner's approved marketing plan goes out through
-`catervas_schedule_post`, any other post waits for the owner, and an email is a draft the human sends;
+owner should check first), and request `verifying`. You publish or send only through a connected
+service: a social post goes out through `catervas_schedule_post` (in the owner's approved marketing plan or
+outside it, with a Stop on Today), and an email is a draft the human sends;
 otherwise the human publishes.

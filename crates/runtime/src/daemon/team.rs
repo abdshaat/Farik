@@ -768,7 +768,7 @@ fn kits_of(
 }
 
 /// The usable tools of `listed`, each labelled by `tags` (an object of tool name to tag) or else
-/// `external_effect` (SPEC 5.6).
+/// `paid`, so that a tool whose cost nobody stated still asks (SPEC 5.6, ADR 0061).
 ///
 /// # Errors
 ///
@@ -800,10 +800,7 @@ pub fn labelled(
     Ok(usable
         .into_iter()
         .map(|name| {
-            let tag = tags
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| json!("external_effect"));
+            let tag = tags.get(name).cloned().unwrap_or_else(|| json!("paid"));
             (name.to_string(), tag)
         })
         .collect())
@@ -968,7 +965,7 @@ async fn connector_sign_in(
 }
 
 /// `connector.connect`: the server's tools listed with its keys, or its sign-in, each usable one
-/// labelled by `tags` or else `external_effect` (SPEC 5.6), the keys or the grant kept beside the
+/// labelled by `tags` or else `paid` (SPEC 5.6), the keys or the grant kept beside the
 /// definition's hash, then `connector_connect` handled, which writes the team file and records
 /// `connector.connected`.
 async fn connector_connect(
@@ -1448,7 +1445,7 @@ fn model_label(id: &str, newest: &[(String, &str)]) -> String {
 
 /// What the browser shows of `team` and does not work out itself: each agent's model and effort
 /// as its sessions run them, the tiers it holds and those its role and the team's answers give it
-/// before its own grants and revokes; and who checks plans under each choice.
+/// before its own grants and revokes.
 fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let newest = newest(deps)?;
     let permissions = team.permissions();
@@ -1469,25 +1466,7 @@ fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             }))
         })
         .collect::<Result<Vec<_>, Failure>>()?;
-    let holder = |role: Role| {
-        team.active_agents()
-            .find(|agent| Role::from(agent.role) == role)
-            .map(|agent| {
-                json!({ "agent_id": agent.id, "display_name": agent.display_name, "role": agent.role })
-            })
-    };
-    let mut auto = team.clone();
-    if let Some(judgment) = auto.policy.judgment.as_mut() {
-        judgment.judge = catervas_core::team::JudgeChoice::Auto;
-    }
-    Ok(json!({
-        "agents": agents,
-        "judges": {
-            "auto": holder(auto.judge()),
-            "architect": holder(Role::Architect),
-            "scrum_master": holder(Role::ScrumMaster),
-        },
-    }))
+    Ok(json!({ "agents": agents }))
 }
 
 /// `project.scan`: the project scanned again, its facts for the rows, the checks it found, and the
@@ -1649,9 +1628,6 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
         ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
-        ["policy", "judgment", "judge"] => "judge_not_held",
-        ["policy", "judgment", "questions"] => "no_questions",
-        ["policy", "judgment", "questions", _] => "question_length",
         _ => "invalid",
     }
 }
@@ -3891,14 +3867,14 @@ pub(super) mod tests {
                 {
                     "id": "dev-a",
                     "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
-                    "tiers": ["read", "write_workspace", "git_remote"],
-                    "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                    "tiers": ["read", "write_workspace", "network", "git_remote"],
+                    "base_tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                 },
                 {
                     "id": "dev-b",
                     "model": { "id": "claude-sonnet-5", "label": "Everyday model (older)", "effort": "low" },
-                    "tiers": ["read", "write_workspace", "git_local", "git_remote"],
-                    "base_tiers": ["read", "write_workspace", "git_local", "git_remote"],
+                    "tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
+                    "base_tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                 },
                 {
                     "id": "ada",
@@ -3908,13 +3884,6 @@ pub(super) mod tests {
                 },
             ])
         );
-        // A paused Architect checks nothing: Catervas's choice is the Product Manager.
-        let pm = json!({ "agent_id": "pm", "display_name": "pm", "role": "product_manager" });
-        assert_eq!(
-            got["judges"],
-            json!({ "auto": pm, "architect": null, "scrum_master": null })
-        );
-
         // A draft is answered the same way, before it is saved.
         paused["id"] = json!("ivo");
         paused["display_name"] = json!("Ivo");
@@ -3925,11 +3894,6 @@ pub(super) mod tests {
             "team.validate",
             &json!({ "team": team }),
             "teamValidateResult",
-        );
-        let ivo = json!({ "agent_id": "ivo", "display_name": "Ivo", "role": "architect" });
-        assert_eq!(
-            checked["judges"],
-            json!({ "auto": ivo, "architect": ivo, "scrum_master": null })
         );
         assert_eq!(
             checked["agents"][4]["tiers"],
@@ -4006,19 +3970,6 @@ pub(super) mod tests {
                 team["agents"].as_array_mut().expect("agents").remove(2);
             }),
             ["/agents worked"]
-        );
-        assert_eq!(
-            codes(&|team| team["policy"]["judgment"] = json!({ "judge": "architect" })),
-            ["/policy/judgment/judge judge_not_held"]
-        );
-        assert_eq!(
-            codes(&|team| team["policy"]["judgment"] =
-                json!({ "required": "always", "questions": [] })),
-            ["/policy/judgment/questions no_questions"]
-        );
-        assert_eq!(
-            codes(&|team| team["policy"]["judgment"] = json!({ "questions": ["short"] })),
-            ["/policy/judgment/questions/0 question_length"]
         );
         assert_eq!(
             codes(&|team| team["policy"]["integration"] = json!("mail")),
@@ -4662,18 +4613,10 @@ pub(super) mod tests {
                 "wip_limit_per_agent": 1,
                 "blocked_limit_hours": 24,
                 "max_iterations": 3,
-                "integration": "auto_merge",
+                "integration": "pull_request",
                 "ambient_messages_per_sprint": 1,
                 "escalation_age_hours": 24,
                 "memory_cap_tokens": 8000,
-                "judgment": {
-                    "required": "always",
-                    "questions": [
-                        "Does the task fit its budget?",
-                        "Would its checks notice if the work went wrong the way its intent worries about?"
-                    ],
-                    "judge": "auto"
-                },
                 "permissions": { "run_commands": true, "push": false },
                 "plan_in_sprints": true
             })
@@ -5174,8 +5117,7 @@ pub(super) mod tests {
         connector["setup"] = json!("Make a key on the fixture's page and paste it.");
         connector["key_page"] = json!("https://fixture.example/keys");
         connector["labels"] = json!({ "search": "search the fixture" });
-        connector["tools"] =
-            json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        connector["tools"] = json!({ "search": "network", "env": "paid", "delete_repo": "denied" });
         for (tool, tag) in more.as_object().into_iter().flatten() {
             connector["tools"][tool] = tag.clone();
         }
@@ -5204,14 +5146,14 @@ pub(super) mod tests {
     }
 
     const KIT_TAGS: fn() -> Value =
-        || json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        || json!({ "search": "network", "env": "paid", "delete_repo": "denied" });
 
     /// The fixture kit with a spending tool `make`, which may run 20 times a sprint unasked, and
     /// `post`, which publishes and so always asks.
     fn allowance_kit(test: &str) -> catervas_roles::Kit {
         fixture_kit_with(
             test,
-            &json!({ "make": "external_effect", "post": "external_effect" }),
+            &json!({ "make": "paid", "post": "paid" }),
             &json!({ "make": { "calls": 20, "what": "pictures" } }),
         )
     }
@@ -5534,7 +5476,7 @@ pub(super) mod tests {
     }
 
     /// A guard: each of the Marketing Specialist's five services connects by name, carrying the
-    /// kit's allowances (Buffer and Google Ads none, Kit its two broadcast tools), and is no other
+    /// kit's allowances (Buffer, Kit and Google Ads none), and is no other
     /// role's.
     #[test]
     fn connects_each_marketing_service_by_name() {
@@ -5568,15 +5510,10 @@ pub(super) mod tests {
                     ("crisp_upscale".to_string(), 10),
                 ]),
             ),
-            // Every post asks: `kit_entry` adds no `allowances` when the map is empty.
+            // No post costs money, so Buffer and Kit have no allowance: `kit_entry` adds no
+            // `allowances` when the map is empty (ADR 0061).
             ("buffer", BTreeMap::new()),
-            (
-                "kit",
-                BTreeMap::from([
-                    ("create_broadcast".to_string(), 10),
-                    ("update_broadcast".to_string(), 10),
-                ]),
-            ),
+            ("kit", BTreeMap::new()),
             // Its writes run inside the marketing plan, so none has an allowance.
             ("google-ads", BTreeMap::new()),
         ] {
@@ -5761,7 +5698,7 @@ pub(super) mod tests {
         let mut wider = server.clone();
         wider.tools.insert(
             "search".to_string(),
-            catervas_core::governor::permissions::ConnectorTag::ExternalEffect,
+            catervas_core::governor::permissions::ConnectorTag::Paid,
         );
         wider.tools.insert(
             "delete_repo".to_string(),
@@ -5821,8 +5758,8 @@ pub(super) mod tests {
     }
 
     const ALLOW_TAGS: fn() -> Value = || {
-        json!({ "search": "network", "env": "external_effect", "delete_repo": "denied",
-                "make": "external_effect", "post": "external_effect" })
+        json!({ "search": "network", "env": "paid", "delete_repo": "denied",
+                "make": "paid", "post": "paid" })
     };
 
     #[test]
@@ -5942,7 +5879,7 @@ pub(super) mod tests {
         let (harness, _) = keeping("allow-change-left-out");
         harness.project.set_kit(fixture_kit_with(
             "allow-change-left-out",
-            &json!({ "make": "external_effect", "post": "external_effect" }),
+            &json!({ "make": "paid", "post": "paid" }),
             &json!({
                 "make": { "calls": 20, "what": "pictures" },
                 "post": { "calls": 4, "what": "posts" }
@@ -6027,7 +5964,7 @@ pub(super) mod tests {
         // A release tags `make` denied: the entry is no longer the kit's.
         harness.project.set_kit(fixture_kit_with(
             "allow-kit-changed-2",
-            &json!({ "make": "denied", "post": "external_effect" }),
+            &json!({ "make": "denied", "post": "paid" }),
             &json!({}),
         ));
         let (_, message) = refused(
@@ -6106,7 +6043,7 @@ pub(super) mod tests {
         for call in 0..n {
             let mut body = json!({
                 "tool": "mcp__fixture__make", "input": "{}", "server": "fixture",
-                "tag": "external_effect",
+                "tag": "paid",
             });
             if granted && call + 1 == n {
                 body["approval"] = json!(5);
@@ -6505,8 +6442,7 @@ pub(super) mod tests {
             &params,
             "connectorConnectResult",
         );
-        let tools =
-            json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        let tools = json!({ "search": "network", "env": "paid", "delete_repo": "denied" });
         assert_eq!(answer, json!({ "stored_in": "keychain", "tools": tools }));
         let written = entry(&harness, 1, "fixture").expect("the entry is written");
         assert_eq!(written["source"], "custom");
@@ -6576,14 +6512,14 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn an_unlabelled_tool_is_written_external_effect() {
+    fn an_unlabelled_tool_is_written_paid() {
         let (harness, _) = keeping("connector-unlabelled");
         let server = fixture_server("unlabelled");
         connected(&harness, "dev-a", &server, &json!({}));
         let written = entry(&harness, 1, "fixture").expect("the entry is written");
         assert_eq!(
             written["tools"],
-            json!({ "search": "external_effect", "env": "external_effect", "delete_repo": "external_effect" })
+            json!({ "search": "paid", "env": "paid", "delete_repo": "paid" })
         );
         let shown = json!([{ "source": "custom", "agent": "dev-a", "server": "fixture", "auth": "keys", "state": "connected", "stored_in": "keychain" }]);
         assert_eq!(states(&harness), shown);
@@ -7245,8 +7181,7 @@ pub(super) mod tests {
             }),
             "connectorConnectResult",
         );
-        let tools =
-            json!({ "search": "network", "env": "external_effect", "delete_repo": "denied" });
+        let tools = json!({ "search": "network", "env": "paid", "delete_repo": "denied" });
         assert_eq!(
             connected,
             json!({ "stored_in": "keychain", "tools": tools })

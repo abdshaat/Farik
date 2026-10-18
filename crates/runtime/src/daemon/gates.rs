@@ -162,12 +162,6 @@ fn waiting_row(deps: &ToolDeps, item: &catervas_store::waiting::Waiting) -> Valu
         row["starts_on"] = json!(ask.starts_on.to_string());
         row["ends_on"] = json!(ask.ends_on.to_string());
     }
-    if let Some(ask) = &item.site {
-        row["request"] = json!(ask.request);
-        row["host"] = json!(ask.host);
-        row["url"] = json!(ask.url);
-        row["why"] = json!(ask.why);
-    }
     if let Some(ask) = &item.order {
         let time = |at: DateTime<Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
         row["order"] = json!(ask.order);
@@ -262,7 +256,7 @@ pub(super) fn query(
                 .map_err(|e| internal(&e))?;
             if deps
                 .transitions
-                .awaits_the_product_plan(&team)
+                .awaits_the_product_plan()
                 .map_err(|e| internal(&e))?
             {
                 let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;
@@ -309,7 +303,6 @@ pub(super) fn query(
         "marketing_plan.get" => {
             marketing_plan_get(state, deps, params["plan"].as_str().unwrap_or(""))
         }
-        "sites.list" => crate::tools::sites::site_list(&deps.log).map_err(|e| internal(&e)),
         "folder_doc_proposals.list" => {
             crate::tools::folders::proposals_list(deps, &team()?).map_err(|e| internal(&e))
         }
@@ -475,7 +468,7 @@ fn readiness(
         .readiness_context(team, contract)
         .map_err(|e| internal(&e))?;
     let result = evaluate_readiness(contract, &context);
-    let total = rules_evaluated(&result);
+    let total = rules_evaluated();
     Ok((result.err().unwrap_or_default(), total))
 }
 
@@ -617,7 +610,7 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let approved = project.is_some()
         && !deps
             .transitions
-            .awaits_the_product_plan(team)
+            .awaits_the_product_plan()
             .map_err(|e| internal(&e))?;
     let board = deps.projections.board().map_err(|e| internal(&e))?;
     let filed = product_plan_tasks(&deps.log).map_err(|e| internal(&e))?;
@@ -3146,7 +3139,10 @@ pub(super) mod tests {
             &json!({}),
             "folderDocProposalsListResult",
         );
-        assert_eq!(listed, json!({ "integration": "manual", "cards": [] }));
+        assert_eq!(
+            listed,
+            json!({ "integration": "pull_request", "cards": [] })
+        );
 
         let harness = folders_integrating("gates-folder-doc-two-reviews", "pull_request");
         let third = pm_proposes(&harness, "S3", ROADMAP, "# Roadmap\n", "Roadmap.");
@@ -3175,8 +3171,8 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn lists_a_folder_change_waiting_to_be_added_under_manual() {
-        let harness = folders_integrating("gates-folder-change-manual", "manual");
+    fn lists_a_folder_change_waiting_to_be_merged() {
+        let harness = folders_integrating("gates-folder-change-manual", "pull_request");
         let roadmap = pm_proposes(&harness, "S4", ROADMAP, "# Roadmap\n", "Roadmap.");
         let spec = pm_proposes(&harness, "S4", SPEC, "# Spec\n", "Spec.");
         harness.project.record(
@@ -3216,12 +3212,12 @@ pub(super) mod tests {
                 json!({
                     "kind": "integration", "folder_change": 1, "agent_id": "pm",
                     "title": "Roadmap and Product description from the sprint 4 review",
-                    "line": "You approved it; it waits for you to add it"
+                    "line": "You approved it; it waits for you to merge it"
                 }),
                 json!({
                     "kind": "integration", "folder_change": 2, "agent_id": "sm",
                     "title": "Sprint rhythm by Sol",
-                    "line": "Sol wrote it; it waits for you to add it"
+                    "line": "Sol wrote it; it waits for you to merge it"
                 }),
             ]
         );
@@ -3238,6 +3234,7 @@ pub(super) mod tests {
         );
         assert!(integration_rows(&harness).is_empty());
 
+        // A pull request opened for it changes the words, under any policy the file says.
         let harness = folders_integrating("gates-folder-change-auto", "auto_merge");
         harness.project.record_in(
             Some("sm"),
@@ -3249,7 +3246,19 @@ pub(super) mod tests {
                 "change": 1, "sha": "def"
             }),
         );
-        assert!(integration_rows(&harness).is_empty());
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 1, "url": "https://github.com/o/r/pull/7", "number": 7 }),
+        );
+        assert_eq!(
+            integration_rows(&harness),
+            [json!({
+                "kind": "integration", "folder_change": 1, "agent_id": "sm",
+                "title": "Sprint rhythm by Sol",
+                "line": "Its pull request waits for you to merge it"
+            })]
+        );
     }
 
     #[test]
@@ -4459,7 +4468,7 @@ pub(super) mod tests {
             &json!({ "task_id": "CTV-3", "contract": contract }),
             "contractCheckResult",
         );
-        assert_eq!(checked, json!({ "failures": [], "total": 33 }));
+        assert_eq!(checked, json!({ "failures": [], "total": 31 }));
 
         // The activity and what moved answer in their shapes.
         query(
@@ -5026,7 +5035,7 @@ pub(super) mod tests {
     }
 
     /// `proc`'s order 1 on CTV-1 from `seller`, drafted in its session as the tool records it, with
-    /// its comparison written and its workbook made; a page on a site Catervas ships, or none.
+    /// its comparison written and its workbook made; a page on a shop, or none.
     fn order_drafted(harness: &Harness, seller: &str, page: bool) -> Value {
         let project = &harness.project;
         project
@@ -5037,7 +5046,7 @@ pub(super) mod tests {
                 json!({ "name": "mirrors", "text": "# Baby car mirrors\n\nAcme is <b>cheapest</b>." }),
             )
             .expect("the comparison is written");
-        let shipped = &catervas_roles::sites::catervas_sites()[0].host;
+        let shipped = "shop.example";
         project
             .call(
                 "proc",
@@ -5077,7 +5086,7 @@ pub(super) mod tests {
             .find(|agent| agent.id.as_str() == "proc")
             .map(|agent| agent.display_name.to_string())
             .expect("proc");
-        let shipped = catervas_roles::sites::catervas_sites()[0].host.clone();
+        let shipped = "shop.example".to_string();
 
         let waiting = query(
             &harness.daemon,
@@ -5814,143 +5823,21 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn waiting_lists_a_site_request() {
+    fn waiting_lists_no_site_request() {
+        // Catervas keeps no list of sites (ADR 0061): a request in an older log loads, and
+        // nothing lists it.
         let harness = Harness::with_procurement("gates-site-waits");
         harness.procurement_task("CTV-1", Some("in_progress"));
-        let request = site_asked(&harness, "shop.example");
-        let name = harness
-            .project
-            .deps
-            .files
-            .read_team()
-            .expect("the team")
-            .agents
-            .iter()
-            .find(|agent| agent.id.as_str() == "proc")
-            .map(|agent| agent.display_name.to_string())
-            .expect("proc");
-        let waiting = || {
-            query(
-                &harness.daemon,
-                "waiting.list",
-                &json!({}),
-                "waitingListResult",
-            )["waiting"]
-                .clone()
-        };
+        site_asked(&harness, "shop.example");
 
-        assert_eq!(
-            waiting(),
-            json!([{
-                "task_id": "CTV-1", "kind": "site_request", "agent_id": "proc",
-                "title": "Add a login page",
-                "line": format!("{name} asks to read shop.example"),
-                "request": request, "host": "shop.example",
-                "url": "https://www.shop.example/boxes", "why": "A maker."
-            }])
-        );
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        )["waiting"]
+            .clone();
 
-        harness.project.record(
-            "CTV-1",
-            "site.approved",
-            &json!({ "host": "shop.example", "request": request }),
-        );
-        assert_eq!(waiting(), json!([]), "gone once decided");
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn lists_the_sites() {
-        let harness = Harness::with_procurement("gates-sites-list");
-        harness.procurement_task("CTV-1", Some("in_progress"));
-        let catervas = catervas_roles::sites::catervas_sites();
-        let minute = |n: i64| at() + chrono::Duration::minutes(n);
-        let stamp = |n: i64| minute(n).to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
-        // The owner turned one of Catervas's off, and another off and on again, allowed a site a
-        // request named, added one unasked, and two requests wait.
-        harness.project.record_at(
-            minute(1),
-            "",
-            "site.removed",
-            &json!({ "host": catervas[1].host }),
-        );
-        harness.project.record_at(
-            minute(2),
-            "",
-            "site.removed",
-            &json!({ "host": catervas[2].host }),
-        );
-        harness.project.record_at(
-            minute(3),
-            "",
-            "site.approved",
-            &json!({ "host": catervas[2].host }),
-        );
-        let allowed = site_asked(&harness, "allowed.example");
-        harness.project.record_at(
-            minute(4),
-            "CTV-1",
-            "site.approved",
-            &json!({ "host": "allowed.example", "request": allowed }),
-        );
-        harness.project.record_at(
-            minute(5),
-            "",
-            "site.approved",
-            &json!({ "host": "added.example" }),
-        );
-        let later = site_asked(&harness, "wait.example");
-        let earlier = site_asked(&harness, "again.example");
-
-        let listed = query(&harness.daemon, "sites.list", &json!({}), "sitesListResult");
-
-        let rows = listed["catervas"].as_array().expect("a list");
-        assert_eq!(
-            rows.len(),
-            catervas.len(),
-            "every entry, in the file's order"
-        );
-        for (row, site) in rows.iter().zip(catervas) {
-            assert_eq!(row["host"], site.host);
-            assert_eq!(row["shop"], site.shop);
-            assert_eq!(row["category"], site.category.to_string());
-        }
-        assert_eq!(rows[0]["on"], true);
-        assert!(
-            rows[0].get("at").is_none(),
-            "nothing was ever decided: {}",
-            rows[0]
-        );
-        assert_eq!(
-            (&rows[1]["on"], &rows[1]["at"]),
-            (&json!(false), &json!(stamp(1)))
-        );
-        assert_eq!(
-            (&rows[2]["on"], &rows[2]["at"]),
-            (&json!(true), &json!(stamp(3))),
-            "turned back on"
-        );
-        assert_eq!(
-            listed["owner"],
-            json!([
-                { "host": "added.example", "at": stamp(5) },
-                { "host": "allowed.example", "at": stamp(4), "request": allowed },
-            ])
-        );
-        let waiting = listed["waiting"].as_array().expect("a list");
-        let hosts: Vec<&str> = waiting
-            .iter()
-            .map(|row| row["host"].as_str().expect("a host"))
-            .collect();
-        assert_eq!(hosts, ["again.example", "wait.example"], "by host");
-        assert_eq!(
-            waiting[1],
-            json!({
-                "request": later, "host": "wait.example",
-                "url": "https://www.wait.example/boxes", "why": "A maker.",
-                "task_id": "CTV-1", "agent_id": "proc", "at": stamp(0)
-            })
-        );
-        assert_eq!(waiting[0]["request"], earlier);
+        assert_eq!(waiting, json!([]));
     }
 }

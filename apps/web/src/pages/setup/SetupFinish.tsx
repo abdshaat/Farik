@@ -1,69 +1,19 @@
-import { Button, Choice } from "@catervas/ui";
+import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ShowAdvanced } from "../../components/ShowAdvanced.tsx";
 import { t } from "../../strings/t.ts";
 import { AdvancedSettings } from "./SetupAdvanced.tsx";
 import styles from "./setup.module.css";
-import { PutBack, useDefaults, useSetup, useStart } from "./TeamSetup.tsx";
+import { useSetup, useStart } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
-type Integration = "auto_merge" | "pull_request" | "manual";
-
-/** How accepted work is added, and "Put back the default": setup's and Settings'. */
-export function IntegrationChoice({
-	value,
-	onChange,
-	putBack,
-}: {
-	value: string;
-	onChange: (integration: string) => void;
-	putBack: (() => void) | undefined;
-}) {
-	return (
-		<>
-			<div className={styles.card}>
-				<Choice<Integration>
-					name="integration"
-					legend={t("finishChoice")}
-					value={value as Integration}
-					onChange={onChange}
-					options={[
-						{
-							value: "auto_merge",
-							label: t("finishAuto"),
-							description: t("finishAutoNote"),
-						},
-						{
-							value: "pull_request",
-							label: t("finishPullRequest"),
-							description: t("finishPullRequestNote"),
-						},
-						{
-							value: "manual",
-							label: t("finishManual"),
-							description: t("finishManualNote"),
-						},
-					]}
-				/>
-			</div>
-			<PutBack onClick={putBack} />
-		</>
-	);
-}
-
-/** Setup's last step: what happens to accepted work, then "Start the team". */
+/** Setup's last step: what happens to accepted work, said and not asked, then "Start the team". */
 export function SetupFinish() {
 	const navigate = useNavigate();
-	const { draft, change } = useSetup();
+	const { draft } = useSetup();
 	const { start, busy, refused } = useStart();
-	const defaults = useDefaults();
 	const [advanced, setAdvanced] = useState(false);
-	const integrate = (integration: string) =>
-		change({
-			...draft,
-			team: { ...draft.team, policy: { ...draft.team.policy, integration } },
-		});
 
 	return (
 		<Wizard
@@ -76,11 +26,6 @@ export function SetupFinish() {
 			}
 			carried={!!draft.from}
 		>
-			<IntegrationChoice
-				value={draft.team.policy.integration}
-				onChange={integrate}
-				putBack={defaults && (() => integrate(defaults.policy.integration))}
-			/>
 			{draft.from && <Carried from={draft.from} answers={draft.answers} />}
 			{draft.team.policy.planInSprints && (
 				<section className={styles.sprints} aria-labelledby="sprints">

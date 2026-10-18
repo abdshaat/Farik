@@ -6,8 +6,8 @@ description: Use when a request from the user needs triage, or a draft or refini
 # Writing task contracts
 
 A contract is the only way work enters the team. The governor checks it against the Definition of
-Ready before anyone may start, and every criterion in it is what a reviewer will run to decide
-whether the work is done. Write it for the reviewer who has nothing else.
+Ready before anyone may start, and every criterion in it is what a reviewer (for code) or Catervas itself (for anything else) will run to decide
+whether the work is done. Write it for the one who has nothing else.
 
 ## 1. Triage, when it is yours
 
@@ -28,8 +28,8 @@ question per call, and end your turn after each. Ask about the need, the user wh
 must not change, and how the user will know it worked. Do not guess an answer you could ask for.
 The governor refuses an epic's contract while a question you asked is unanswered.
 
-When you believe you have no questions, say so in the contract's intent. The user's approval is
-the check that you were right.
+When you believe you have no questions, say so in the contract's intent. The governor's check of the
+contract is the check that you were right.
 
 A standalone task may need questions too; ask them first in the same way.
 
@@ -42,8 +42,8 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
 
 - **Intent**: the user-facing reason for the work, in the user's terms. Not what to change, but
   why it matters and to whom.
-- **Summary**: two or three plain sentences the user can decide on, which their approval page
-  shows first; every epic needs one, and so does every task the team's policy asks them to approve.
+- **Summary** (optional): two or three plain sentences the user can read at a glance, shown first
+  wherever the plan is shown.
   Open every completion and review note the same way, then a blank line, then the details.
 - **Requirements**: numbered `R1`, `R2`, ..., each one thing that must be true afterwards.
 - **Scope**: `allowed_paths` as narrow as the work allows and within the team's ceiling, and at
@@ -60,12 +60,12 @@ The team's rules and the criterion library are in this prompt; call `catervas_re
   docs/adr/** or src/**/*.rs. A Marketing Specialist's task names paths under docs/catervas/marketing/
   alone: it reads only that folder and docs/catervas/product/, so it cannot change any other file.
 - **Exit criteria**: see below.
-- **Assignee role and reviewer role**: a Developer's task is reviewed by an active Architect when
+- **Assignee role and reviewer role**: only a code task is reviewed: a Developer's task is reviewed by an active Architect when
   the team has one, else by another active Developer, which needs two active Developers; a
-  UI/UX Designer's by an active Architect, else by a Developer; an Architect's or a Marketing Specialist's by you. Paused and retired agents do not count. When
+  UI/UX Designer's by an active Architect, else by a Developer; every other role's task is not reviewed by an agent: Catervas checks its criteria, and the reviewer role you name there is only a name on the contract. Paused and retired agents do not count. When
   the team has neither, the contract fails readiness: ask the user for a reviewer with
-  `catervas_ask_human` rather than naming one nobody can staff. Nobody reviews their own work but you, in a fresh session, for your own docs tasks (below). When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
-- **Your own docs tasks**: A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself, reviewed in a fresh session that knows nothing of the work, and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.
+  `catervas_ask_human` rather than naming one nobody can staff. When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
+- **Your own docs tasks**: A docs task of your own has assignee role `product_manager`, reviewer role the Architect, else the Scrum Master, else yourself (not reviewed: Catervas checks its criteria), and `allowed_paths` within `docs/catervas/product/`, or `CHANGELOG.md` alone for your changelog task.
 - **Risk** and **budget**: set both. A task's budget is within the team's maximum when the team
   sets one, what is left of the sprint when it has a budget, and, under an epic, what is left of
   the epic.
@@ -83,9 +83,10 @@ A good criterion would fail if the work were wrong, not merely if nothing ran:
   a line the output must or must not contain). Ask for new tests (`new_tests_required`) when the
   change is behaviour the existing suite cannot see; the team's rules may require it.
 - `artifact` criteria name a path and what it must contain.
-- `review` criteria are yes-or-no questions the reviewer answers with a cited reason each; use
-  them only where no command can decide.
-- `human` criteria are questions only the user can answer.
+- `review` criteria are yes-or-no questions the reviewer answers with a cited reason each; only a
+  code task may carry one, since only code is reviewed. Readiness refuses one anywhere else.
+- `human` criteria are questions only the user can answer; again only a code task may carry one.
+  Anything that is not code is checked by Catervas with `command`, `test` or `artifact` criteria.
 
 Include every method the team's rules require.
 
@@ -96,11 +97,10 @@ in the answer with what to change; fix them all and ask again. A contract that f
 escalates to the user. When no agent can review, ask the user to add one, an Architect or a second
 Developer; do not change the reviewer role to one nobody on the team holds. When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
 
-## 6. After approval
+## 6. After the contract is ready
 
-An epic always waits for the user's approval before it is ready, and so does a `high` risk task or
-any task the team's policy names. Only after an epic is approved do you write its requirements into the spec,
-by `writing-requirements`.
+No epic or task waits for the user's approval: a contract that passes the Definition of Ready is
+ready. Once an epic is ready, write its requirements into the spec, by `writing-requirements`.
 
 ## 7. An approved epic's tasks
 
@@ -112,7 +112,7 @@ An approved epic's tasks are yours to write. Read the epic and the tasks already
    extension (`.html` or `.md`, as the Team rules say),
    no `lane`, an `artifact` criterion that the plan exists, and in its requirements how many
    builders (Software Developers and UI/UX Designers) are active.
-2. Once the plan is on the integration branch, file one task per planned task: its `plan`, its
+2. Once Catervas has accepted the plan task (you are asked with the plan's text), file one task per planned task: its `plan`, its
    `lane`, the planned tasks it needs in `dependencies`, the Architect's paths as `allowed_paths`
    and its constraints as `constraints`, with acceptance criteria from the epic's requirements and
    the spec.

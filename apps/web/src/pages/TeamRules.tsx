@@ -13,8 +13,7 @@ import {
 	type PreviewForm,
 	previewOf,
 } from "./setup/PreviewFields.tsx";
-import { PlanCheck, SprintsSwitch } from "./setup/SetupAdvanced.tsx";
-import { IntegrationChoice } from "./setup/SetupFinish.tsx";
+import { SprintsSwitch } from "./setup/SetupAdvanced.tsx";
 import { PermissionChoices } from "./setup/SetupPermissions.tsx";
 import { useDailyLimit } from "./setup/SetupSpending.tsx";
 import setup from "./setup/setup.module.css";
@@ -24,9 +23,8 @@ import {
 	type Team,
 	useDefaults,
 } from "./setup/TeamSetup.tsx";
-import type { Judges } from "./Team.tsx";
 
-type Checked = { errors: Refusal[]; effects: string[]; judges?: Judges };
+type Checked = { errors: Refusal[]; effects: string[] };
 type Part = {
 	saved: Team;
 	defaults: Defaults | undefined;
@@ -222,21 +220,10 @@ export function Spend(part: Part) {
 	);
 }
 
-export function Finish(part: Part) {
-	const { saved, defaults } = part;
-	const [mine, setMine] = useState<string>();
-	const next = mine
-		? { ...saved, policy: { ...saved.policy, integration: mine } }
-		: saved;
-	const { foot } = useChange(part, next);
+export function Finish() {
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
-			<IntegrationChoice
-				value={mine ?? saved.policy.integration}
-				onChange={setMine}
-				putBack={defaults && (() => setMine(defaults.policy.integration))}
-			/>
-			{foot}
+			<p>{t("rulesFinishPullRequest")}</p>
 		</Part>
 	);
 }
@@ -343,29 +330,6 @@ export function Documents(part: Part) {
 				</div>
 			)}
 		</Part>
-	);
-}
-
-export function Plans(part: Part) {
-	const { saved, defaults } = part;
-	const [mine, setMine] = useState<Team["policy"]["judgment"]>();
-	const next = mine
-		? { ...saved, policy: { ...saved.policy, judgment: mine } }
-		: saved;
-	const { checked, errors, foot } = useChange(part, next, {
-		shownAbove: "/policy/judgment",
-	});
-	return (
-		<PlanCheck
-			judgment={mine ?? saved.policy.judgment ?? defaults?.policy.judgment}
-			onChange={setMine}
-			judges={checked?.judges}
-			errors={errors}
-			putBack={defaults && (() => setMine(defaults.policy.judgment ?? {}))}
-			heading="h3"
-		>
-			{foot}
-		</PlanCheck>
 	);
 }
 

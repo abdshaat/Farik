@@ -856,7 +856,7 @@ describe("chats", () => {
 	});
 
 	const INTRO =
-		"Before your team builds anything, Mira asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.";
+		"Before your team builds anything, Mira asks what you want to make. This chat only talks: your product plan is written next, and your team builds once it is done.";
 	const SUMMARY = "Thank you, that’s enough to start. Here is what I heard.";
 	const DRAFT = "Draft the product plan";
 	const stateAsked = (s: FakeSocket) =>
@@ -947,7 +947,7 @@ describe("chats", () => {
 		expect(screen.getAllByRole("button", { name: DRAFT })).toHaveLength(1);
 		expect(
 			within(region).getByText(
-				"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
+				"I write it as my first task: a product description and a roadmap. Your team starts building once it is done.",
 			),
 		).toBeTruthy();
 		fireEvent.click(button);
@@ -969,7 +969,7 @@ describe("chats", () => {
 			},
 		});
 		const sentLine = await screen.findByText(
-			"Drafting it as CTV-1. It comes to you on Today to approve.",
+			"Drafting it as CTV-1. Your team starts building once it is done.",
 		);
 		expect(sentLine.closest("[role=status]")).toBe(sentLine);
 		expect(screen.queryByRole("button", { name: DRAFT })).toBeNull();
@@ -1044,7 +1044,7 @@ describe("chats", () => {
 		});
 		expect(
 			await screen.findByText(
-				"Drafting it as CTV-4. It comes to you on Today to approve.",
+				"Drafting it as CTV-4. Your team starts building once it is done.",
 			),
 		).toBeTruthy();
 		expect(screen.queryByRole("button", { name: DRAFT })).toBeNull();

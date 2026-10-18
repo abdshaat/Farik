@@ -54,15 +54,11 @@ pub fn product_plan_tasks(log: &EventLog) -> Result<Vec<(TaskId, DateTime<Utc>)>
         .collect())
 }
 
-/// Whether a product plan task still drafts the plan: it is not cancelled, and not accepted with
-/// its integration done.
+/// Whether a product plan task still drafts the plan: it is neither cancelled nor accepted
+/// (Catervas accepts it, and nothing waits for its merge).
 #[must_use]
 pub fn drafts_the_plan(row: &TaskProjection) -> bool {
-    match row.status {
-        TaskStatus::Cancelled => false,
-        TaskStatus::Accepted => row.awaiting_integration,
-        _ => true,
-    }
+    !matches!(row.status, TaskStatus::Cancelled | TaskStatus::Accepted)
 }
 
 /// Whether a task's events say it is the product plan's: its `task.created` has `product_plan`.
@@ -96,7 +92,7 @@ mod tests {
     }
 
     #[test]
-    fn a_task_drafts_the_plan_until_it_is_cancelled_or_accepted_and_integrated() {
+    fn a_task_drafts_the_plan_until_it_is_cancelled_or_accepted() {
         let board = Board::new("product-plan-open");
         created(&board, "CTV-1", &json!({ "product_plan": true }));
         let drafting = |board: &Board| {
@@ -111,15 +107,7 @@ mod tests {
             "human",
             (None, None),
         );
-        assert!(drafting(&board), "accepted, awaiting its integration");
-        board.put(
-            at(11, 5),
-            Some("CTV-1"),
-            None,
-            "task.integrated",
-            json!({ "sha": "4b825dc642cb6eb9a060e54bf8d69288fbee4904", "into": "main", "integrated_by": "governor" }),
-        );
-        assert!(!drafting(&board), "accepted and integrated");
+        assert!(!drafting(&board), "accepted, merged or not");
         let cancelled = Board::new("product-plan-cancelled");
         created(&cancelled, "CTV-1", &json!({ "product_plan": true }));
         cancelled.moved(

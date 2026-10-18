@@ -6,8 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use catervas_core::folders::{
-    DocumentFormat, PRODUCT_PLAN_STEMS, agent_twin, is_human_document, product_plan_approved,
-    twin_is_stale, with_format,
+    DocumentFormat, agent_twin, is_human_document, twin_is_stale, with_format,
 };
 use catervas_core::team::Team;
 
@@ -723,6 +722,80 @@ impl Git {
         }
     }
 
+    /// Merges `from` into the branch checked out in the worktree at `worktree`, with a merge
+    /// commit, and never touches the root's checkout: a task that starts from other tasks'
+    /// unmerged branches is made this way (ADR 0061). On conflicts the merge is aborted and the
+    /// paths are answered, the worktree as it was.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `worktree` is not a worktree of this repository, when `from` names
+    /// nothing, or when git refuses for a reason that is not a conflict.
+    pub fn merge_in(
+        &self,
+        worktree: &Path,
+        from: &str,
+        message: &str,
+    ) -> Result<MergeOutcome, GitError> {
+        self.require_repository()?;
+        self.require_worktree_of_this_repository(worktree)?;
+        match run_git(
+            worktree,
+            &as_someone(worktree, &["merge", "--no-ff", "-m", message, from]),
+        ) {
+            Ok(_) => Ok(MergeOutcome::Merged {
+                sha: run_git(worktree, &["rev-parse", "HEAD"])?,
+            }),
+            Err(refusal) => {
+                let conflicted =
+                    run_git(worktree, &["diff", "--name-only", "--diff-filter=U", "-z"])?;
+                let conflicts = paths_of(&conflicted);
+                if conflicts.is_empty() {
+                    return Err(refusal);
+                }
+                run_git(worktree, &["merge", "--abort"])?;
+                Ok(MergeOutcome::Conflicts(conflicts))
+            }
+        }
+    }
+
+    /// Writes the ref `name` (`refs/...`) at `rev`.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn set_ref(&self, name: &str, rev: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.at_root(&["update-ref", name, rev])?;
+        Ok(())
+    }
+
+    /// Whether the ref `name` (`refs/...`) exists.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, or `NotInstalled` when git cannot be run.
+    pub fn has_ref(&self, name: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        match self.at_root(&["rev-parse", "--verify", "--quiet", name]) {
+            Ok(_) => Ok(true),
+            Err(GitError::CommandFailed { .. }) => Ok(false),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Deletes the local branch `name` (`git branch -D`), which no worktree may have checked out.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when the branch is checked out anywhere or does not exist.
+    pub fn delete_branch(&self, name: &str) -> Result<(), GitError> {
+        self.require_repository()?;
+        self.check_branch_name(name)?;
+        self.at_root(&["branch", "-D", name])?;
+        Ok(())
+    }
+
     /// Makes the branch `branch` at `from` with one commit that writes `files` (`(path, text)`,
     /// repository-relative) and removes `removed`, in the root's checkout as `merge` does, and
     /// puts the branch that was checked out back (`docs/SPEC.md` 5.14).
@@ -1105,6 +1178,30 @@ fn paths_of(listed: &str) -> Vec<String> {
         .collect()
 }
 
+/// The ref that remembers where a task's worktree began, when it did not begin at the integration
+/// branch (`task_base`).
+#[must_use]
+pub fn task_start_ref(task_id: &catervas_core::contract::TaskId) -> String {
+    format!("refs/catervas/start/{}", task_id.as_str())
+}
+
+/// What a task's diff, commit count and changed paths are taken from: the ref written where its
+/// worktree began, when it began from other tasks' unmerged branches (ADR 0061), else
+/// `integration_branch`.
+#[must_use]
+pub fn task_base(
+    git: &Git,
+    integration_branch: &str,
+    task_id: &catervas_core::contract::TaskId,
+) -> String {
+    let reference = task_start_ref(task_id);
+    if git.has_ref(&reference).unwrap_or(false) {
+        reference
+    } else {
+        integration_branch.to_string()
+    }
+}
+
 /// The branch a task's work is measured against and merges into: the team's
 /// `policy.integration_branch`, or the repository's default branch when the team names none.
 ///
@@ -1148,26 +1245,6 @@ pub fn held_document(
         }
     }
     Ok(None)
-}
-
-/// Whether the new project's product plan is on the team's integration branch: both documents of
-/// `PRODUCT_PLAN_STEMS` are there, each as `.md` or `.html` (`docs/SPEC.md` 5.3). False when the repository has no such branch yet.
-///
-/// # Errors
-///
-/// What `integration_branch` refuses; `CommandFailed` for any git error but a missing branch.
-pub fn product_plan_on(git: &Git, team: &Team) -> Result<bool, GitError> {
-    let branch = integration_branch(team, git)?;
-    match git.tree(&branch) {
-        Ok(_) => {}
-        Err(GitError::CommandFailed { .. }) => return Ok(false),
-        Err(other) => return Err(other),
-    }
-    let mut present = Vec::new();
-    for stem in PRODUCT_PLAN_STEMS {
-        present.extend(held_document(git, &branch, stem, team.document_format())?);
-    }
-    Ok(product_plan_approved(&present))
 }
 
 /// The `.agent.md` twins on `branch` that are behind the document for people beside them: the

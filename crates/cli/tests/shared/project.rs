@@ -293,11 +293,13 @@ pub fn filed(repository: &TempRepo, title: &str) -> String {
         .to_string()
 }
 
-/// Files `a_request(title)` of risk `high`, which waits for the human's acceptance, and walks it
-/// to `verifying` as `dev-a`'s, reviewed by `dev-b`. Answers its id.
-pub fn a_high_risk_task_verifying(repository: &TempRepo, title: &str) -> String {
-    let path = repository.path.join(format!("high-{}.yaml", title.len()));
-    std::fs::write(&path, a_request(title).replace("risk: low", "risk: high"))
+/// Files `a_request(title)` with a `human` criterion, which waits for the human's answer (ADR 0061:
+/// nothing else makes a result wait), and walks it to `verifying` as `dev-a`'s, reviewed by
+/// `dev-b`. Answers its id.
+pub fn a_task_with_a_human_criterion_verifying(repository: &TempRepo, title: &str) -> String {
+    let path = repository.path.join(format!("human-{}.yaml", title.len()));
+    let human = "  - id: C2\n    text: The founder has opened done.txt.\n    satisfies:\n      - R1\n    verification:\n      method: human\n      question: Did you open done.txt?\nassignee_role:";
+    std::fs::write(&path, a_request(title).replace("assignee_role:", human))
         .expect("the request is written");
     let ran = run(
         &repository.path,

@@ -859,7 +859,7 @@
     },
     "reasonBody": {
       "title": "Reason Body",
-      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the Product Manager's decision on the task's latest design plan, through catervas_decide_design_plan (ADR 0026), and why; the envelope names the task, the Product Manager and the session, and a returned plan starts a new explore session with reason. For preview.stopped: Catervas stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
+      "description": "The body of design_plan.approved, design_plan.returned and preview.stopped, which share one shape, so the one branch of the body choice serves all three and the event's kind says which it is. For design_plan.approved and design_plan.returned: the decision on the task's latest design plan, and why. Since ADR 0061 the approval is Catervas's, recorded with no agent and no session, and the envelope names only the task; before it, it was the Product Manager's decision through catervas_decide_design_plan (ADR 0026), and a returned plan, which only older logs hold, starts a new explore session with reason. For preview.stopped: Catervas stopped the task's preview and its browser, and why, in plain words: the session ended, or the preview failed, with the output's last 40 lines (step 12's plan).",
       "type": "object",
       "additionalProperties": false,
       "required": ["reason"],
@@ -1019,7 +1019,7 @@
     },
     "toolApprovalRequestedBody": {
       "title": "Tool Approval Requested Body",
-      "description": "An agent's session called a connector's tool tagged external_effect with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
+      "description": "An agent's session called a connector's tool tagged paid with no grant of the human's for it, so the call was denied and waits for the human like a question (docs/SPEC.md 5.6, 5.7; ADR 0031). The event's sequence number is the approval's id. input is the call's whole input as compact JSON, never cut, so the human sees all of what they allow; input_sha256 is the sha256 of its canonical JSON, object keys sorted at every depth, which a grant binds. The envelope names the session, the agent, and the task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["server", "tool", "input", "input_sha256"],
@@ -1146,7 +1146,7 @@
     },
     "marketingPlanApprovedBody": {
       "title": "Marketing Plan Approved Body",
-      "description": "The owner approved a marketing plan (docs/SPEC.md 6.5; ADR 0042): plan is its id, and note is what the owner added, empty when they added nothing. note is always present, so that this body is never also a valid design_plan.proposed body, whose only property is plan. The envelope names the proposing task and no agent and no session: only the owner decides, under ask and auto alike.",
+      "description": "The owner approved a marketing plan (docs/SPEC.md 6.5; ADR 0042), or Catervas did for a plan that spends nothing (ADR 0061): plan is its id, and note is what the owner added, empty when they added nothing, or Catervas's reason. note is always present, so that this body is never also a valid design_plan.proposed body, whose only property is plan. The envelope names the proposing task and no agent and no session: only the owner decides a plan with money in it, under ask and auto alike.",
       "type": "object",
       "additionalProperties": false,
       "required": ["plan", "note"],
@@ -1235,7 +1235,7 @@
     },
     "socialPostScheduledBody": {
       "title": "Social Post Scheduled Body",
-      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042). approved_by plan: the Marketing Specialist scheduled it with catervas_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Catervas hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
+      "description": "A post is going out (docs/SPEC.md 6.5; ADR 0042; ADR 0061). approved_by plan: the Marketing Specialist scheduled it with catervas_schedule_post into the slot slot of the active plan plan, at least three hours ahead; the envelope names its task, agent and session, and the event's sequence number is the post's number. approved_by catervas: the Marketing Specialist scheduled it with no slot, outside the plan or with no plan, at least three hours ahead; a post costs nothing, so Catervas approves it, and it is shown with a Stop as a planned one is; the envelope is as a plan post's, with no plan and no slot. approved_by owner: the owner allowed a post that was requested; post is the request's number, and the envelope names the request's task and no agent and no session. channel is the network and buffer_channel Buffer's id for the channel; text is the post's words; media is up to four pictures or clips in order; at is when it goes out, with its offset; details is present on YouTube and Pinterest only. Catervas hands it to Buffer an hour before at, or at once when the owner allowed it later than that.",
       "type": "object",
       "additionalProperties": false,
       "required": ["channel", "buffer_channel", "text", "media", "at", "approved_by"],
@@ -1247,14 +1247,14 @@
         "media": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/socialPostMedia" } },
         "at": { "$ref": "#/$defs/socialPostTime" },
         "details": { "$ref": "#/$defs/socialPostDetails" },
-        "approved_by": { "type": "string", "enum": ["plan", "owner"] },
+        "approved_by": { "type": "string", "enum": ["plan", "owner", "catervas"] },
         "plan": { "$ref": "#/$defs/marketingPlanId" },
         "slot": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$", "maxLength": 40 }
       }
     },
     "socialPostRequestedBody": {
       "title": "Social Post Requested Body",
-      "description": "The Marketing Specialist wrote a post that is not in the active plan, with catervas_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042). It waits for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
+      "description": "Older logs only: the Marketing Specialist wrote a post that is not in the active plan, with catervas_schedule_post and no slot (docs/SPEC.md 6.5; ADR 0042); since ADR 0061 such a post is scheduled at once (social_post.scheduled with approved_by catervas). It waited for the owner, who allows it (social_post.scheduled with approved_by owner and post) or does not (social_post.stopped by declined). The event's sequence number is the post's number; the envelope names its task, agent and session, and the task does not wait. The fields are those of social_post.scheduled.",
       "type": "object",
       "additionalProperties": false,
       "required": ["channel", "buffer_channel", "text", "media", "at"],
@@ -1551,8 +1551,8 @@
     },
     "dataPipelineDecidedBy": {
       "type": "string",
-      "enum": ["product_manager", "human"],
-      "description": "Who decided a request: the Product Manager, in the session that was asked to, or the owner. Under auto (phase 9 step 01) a third word joins them."
+      "enum": ["product_manager", "human", "catervas"],
+      "description": "Who decided a request: the owner, Catervas (a request that costs nothing and sends nothing out, filed at once: ADR 0061), or, in an older log, the Product Manager, in the session that was asked to."
     },
     "dataPipelineRequestedBody": {
       "title": "Data Pipeline Requested Body",
@@ -1572,7 +1572,7 @@
     },
     "dataPipelineEscalatedBody": {
       "title": "Data Pipeline Escalated Body",
-      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Catervas did after three decision sessions ended without a word (the reason is Catervas's sentence and the envelope names no agent and no session). pipeline is the request's number. About the request and no task of its own.",
+      "description": "A request goes to the owner (docs/SPEC.md 6.10; ADR 0039): Catervas passed it on at once, since it costs money, its cost is not known or it sends the project's data out (ADR 0061): the reason is Catervas's sentence and the envelope names no agent and no session. In an older log the Product Manager passed it on, with its reason on one line of its own words (the envelope names the Product Manager and its decision session), or Catervas did after three decision sessions ended without a word. pipeline is the request's number. About the request and no task of its own.",
       "type": "object",
       "additionalProperties": false,
       "required": ["pipeline", "reason"],
@@ -1583,7 +1583,7 @@
     },
     "dataPipelineApprovedBody": {
       "title": "Data Pipeline Approved Body",
-      "description": "A request was approved, and the team was asked to set the source up (docs/SPEC.md 6.10; ADR 0039): by the Product Manager, from the decision session of this request, or by the owner, whose envelope names no agent and no session. reason is the Product Manager's reason or the owner's note, empty when the owner said nothing; request is the id of the ordinary request that was filed, the only thing an approval does. About the request and no task of its own.",
+      "description": "A request was approved, and the team was asked to set the source up (docs/SPEC.md 6.10; ADR 0039): by Catervas, at once, for a request that costs nothing and sends nothing out (ADR 0061), or by the owner, whose envelope names no agent and no session; in an older log by the Product Manager, from the decision session of this request. reason is the Product Manager's reason or the owner's note, empty when the owner or Catervas said nothing; request is the id of the ordinary request that was filed, the only thing an approval does. About the request and no task of its own.",
       "type": "object",
       "additionalProperties": false,
       "required": ["pipeline", "by", "reason", "request"],
@@ -1918,7 +1918,7 @@
     },
     "connectorTag": {
       "type": "string",
-      "enum": ["network", "external_effect", "denied"],
+      "enum": ["network", "paid", "external_effect", "denied"],
       "description": "A connector tool's tag (docs/SPEC.md section 5.6)."
     },
     "questionAskedBody": {

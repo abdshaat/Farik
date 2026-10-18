@@ -180,7 +180,7 @@
             "minimum": 0,
             "maximum": 1000
           },
-          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags external_effect (allowance_not_external), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
+          "description": "A kit entry's alone (allowance_not_kit): for a tool it tags paid (allowance_not_paid; an older team file may still give one for an external_effect tool), how many calls each sprint the agent makes without asking, 0 to 1000; 0 asks every time (ADR 0037). Left out or empty, every such call asks. A commit that raises one makes the server need connecting again."
         },
         "oauth": {
           "type": "object",
@@ -216,10 +216,11 @@
       "type": "string",
       "enum": [
         "network",
+        "paid",
         "external_effect",
         "denied"
       ],
-      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and asks the human; denied, never offered."
+      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and runs without asking, each use recorded; paid, it costs money at the service, asks the human and is the only one that does (ADR 0061); denied, never offered."
     },
     "role": {
       "type": "string",
@@ -503,7 +504,7 @@
             "never"
           ],
           "default": "always",
-          "description": "Whether every contract's plan is checked before work starts (spec 5.3). Left out, always."
+          "description": "Ignored since ADR 0061."
         },
         "questions": {
           "type": "array",
@@ -517,7 +518,7 @@
             "Does the task fit its budget?",
             "Would its checks notice if the work went wrong the way its intent worries about?"
           ],
-          "description": "What the judge answers about each plan, one answer per question. Left out, the two of spec 5.3. validate_team refuses none while required is always."
+          "description": "What the judge answers about each plan, one answer per question. Ignored since ADR 0061."
         },
         "judge": {
           "type": "string",
@@ -527,10 +528,10 @@
             "scrum_master"
           ],
           "default": "auto",
-          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). A named judge must be an active agent (validate_team)."
+          "description": "Who checks plans. `auto` is the first active agent of the Architect, the Scrum Master and the Product Manager, in that order (the founder, 2026-09-29). Ignored since ADR 0061."
         }
       },
-      "description": "The plan check (spec 5.3). Left out, every plan is checked by the defaults."
+      "description": "Ignored since ADR 0061: no agent judges a contract. Older team files may carry it."
     },
     "permissions": {
       "type": "object",

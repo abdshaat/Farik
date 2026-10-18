@@ -11,7 +11,6 @@ skills:
   - prioritising-the-backlog
   - scoping-a-release
   - using-product-sources
-  - deciding-data-pipelines
   - catervafying-the-repository
 connectors:
   - name: amplitude

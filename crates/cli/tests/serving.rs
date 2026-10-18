@@ -570,8 +570,6 @@ fn told_at_listen<T: Send + 'static>(
                 daemon.register_session(SessionRegistration {
                     read_roots: Vec::new(),
                     session_id: "probe".to_string(),
-                    web: catervas_core::governor::sites::WebAccess::Open,
-                    reads: catervas_core::folders::ReadAccess::Open,
                     agent_id: "probe".to_string(),
                     task_id: None,
                     purpose: SessionPurpose::Triage,
@@ -2042,10 +2040,15 @@ fn changes_project_from_the_browser() {
     });
 
     assert_eq!(status["paused"], false, "{status}");
-    let written: Value = serde_json::from_str(
-        &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
-    )
-    .expect("JSON");
+    // The driver answers before it remembers the project, so wait for the write, not the answer.
+    let mut written = Value::Null;
+    until("the target is remembered", || {
+        written = std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        written["last_project"] == json!(root.display().to_string())
+    });
     assert_eq!(written["last_project"], json!(root.display().to_string()));
     assert!(!root.join(".catervas/local/setup-pending").exists());
     let stopped = run(&root, &["stop"]);

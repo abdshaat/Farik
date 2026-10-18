@@ -38,7 +38,7 @@ or say you did not find; never guess. If two places disagree, say both.
 
 ## 5. Finish
 
-Commit with `catervas_git_commit`, and request `verifying`. The reviewer checks the documents
+Commit with `catervas_git_commit`, and request `verifying`. Catervas checks that the documents exist (only code is reviewed), so write them
 against the code.
 
 ## Each sprint

@@ -303,20 +303,9 @@ export const en = {
 	firstDay:
 		"A first full day for the suggested team of six costs about twenty-five dollars (an estimate) on your own key at today’s prices. A smaller team costs less.",
 	finishTitle: "When you accept a piece of work, what happens to it?",
-	finishLead:
-		"Accepted work has to be added to your project. Choose how much you want to do by hand.",
-	finishChoice: "Accepted work",
-	finishAuto: "Catervas adds it for me",
-	finishAutoNote:
-		"Recommended. Catervas adds the work to your project as soon as you accept it, and sends it to your online repository if you have one.",
-	finishPullRequest: "Open a pull request on GitHub for each piece",
-	finishPullRequestNote:
-		"You, or someone you trust, merges each one on GitHub. Needs the GitHub app on this computer.",
-	finishManual: "I will add each one myself",
-	finishManualNote:
-		"Catervas waits. Each accepted piece shows an “Add to project” button until you press it.",
+	finishLead: "Accepted work opens a pull request for you to merge.",
 	finishSafe:
-		"Rules for the whole team, the checks every piece of work must pass, and how plans are judged are already set to safe choices.",
+		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",
 	advancedHide: "Hide advanced settings",
 	rulesTitle: "Team rules",
@@ -347,20 +336,6 @@ export const en = {
 	checkNewHint:
 		"Say what must be true of finished work, in at least 10 characters. Another agent checks it.",
 	checkAdd: "Add a check",
-	planTitle: "Checking plans",
-	planLead: "Before anyone starts, one agent checks that the plan makes sense.",
-	planRequired: "Check every plan before work starts",
-	planQuestions: "What the checker asks about each plan",
-	planBudget: "Can this be done within its budget?",
-	planBudgetNote: "So work does not stop halfway because the money ran out.",
-	planNotice: "Would the checks notice if it went wrong?",
-	planNoticeNote: "So a broken result cannot pass as finished.",
-	planSmall: "Is it small enough to finish in one go?",
-	planSmallNote: "Big plans get split into smaller pieces first.",
-	planJudge: "Who checks",
-	planJudgeAuto: "Catervas chooses: {who}",
-	planJudgeNamed: "{name}, the {role}",
-	planJudgeNone: "The {role}, once the team has one",
 	team: "Team",
 	teamPageLead:
 		"{count} agents work on {name}. A team needs a Product Manager; everyone else is up to you. You can have up to seven.",
@@ -408,7 +383,7 @@ export const en = {
 	tierGitRemote: "Push to GitHub and open pull requests",
 	tierGitRemoteNote: "Off until you give it.",
 	tierExternal: "Do things outside your computer",
-	tierExternalNote: "Mail, posts, deploys. You approve each.",
+	tierExternalNote: "Mail, posts, deploys. Only a payment asks you.",
 	agentDefaults: "Put back the role’s defaults",
 	agentEffects: "What this changes",
 	agentPlace: "{name}’s place on the team",
@@ -519,7 +494,7 @@ export const en = {
 	decided: "{name}, your {role}, decided",
 	sizeLargeCard: "A big request",
 	sizeLargeBody:
-		"{pm} writes a plan with parts, asks you what is needed, and waits for your approval before anyone starts building.",
+		"{pm} writes a plan with parts and asks you what is needed. The team starts building without waiting for your approval.",
 	sizeSmallCard: "A small request",
 	sizeSmallBody:
 		"One task, planned and built straight away. Choose this if you only want a first, simple version.",
@@ -531,7 +506,7 @@ export const en = {
 	nextTitle: "What happens next",
 	nextLarge1: "{pm} asks you a few questions. You will see them on Today.",
 	nextLarge2: "{pm} writes the plan and Catervas checks it is complete.",
-	nextLarge3: "You approve the plan, or ask for changes.",
+	nextLarge3: "The plan needs no approval. You can read it on its page.",
 	nextLarge4: "{breaker} splits it into tasks and the team starts.",
 	nextSmall1:
 		"{pm} asks you anything that is unclear. You will see it on Today.",
@@ -569,6 +544,7 @@ export const en = {
 		"A question is not a problem. {agent} just needs your answer to carry on.",
 	aboutQuestionsNext: "Your answer goes straight into {agent}’s next session.",
 	approveTitle: "Approve the plan for {title}",
+	planTitle: "The plan for {title}",
 	approveLead: "Plan {id}.",
 	approveLeadTask:
 		"Plan {id}. It waits for your approval before anyone builds it.",
@@ -650,8 +626,7 @@ export const en = {
 	verdictNote:
 		"Catervas checks the plan as you type. The results come from your project, not from this page.",
 	editSave: "Save",
-	savedBack:
-		"Saved. {pm} checks the plan again, then it comes back to you to approve.",
+	savedBack: "Saved. {pm} checks the plan again.",
 	saved: "Saved.",
 	editClash:
 		"{pm} changed this plan while you were editing. Your changes are kept.",
@@ -662,6 +637,7 @@ export const en = {
 	gateReviewed: "{name}, your {role}, reviewed it",
 	gateReviewedAfter:
 		"{name}, your {role}, reviewed the code after {designer} passed the screens",
+	gateChecked: "Catervas checked it",
 	gateCheckedHint:
 		"Catervas ran these checks itself. It did not take the team’s word for them.",
 	gateSeeChanges: "See the code changes",
@@ -721,14 +697,7 @@ export const en = {
 	refuseKeepsRead:
 		"Every agent reads the project. Pause the agent instead of taking reading away.",
 	refuseStatusFromCard: "Pause, retire or resume someone from their card.",
-	refuseJudge:
-		"Nobody on the team is an active {role}. Let Catervas choose who checks, or add a {role}.",
-	refuseNoQuestions:
-		"Checking plans needs at least one question. Tick one, or stop checking plans.",
-	refuseQuestionLength: "A question is 10 to 200 characters long.",
 	refuseLastOfRole: "{name} is your only {role}, so add another {role} first.",
-	refuseLastJudge:
-		"{name} checks your plans. Let Catervas choose who checks, or add another {role}, first.",
 	refuseOther:
 		"Catervas could not make this change. Check what you changed, then try again.",
 	refuseAlreadyPaused: "The team is already paused.",
@@ -744,7 +713,7 @@ export const en = {
 	refuseChecksFailed:
 		"Some checks failed once the parts were put together, so this cannot be accepted yet. Send it back with what is missing.",
 	refuseUsePlan:
-		"This plan is waiting for your approval. Approve it from its plan page.",
+		"This plan does not wait for your approval; read it from its plan page.",
 	refuseUseHelp:
 		"This task is waiting for your help. Answer it from its help page.",
 	refuseExtraTries:
@@ -805,7 +774,7 @@ export const en = {
 	mayGitLocal: "saves its work on its own branch",
 	mayNetwork: "looks things up on the web",
 	mayGitRemote: "sends its work to its own branches online",
-	mayExternal: "acts outside your computer, with your approval",
+	mayExternal: "acts outside your computer; only a payment asks you",
 	putBack: "Put back the default",
 	rulesNextSession:
 		"Your answers from setup. Change them whenever you like.\nA change starts with each agent’s next piece of work, never in the middle of one.",
@@ -813,6 +782,8 @@ export const en = {
 	rulesSpend: "Daily spending limit",
 	rulesSpendTitle: "What the team may spend",
 	rulesFinish: "How finished work is added",
+	rulesFinishPullRequest:
+		"Finished work opens a pull request for you to merge.",
 	accountConfirm:
 		"Disconnecting pauses your team until you start Catervas again and connect an account.",
 	accountDisconnectYes: "Disconnect and pause the team",
@@ -911,6 +882,7 @@ export const en = {
 	taskInSprint: "{id} in sprint {n}.",
 	taskDoing: "{name} is doing it",
 	taskReviews: "{name} reviews it",
+	taskChecked: "Catervas checks it",
 	taskTry: "Try {try} of {of}.",
 	taskTabs: "About this task",
 	tabSummary: "Summary and checks",
@@ -958,10 +930,7 @@ export const en = {
 	toldDesignApproved: "{who} approved {designer}’s plan.",
 	toldDesignReturned: "{who} sent {designer}’s plan back.",
 	designLead:
-		"{designer} looked at your app and wrote this. {designer} changes nothing until {pm} approves it.",
-	designWaiting: "Waiting for {pm} to approve the plan",
-	designWaitingNote:
-		"{pm} checks that the plan does what the task asks, and nothing more. You do not need to do anything.",
+		"{designer} looked at your app and wrote this, then changes the page as it says. The finished change is reviewed, as for any task.",
 	designBeingBuilt: "Being built",
 	designBeingBuiltNote:
 		"{designer} is changing the page now, as the plan says.",
@@ -1001,13 +970,11 @@ export const en = {
 		"Once the task is accepted, Catervas adds its changes to your main branch, one task at a time.",
 	taskAdd: "Add to the project",
 	taskAddNotYet: "Not yet: the task has not been accepted.",
-	taskAddOnItsOwn: "Accepted. Catervas adds it to your project on its own.",
 	taskAddByPullRequest:
 		"Accepted. Catervas opens a pull request for it, for you to merge.",
-	taskAddByHand: "Accepted. It waits for you to add it.",
 	riskLowWhy: "Low. The team may accept it without you.",
 	riskMediumWhy: "Medium. The team may still accept it without you.",
-	riskHighWhy: "High. You approve its plan, and you accept the work yourself.",
+	riskHighWhy: "High. The team may accept it without you, as for any task.",
 	taskAdded: "Added on {day}.",
 	taskStop: "Stop work on this task",
 	taskCancel: "Cancel this task",
@@ -1111,7 +1078,7 @@ export const en = {
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
 	chatsInterviewIntro:
-		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and you approve it before anything is built.",
+		"Before your team builds anything, {name} asks what you want to make. This chat only talks: your product plan is written next, and your team builds once it is done.",
 	heardTitle: "What I heard",
 	heardCustomers: "Your customers",
 	heardProblem: "The problem",
@@ -1120,8 +1087,9 @@ export const en = {
 	heardWorksWhen: "It works when",
 	draftPlan: "Draft the product plan",
 	draftPlanLine:
-		"I write it as my first task: a product description and a roadmap. It comes to you on Today to approve.",
-	draftPlanSent: "Drafting it as {id}. It comes to you on Today to approve.",
+		"I write it as my first task: a product description and a roadmap. Your team starts building once it is done.",
+	draftPlanSent:
+		"Drafting it as {id}. Your team starts building once it is done.",
 	channelIntro:
 		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
 	channelMessages: "Messages",
@@ -1249,9 +1217,11 @@ export const en = {
 	tagNetwork: "Only reads",
 	tagNetworkNote:
 		"{name} may use it any time. It looks things up and changes nothing.",
-	tagExternal: "Changes things, asks you",
-	tagExternalNote:
+	tagPaid: "Costs money, asks you",
+	tagPaidNote:
 		"{name} asks you before each use, and you see exactly what {name} wants to send.",
+	tagExternal: "Changes things",
+	tagExternalNote: "{name} may use it without asking; each use is recorded.",
 	tagDenied: "Never",
 	tagDeniedNote: "{name} is not given it.",
 	addTitle: "Add a custom connector to {name}",
@@ -1303,7 +1273,7 @@ export const en = {
 	addChanged:
 		"{server}’s settings in your project changed since you connected it on this computer, or it was never connected here. Check each one against the service’s or the connector’s instructions before you go on.",
 	addListLead:
-		"Catervas has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things, asks you”.",
+		"Catervas has not checked {server}, so you decide what {name} may do with each of its {count} tools. When unsure, leave “Changes things”.",
 	addFrom: "Each tool’s description comes from {server}.",
 	addUnusable:
 		"Catervas can’t use this tool: its name has characters Catervas can’t pass on. {name} is not given it.",
@@ -1451,10 +1421,10 @@ export const en = {
 	allowSignedIn: "Signed in to {service}.",
 	allowQuestion: "How many may {name} make each sprint without asking?",
 	allowSpends:
-		"Each one uses your {service} credits. After that many, {name} asks you first, as for anything that changes things outside your project.",
+		"Each one uses your {service} credits. After that many, {name} asks you first.",
 	allowEach: "each sprint",
 	allowRange: "0 means {name} asks every time. Up to 1,000 each.",
-	allowAlwaysAsk: "Tools that publish or post always ask.",
+	allowAlwaysAsk: "Only tools that cost money count here.",
 	allowDay: "With no sprint running, the count starts again each day.",
 	allowApplies:
 		"A new number applies from {name}’s next piece of work. It does not allow a call that is already waiting; decide that one on Today.",
@@ -1533,7 +1503,6 @@ export const en = {
 	designerWorks: "How {designer} works",
 	designerStepLook: "Looks at your app in a browser",
 	designerStepPlan: "Writes a plan",
-	designerStepApprove: "{pm} approves the plan",
 	designerStepChange: "{designer} changes the page",
 	designerStepReview: "{reviewer} reviews it, as for any task",
 	stepDone: "Done",
@@ -1587,10 +1556,10 @@ export const en = {
 	teamNameAll:
 		"Name the Product Manager and at least one more person to continue.",
 	teamSavedAnswers:
-		"{name} also holds your answers about what they may do, spending, finishing work and checking plans. You will see them on the next screens, already chosen.",
+		"{name} also holds your answers about what they may do, spending and checking plans. You will see them on the next screens, already chosen.",
 	templateMeta: "{names} · saved {date}",
 	finishLeadSaved:
-		"Accepted work has to be added to your project. {name}’s answer is already chosen; change it if this project needs another.",
+		"Accepted work opens a pull request for you to merge. {name}’s other answers are already chosen; change them if this project needs others.",
 	finishCarried: "What they may do, from {name}",
 	finishCommands: "Run commands on this computer",
 	finishPush: "Send work to your online repository",
@@ -1612,7 +1581,7 @@ export const en = {
 		"Catervas keeps a copy on this computer, so any of your projects can start from it.",
 	saveKeeps: "What it keeps",
 	saveKeepsBody:
-		"Everyone’s name, picture, persona and model, and your answers about what they may do, checking plans, spending and finishing work.",
+		"Everyone’s name, picture, persona and model, and your answers about what they may do, checking plans and spending.",
 	saveStays: "What stays with this project",
 	saveStaysBody:
 		"The team’s rules, the checks, how to open your app, and who is paused or retired.",
@@ -2013,6 +1982,8 @@ export const en = {
 	postDays: "{n} days",
 	postApprovedBefore: "Approved in your plan ",
 	postAllowed: "You allowed this",
+	postByCatervas:
+		"Not in your plan. Posting costs nothing, so Catervas lets it go out. ",
 	postHandsOverAt: ". Catervas hands it to Buffer at {time}.",
 	postHandsOverBefore: ". Catervas hands it to Buffer an hour before.",
 	postBufferHas: ". Buffer has it, and posts it at {time}.",
@@ -2086,24 +2057,9 @@ export const en = {
 	currencyGbp: "British pounds",
 	currencyCad: "Canadian dollars",
 	currencyAud: "Australian dollars",
-	// A site the Procurement Specialist asks to read, on Today (SPEC 6.10).
-	siteRequestLine: "{name} asks to read {host}",
-	siteRequestTask: "For {task}. The task waits until you decide.",
-	siteRequestScriptWhat: "This name is written in another alphabet.",
-	siteRequestScriptCheck: "Check it is the site you expect.",
-	siteRequestPage: "The page {name} wants to read",
-	siteRequestWhy: "Why, in {name}’s words",
-	siteRequestWhat:
-		"{name} reads only Catervas’s approved sites and the sites you allow. Allowing {host} lets it read any page there until you remove it.",
-	siteRequestAllow: "Allow",
-	siteRequestDecline: "Don’t allow",
-	siteRequestNote: "A note for {name} (optional)",
-	siteAllowTitle: "Allow {name} to read {host}?",
-	siteAllowBody:
-		"{name} can then read any page on {host}, for this task and later ones, until you remove it on {name}’s page.",
-	siteDeclineTitle: "Don’t allow {name} to read {host}?",
-	siteDeclineBody:
-		"{name} is told you said no, with your note, and goes on without it.",
+	// A name written in another alphabet, on Today (SPEC 6.10).
+	scriptWarningWhat: "This name is written in another alphabet.",
+	scriptWarningCheck: "Check it is the site you expect.",
 	// A data source the Procurement Specialist asks for and the Product Manager passed on, on Today (SPEC 6.10).
 	pipelineLine: "{name} asks for a data source: {source}",
 	pipelineTask: "For {task}. {name} goes on without it.",
@@ -2111,7 +2067,6 @@ export const en = {
 	pipelinePaid: "It costs money.",
 	pipelineUnknown: "Its cost is not known.",
 	pipelineSendsData: "It sends your data to {source}.",
-	pipelineUndecided: "The Product Manager did not decide.",
 	pipelineAsks: "The Product Manager asks you:",
 	pipelineWhat: "What it would give {name}",
 	pipelineWhy: "Why, in {name}’s words",
@@ -2137,55 +2092,10 @@ export const en = {
 		"The Product Manager has not passed this request to you.",
 	refusePipelineUnknown: "There is no such request.",
 	refusePipelineNoteLong: "A note is at most 600 characters.",
-	// The Procurement Specialist's page: the sites it may read.
-	sitesTitle: "Sites it may read",
-	sitesLead:
-		"Searches the whole web; opens pages only on these sites. Asks you on Today for others.",
-	sitesCatervasTitle: "Catervas’s approved sites",
-	sitesCatervasNote:
-		"Long-running shops Catervas checked. Turn one off to stop it.",
-	siteCategoryGeneralMarketplace: "Marketplaces",
-	siteCategoryOfficeSupplies: "Office supplies",
-	siteCategoryIndustrialSupplies: "Industrial supplies",
-	siteCategoryPackagingAndShipping: "Packaging and shipping",
-	siteCategoryElectronicComponents: "Electronic components",
-	siteCategoryComputersAndIt: "Computers and IT",
-	siteCategoryFurniture: "Furniture",
-	siteCategoryFoodService: "Restaurant and kitchen supplies",
-	siteCategoryPrinting: "Printing",
-	siteCategorySoftware: "Software marketplaces",
-	sitesMore: "{names} and {n} more",
-	sitesCount: "{n} shops",
-	sitesCountOne: "1 shop",
-	sitesCountOff: ", {n} turned off",
-	sitesOn: "On",
-	sitesOff: "Off",
-	sitesTurnedOff: "You turned it off {day}.",
-	sitesOwnTitle: "Sites you allowed",
-	sitesOwnAsked: "Allowed {day}, when {name} asked",
-	sitesOwnAdded: "Added by you {day}",
-	sitesNoneOwn: "None yet.",
-	sitesRemove: "Remove",
-	sitesRemoveLabel: "Remove {host}",
-	sitesRemoveTitle: "Remove {host}?",
-	sitesRemoveConfirm: "{name} will no longer read {host}.",
-	sitesRemoveAgain:
-		"To let {name} read it again, add it again here, or allow it when {name} asks.",
-	sitesAdd: "Add a site",
-	sitesAddButton: "Add",
-	sitesAddHint: "shop.com, or any page on it.",
-	sitesAdded: "{name} may now read {host}.",
+	// Days, as an order’s dates say them.
 	siteDayToday: "today",
 	siteDayYesterday: "yesterday",
 	siteDayOn: "on {day}",
-	refuseSiteInvalid:
-		"That is not a site Catervas can open. Write a name like shop.com, or a page’s address that starts with https://.",
-	refuseSiteAlreadyAllowed: "This site is allowed already.",
-	refuseSiteNotAllowed:
-		"This site is not allowed now, so there is nothing to remove.",
-	refuseSiteRequestDecided: "You decided this request already.",
-	refuseSiteRequestUnknown: "There is no such request.",
-	refuseSiteNoteTooLong: "Keep the note under 600 characters.",
 	// A purchase order the Procurement Specialist suggested, on Today (SPEC 6.10, ADR 0039).
 	orderLine: "{name} set up an order from {seller}",
 	orderTask: "For {task}.",
@@ -2519,22 +2429,8 @@ export const en = {
 	docChangesApprove: "Approve",
 	docChangesSendBack: "Send back",
 	docChangesNeedNotes: "Write what {name} should change first.",
-	docChangesNothingYet: "Nothing changes until you approve.",
 	docChangesPullRequest:
 		"Nothing changes until you approve. Then Catervas opens a pull request, and the change is in your project once it is merged.",
-	docChangesManual:
-		"Nothing changes until you approve. Then it waits under Waiting on you for you to add it to your project.",
-	planToApprove: "Your product plan to approve",
-	planFrom: "From {name}, written from your chat {when}",
-	planWhenMorning: "this morning",
-	planWhenAfternoon: "this afternoon",
-	planWhenEvening: "this evening",
-	planWhenYesterday: "yesterday",
-	planWhenOn: "on {weekday}",
-	planIntro:
-		"Here is what we will build and in what order. Read both parts, then approve it or send it back with what to change.",
-	planGate:
-		"Nothing else is planned until you approve. Then your team documents the plan in a first sprint.",
 	todayWaitsForPlan: "{project}: your team waits for your product plan",
 	refuseFolderDocDecided: "These changes were decided already.",
 	refuseFolderDocSuperseded: "A newer version of these changes is waiting.",
@@ -2593,18 +2489,11 @@ export const en = {
 		"No one on your team owns this folder right now. Resume or add its role first.",
 	refuseNoTaskTaker:
 		"The Scrum Master keeps this document up to date at its retro.",
-	filesSaveAuto: "Saving keeps your change at once.",
 	filesSavePullRequest:
 		"Saving puts your change in a pull request; it is in your project once that is merged.",
-	filesSaveManual:
-		"Saving puts your change on a branch for you to add with catervas integrate.",
-	filesThenAuto: "{owner} will update the team’s version.",
 	filesThen: "Then {owner} updates the team’s version.",
-	filesWaitingAuto: "Saved. Catervas adds it to your project in a moment.",
 	filesWaitingPullRequest: "Saved. It goes out with a pull request.",
 	filesNotMerged: "Not merged yet. It comes from {task}, which waits to merge.",
-	filesWaitingManual:
-		"Saved. It goes out when you run catervas integrate folder-{change}.",
 	filesChangedWhile:
 		"This file changed while you were editing. Your text is still here; copy it, then reload to see the new version.",
 	filesReload: "Reload",
@@ -2633,13 +2522,13 @@ export const en = {
 	readyOfferLead:
 		"Your team reads your project and writes down what it learns before building anything. You can read all of it in Files.",
 	readyPm:
-		"writes what your product is and what comes next, as your product plan to approve.",
+		"writes what your product is and what comes next, as your product plan.",
 	readyArchitect: "writes how your project is put together, with diagrams.",
 	readyDeveloper:
 		"writes how your project is built and worked on: its habits and rules.",
 	readyDesigner: "writes down every screen your project has.",
 	readyMarketing:
-		"writes your marketing plan, after you approve the product plan.",
+		"writes your marketing plan, after the product plan is written.",
 	readyNote:
 		"Your team only adds its notes; nothing else in your project changes.",
 	readyStart: "Start",
@@ -2648,7 +2537,7 @@ export const en = {
 	refuseCatervaficationStarted:
 		"Your team is already documenting this project.",
 	refuseCatervaficationNewProject:
-		"A new project's documenting sprint starts by itself once you approve its product plan.",
+		"A new project's documenting sprint starts by itself once its product plan is accepted.",
 	refuseCatervaficationNoPm:
 		"Your Product Manager is paused. Resume them on the Team page, then start.",
 	refuseCatervaficationNoWriters:

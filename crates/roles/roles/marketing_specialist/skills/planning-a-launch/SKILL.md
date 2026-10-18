@@ -6,9 +6,8 @@ description: Use when something new is about to reach customers, such as a produ
 # Planning a launch
 
 A launch plan is a short list of dated actions, each with an owner, so nobody wonders what
-happens next. You write the plan; a social post in the owner's approved marketing plan goes out
-through `catervas_schedule_post`, any other post waits for the owner, and otherwise the human publishes
-and sends.
+happens next. You write the plan; a social post goes out through `catervas_schedule_post`, in the
+owner's approved marketing plan or outside it, and otherwise the human publishes and sends.
 
 ## 1. Fix the audience and the one action
 
@@ -34,10 +33,10 @@ Put a date on every line. Keep each line to one action.
 
 ## 4. Mark who does each line
 
-A social post in the owner's approved marketing plan goes out through `catervas_schedule_post`; any
-other post waits for the owner; an email is a draft the human sends; otherwise the human publishes.
+A social post goes out through `catervas_schedule_post`, with a Stop on Today; an email is a draft
+the human sends; otherwise the human publishes.
 You never pay. Mark every line that goes out to the world as "the plan sends this" for a post in the
-approved plan, "the owner decides this" for any other post, and "the human publishes this"
+approved plan, "Catervas sends this" for any other post, and "the human publishes this"
 otherwise, and have the finished words ready. Do not write a line as if it had already gone out.
 
 ## 5. Say what could go wrong

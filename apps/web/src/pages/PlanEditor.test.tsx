@@ -168,9 +168,7 @@ describe("plan editor", () => {
 		expect(params.contract.budget).toEqual({ max_cost_usd: 14 });
 		await s.reply(save, { saved: true, back_to_refining: true });
 		expect(
-			await screen.findByText(
-				"Saved. Mira checks the plan again, then it comes back to you to approve.",
-			),
+			await screen.findByText("Saved. Mira checks the plan again."),
 		).toBeTruthy();
 		// A save refuses stale fields, so the page reads the plan again.
 		await waitFor(() => expect(gets(s)).toHaveLength(4));

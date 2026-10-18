@@ -46,8 +46,8 @@ pub struct PromptInput<'a> {
     /// What the human said for this session (an answer, or an escalation's message), when they
     /// said something.
     pub human_message: Option<&'a str>,
-    /// The `This session` section, when it is not the purpose's own: the judgment session's
-    /// `JUDGMENT_INSTRUCTION`, or a ceremony's entry in `CEREMONY_INSTRUCTIONS`.
+    /// The `This session` section, when it is not the purpose's own: a ceremony's entry in
+    /// `CEREMONY_INSTRUCTIONS`.
     pub closing: Option<&'a str>,
     /// The connectors the session is given, by name, whose every answer is untrusted (8.6).
     pub connectors: &'a [String],
@@ -135,8 +135,8 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
         SessionPurpose::Explore,
         "This session explores the task before anything changes: work out what its screens show \
          now and what should change, and change nothing. End the session by calling \
-         `catervas_propose_design_plan` with your plan; the Product Manager approves it before you \
-         change anything.",
+         `catervas_propose_design_plan` with your plan; Catervas records it, and your next session carries \
+         it out.",
     ),
     (
         SessionPurpose::Implement,
@@ -219,33 +219,6 @@ pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 4] = [
          by all.",
     ),
 ];
-
-/// The `This session` section of the judge's check of a contract's plan (5.3), a `refine`
-/// session given `catervas_record_judgment` alone.
-pub const JUDGMENT_INSTRUCTION: &str = "This session checks the plan of the contract above, \
-     which already passes the governor's structural rules. Answer each question of the message you \
-     were given, honestly: yes only when the plan passes it, not just when something would run. \
-     End the session by calling `catervas_record_judgment` with one answer to each question, in the \
-     order they are numbered, and your overall reason, which the Product Manager rewrites from \
-     when any answer is no.";
-
-/// The closing of the Product Manager's session given `catervas_decide_design_plan` alone.
-pub const DESIGN_DECISION_INSTRUCTION: &str = "This session decides the UI/UX Designer's plan \
-     for the task above, which the message you were given holds. Approve it when it keeps to the \
-     contract and says what it will change and what it leaves alone; return it otherwise, saying \
-     what to change. End the session by calling `catervas_decide_design_plan` with your decision \
-     and your reason.";
-
-/// The closing of the Product Manager's session given `catervas_decide_data_pipeline` alone.
-pub const PIPELINE_DECISION_INSTRUCTION: &str = "This session decides one request of the \
-     Procurement Specialist for a source of data, which the message you were given holds. \
-     Approve it only when it would change a decision the team makes this sprint or the next, it \
-     costs nothing, and it sends none of the project's data out: Catervas refuses an approval \
-     otherwise. Decline what the team can do without, saying what to use instead. Pass to the \
-     owner, by escalating, what costs money or sends data out and still seems worth asking, \
-     and what needs an account the team does not have. End the session by calling \
-     `catervas_decide_data_pipeline` with your decision and your reason in one line the owner can \
-     read.";
 
 /// The system prompt of one session: the sections of `PROMPT_SECTIONS`, in that order.
 ///

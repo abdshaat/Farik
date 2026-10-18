@@ -112,7 +112,6 @@ mod tests {
             approval: None,
             plan: None,
             post: None,
-            site: None,
             order: None,
             pipeline: Some(PipelineAsk {
                 pipeline: 4,

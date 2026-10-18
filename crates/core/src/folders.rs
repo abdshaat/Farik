@@ -2,7 +2,7 @@
 //! (`docs/SPEC.md` section 5.17, ADR 0051). Pure: paths in, answers out.
 
 use crate::contract::TaskId;
-use crate::governor::paths::{PathRefusal, check_allowed_paths, normalise, stays_within};
+use crate::governor::paths::normalise;
 use crate::team::{Role, plain_role};
 
 /// Each role that owns a folder, with its folder, in the order the Team rules list them. The Finance
@@ -128,6 +128,19 @@ pub fn plan_stem(epic: &str) -> String {
     format!("docs/catervas/architecture/plans/{epic}")
 }
 
+/// Whether the task writes an epic's plan: its `plan` is set and its `allowed_paths` are exactly
+/// that.
+#[must_use]
+pub fn is_plan_task(contract: &crate::contract::TaskContract) -> bool {
+    contract.plan.as_ref().is_some_and(|own| {
+        contract
+            .allowed_paths
+            .iter()
+            .map(ToString::to_string)
+            .eq([own.to_string()])
+    })
+}
+
 /// Whether the path is the Architect's plan for the epic, in either format.
 #[must_use]
 pub fn is_plan_of(path: &str, epic: &str) -> bool {
@@ -211,36 +224,6 @@ pub const PRODUCT_PLAN_STEMS: [&str; 2] = [
     "docs/catervas/product/spec",
     "docs/catervas/product/roadmap",
 ];
-
-/// Whether both documents of [`PRODUCT_PLAN_STEMS`], each as `.md` or `.html`, are among the
-/// paths on the integration branch, compared after `normalise` and with letter case.
-#[must_use]
-pub fn product_plan_approved(on_integration_branch: &[String]) -> bool {
-    let present: Vec<String> = on_integration_branch
-        .iter()
-        .filter_map(|path| normalise(path))
-        .collect();
-    PRODUCT_PLAN_STEMS
-        .iter()
-        .all(|stem| present.iter().any(|path| stem_of(path) == Some(stem)))
-}
-
-/// Whether a task with these `allowed_paths` may change a document of [`OWNER_ACCEPTED_STEMS`], in
-/// either format: a path passes the Definition of Done's own test of a diff
-/// (`check_allowed_paths`), or a glob does not compile, which fails closed.
-#[must_use]
-pub fn may_change_an_owner_document(allowed_paths: &[String]) -> bool {
-    OWNER_ACCEPTED_STEMS.iter().any(|stem| {
-        [DocumentFormat::Markdown, DocumentFormat::Html]
-            .into_iter()
-            .any(|format| {
-                !matches!(
-                    check_allowed_paths(&[with_format(stem, format)], allowed_paths),
-                    Err(PathRefusal::Violations(_))
-                )
-            })
-    })
-}
 
 /// A path `catervas_write_folder_doc` may write: normalised, and whether the owner approves it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -595,56 +578,6 @@ pub fn stale_line(stale_twins: &[String]) -> Option<String> {
     })
 }
 
-/// What a role may read of the project (`docs/SPEC.md` section 5.6): everything, or only the
-/// listed read paths, each `<folder>/**`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReadAccess {
-    /// The whole project.
-    Open,
-    /// Only what these read paths, each `<folder>/**`, hold.
-    Only(Vec<String>),
-}
-
-/// What the role may read: the Marketing Specialist reads the Product Manager's folder and its own,
-/// every other role (the human included) reads the project.
-#[must_use]
-pub fn read_access(role: Role) -> ReadAccess {
-    if role != Role::MarketingSpecialist {
-        return ReadAccess::Open;
-    }
-    ReadAccess::Only(
-        [Role::ProductManager, Role::MarketingSpecialist]
-            .into_iter()
-            .filter_map(role_folder)
-            .map(|folder| format!("{folder}/**"))
-            .collect(),
-    )
-}
-
-impl ReadAccess {
-    /// Whether every path the glob could match is readable.
-    #[must_use]
-    pub fn allows(&self, glob: &str) -> bool {
-        match self {
-            Self::Open => true,
-            Self::Only(reads) => reads.iter().any(|read| stays_within(glob, read)),
-        }
-    }
-
-    /// The folders it allows, each without its `**`, as the sentence names them.
-    #[must_use]
-    pub fn named(&self) -> String {
-        match self {
-            Self::Open => "everything".to_string(),
-            Self::Only(reads) => reads
-                .iter()
-                .map(|read| read.strip_suffix("**").unwrap_or(read))
-                .collect::<Vec<_>>()
-                .join(" and "),
-        }
-    }
-}
-
 /// The Team rules' line about folders (`docs/SPEC.md` 5.17): each folder of an active role, and of
 /// the reader's own, in table order; which one is the reader's; how to read them; and, in a
 /// project folder, the reader's member folders.
@@ -662,13 +595,7 @@ pub fn folders_line(role: Role, active_roles: &[Role], members: &[&str]) -> Stri
         || "You have none: write none of them.".to_string(),
         |folder| format!("Yours is {folder}/: write no other folder named here."),
     );
-    let reading = match read_access(role) {
-        ReadAccess::Open => "Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.".to_string(),
-        held @ ReadAccess::Only(_) => format!(
-            "Read only {}: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.",
-            held.named()
-        ),
-    };
+    let reading = "Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.";
     let own = member_folders_sentence(role, members);
     format!("- folders: {}. {yours} {reading}{own}", listed.join(", "))
 }
@@ -856,44 +783,16 @@ fn compare<'a>(old: &[&'a str], new: &[&'a str]) -> Vec<(LineChange, &'a str)> {
 mod tests {
     use super::{
         DocumentFormat, FolderDocPathRefusal, FormatRefusal, OWNER_ACCEPTED_STEMS, ROLE_FOLDERS,
-        ReadAccess, agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
+        agent_twin, check_document_format, check_folder_doc_path, folder_doc_author,
         folder_doc_message, folder_of, folders_line, format_line, human_of_twin, is_human_document,
-        is_plan_of, pair_changed_alone, plan_stem, product_plan_approved, read_access, role_folder,
-        stem_of, with_format,
+        is_plan_of, pair_changed_alone, plan_stem, role_folder, stem_of, with_format,
     };
-    use super::{
-        LineChange, ShownLine, artifact_marks, changed_lines, is_heading,
-        may_change_an_owner_document,
-    };
+    use super::{LineChange, ShownLine, artifact_marks, changed_lines, is_heading};
     use super::{
         Named, OwnerEditRefusal, check_owner_edit, document_name, document_order, named_in_subject,
         plain_name, stale_line, twin_is_stale,
     };
     use crate::team::Role;
-
-    #[test]
-    fn the_plan_is_approved_when_both_documents_are_there() {
-        let paths = |list: &[&str]| list.iter().map(|p| (*p).to_string()).collect::<Vec<_>>();
-        let spec = "docs/catervas/product/spec.md";
-        let roadmap = "docs/catervas/product/roadmap.md";
-        assert!(product_plan_approved(&paths(&[spec, roadmap])));
-        assert!(product_plan_approved(&paths(&[roadmap, "README.md", spec])));
-        assert!(product_plan_approved(&paths(&[
-            "./docs/catervas/product/spec.md",
-            roadmap
-        ])));
-        assert!(!product_plan_approved(&[]));
-        assert!(!product_plan_approved(&paths(&[spec])));
-        assert!(!product_plan_approved(&paths(&[roadmap])));
-        assert!(!product_plan_approved(&paths(&[
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/product/roadmap.agent.md"
-        ])));
-        assert!(!product_plan_approved(&paths(&[
-            "Docs/Catervas/Product/spec.md",
-            roadmap
-        ])));
-    }
 
     #[test]
     fn names_an_epics_plan() {
@@ -1256,62 +1155,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_marketing_specialist_s_reads_are_held() {
-        assert_eq!(
-            read_access(Role::MarketingSpecialist),
-            ReadAccess::Only(vec![
-                "docs/catervas/product/**".to_string(),
-                "docs/catervas/marketing/**".to_string()
-            ])
-        );
-        for role in [
-            Role::ProductManager,
-            Role::ScrumMaster,
-            Role::Architect,
-            Role::SoftwareDeveloper,
-            Role::UiUxDesigner,
-            Role::FinanceSpecialist,
-            Role::ProcurementSpecialist,
-            Role::Human,
-        ] {
-            assert_eq!(read_access(role), ReadAccess::Open, "{role:?}");
-        }
-    }
-
-    #[test]
-    fn a_held_reader_reads_its_folders_alone() {
-        let held = read_access(Role::MarketingSpecialist);
-        for glob in [
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/marketing/plans/MP-1.md",
-        ] {
-            assert!(held.allows(glob), "{glob}");
-        }
-        for glob in [
-            "docs/catervas/architecture/overview.md",
-            "README.md",
-            "docs/catervas/*.md",
-        ] {
-            assert!(!held.allows(glob), "{glob}");
-        }
-        for glob in [
-            "docs/catervas/product/spec.agent.md",
-            "docs/catervas/marketing/plans/MP-1.md",
-            "docs/catervas/architecture/overview.md",
-            "README.md",
-            "docs/catervas/*.md",
-        ] {
-            assert!(ReadAccess::Open.allows(glob), "{glob}");
-        }
-        assert_eq!(
-            held.named(),
-            "docs/catervas/product/ and docs/catervas/marketing/"
-        );
-        assert_eq!(ReadAccess::Open.named(), "everything");
-    }
-
-    #[test]
-    fn tells_the_marketing_specialist_what_it_reads() {
+    fn tells_the_marketing_specialist_to_read_any_folder() {
         assert_eq!(
             folders_line(
                 Role::MarketingSpecialist,
@@ -1322,7 +1166,7 @@ mod tests {
                 ],
                 &[]
             ),
-            "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read only docs/catervas/product/ and docs/catervas/marketing/: Catervas refuses a read anywhere else, and a search that names no path. Where a document there has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
+            "- folders: docs/catervas/product/ (Product Manager), docs/catervas/architecture/ (Architect), docs/catervas/marketing/ (Marketing Specialist). Yours is docs/catervas/marketing/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents."
         );
     }
 
@@ -1526,35 +1370,6 @@ mod tests {
         assert_eq!(changed_lines(&before, &after), expected);
     }
 
-    #[test]
-    fn knows_which_paths_may_change_the_product_plan() {
-        let globs = |globs: &[&str]| globs.iter().map(ToString::to_string).collect::<Vec<_>>();
-        for may in [
-            &["docs/catervas/product/**"][..],
-            &["docs/catervas/product/*.md"],
-            &["docs/catervas/product/spec.md"],
-            &["docs/catervas/product/{spec,notes}.md"],
-            &["**"],
-            &["docs/**"],
-            &["docs/["],
-        ] {
-            assert!(may_change_an_owner_document(&globs(may)), "{may:?}");
-        }
-        for may_not in [
-            &["docs/catervas/product/reports/**"][..],
-            &["docs/catervas/product/spec.agent.md"],
-            &["docs/catervas/product"],
-            &["Docs/Catervas/Product/spec.md"],
-            &["src/**"],
-            &[],
-        ] {
-            assert!(
-                !may_change_an_owner_document(&globs(may_not)),
-                "{may_not:?}"
-            );
-        }
-    }
-
     fn list(paths: &[&str]) -> Vec<String> {
         paths.iter().map(|path| (*path).to_string()).collect()
     }
@@ -1611,19 +1426,6 @@ mod tests {
             pair_changed_alone(&[md.clone(), twin.clone()], &[]),
             [md, twin]
         );
-    }
-
-    #[test]
-    fn owner_documents_and_product_plan_by_stem() {
-        assert!(may_change_an_owner_document(&list(&[
-            "docs/catervas/product/spec.html"
-        ])));
-        let plan = |paths: &[&str]| product_plan_approved(&list(paths));
-        assert!(plan(&[
-            "docs/catervas/product/spec.html",
-            "docs/catervas/product/roadmap.md"
-        ]));
-        assert!(!plan(&["docs/catervas/product/spec.html"]));
     }
 
     #[test]

@@ -822,9 +822,8 @@ pub(super) fn write_sheet(call: &Call<'_>, input: &WriteSheetInput) -> Result<Va
 pub(crate) struct ReadSheetInput {
     /// The workbook's path inside your folder, as for `catervas_write_sheet`.
     path: String,
-    /// Only the Finance Specialist, and only with `path` `vendors.xlsx`: read the procurement
-    /// register, `procurement`, in place of a workbook of your own folder. Leave it out to read
-    /// your own folder.
+    /// Name `finance` or `procurement` to read that private folder's workbook. Leave it out to read
+    /// your own folder, or, in a session about a task in a private folder, that task's.
     #[serde(default)]
     folder: Option<OtherFolder>,
     /// The one sheet to read; without it, every sheet.
@@ -842,16 +841,16 @@ pub(crate) struct ReadSheetInput {
     baseline: bool,
 }
 
-/// A folder other than the caller's own that `catervas_read_sheet` may read (6.10).
+/// A private folder `catervas_read_sheet` may be asked to read, whoever the caller is (6.6, 6.10,
+/// ADR 0061).
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum OtherFolder {
-    /// The Procurement Specialist's folder: its register, `vendors.xlsx`, and nothing else in it.
+    /// The Finance Specialist's folder: its books.
+    Finance,
+    /// The Procurement Specialist's folder: its register, comparisons and orders.
     Procurement,
 }
-
-/// The one workbook of the procurement folder the Finance Specialist reads.
-const REGISTER: &str = "vendors.xlsx";
 
 /// The rows a read gives of each sheet when it is not told how many.
 const DEFAULT_READ_ROWS: u32 = 200;
@@ -863,31 +862,24 @@ const SHEETS_CAP: usize = 256 * 1024;
 /// about it, which can quote the file) a refusal quotes.
 const NAMES_CAP: usize = 2 * 1024;
 
-/// The folder a `catervas_read_sheet` call reads in (spec 6.6, 6.10): the procurement folder, for the
-/// Finance Specialist alone, when `other` asks for it; in a verify session about a task whose
-/// assignee's role has a private folder, that folder, for the task's reviewer and for the Product
-/// Manager, who accepts the task, whatever folder the caller's own role has; and otherwise that of
-/// the caller's own role, in any session.
+/// The folder a `catervas_read_sheet` call reads in (spec 6.6, 6.10, ADR 0061), in this order: the
+/// private folder `other` names, for any role; in any session about a task whose assignee's role has
+/// a private folder, that folder, whatever folder the caller's own role has; and otherwise that of
+/// the caller's own role. Only reading is open: writes stay the owner's.
 fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'static str, ToolError> {
-    if other == Some(OtherFolder::Procurement) {
-        return match private_folder(Role::ProcurementSpecialist) {
-            Some(folder) if call.role() == Role::FinanceSpecialist => Ok(folder),
-            _ => Err(sheet_refused(
-                "only the Finance Specialist names the procurement folder, to read its register; \
-                 leave `folder` out to read your own, or the folder of the task you review",
-            )),
-        };
+    let named = match other {
+        Some(OtherFolder::Finance) => private_folder(Role::FinanceSpecialist),
+        Some(OtherFolder::Procurement) => private_folder(Role::ProcurementSpecialist),
+        None => None,
+    };
+    if let Some(folder) = named {
+        return Ok(folder);
     }
-    // The reviewed task's folder comes before the caller's own: a reviewer that has a folder of its
-    // own reads the task's, and not its own register under the same name.
-    if let Some(task) = &call.context.task_id
-        && call.context.purpose == SessionPurpose::Verify
-    {
+    // The task's folder comes before the caller's own: a session about a task that works in a
+    // private folder reads it, and not the caller's own register under the same name.
+    if let Some(task) = &call.context.task_id {
         let (contract, _) = call.contract(task)?;
-        let reviews = contract.reviewer.as_deref() == Some(call.agent_id());
-        if let Some(folder) = private_folder(contract.assignee_role)
-            && (reviews || call.role() == Role::ProductManager)
-        {
+        if let Some(folder) = private_folder(contract.assignee_role) {
             return Ok(folder);
         }
     }
@@ -895,8 +887,7 @@ fn folder_to_read(call: &Call<'_>, other: Option<OtherFolder>) -> Result<&'stati
         return Ok(folder);
     }
     Err(sheet_refused(
-        "only a role with a private folder reads a workbook, and the reviewer of a task of such a \
-         role, and the Product Manager who accepts it, in a verify session about it",
+        "name `folder`: finance or procurement, to read that private folder's workbook",
     ))
 }
 
@@ -1041,24 +1032,12 @@ fn page_of(
 /// and the services', never an instruction.
 pub(super) fn read_sheet(call: &Call<'_>, input: &ReadSheetInput) -> Result<Value, ToolError> {
     let folder = folder_to_read(call, input.folder)?;
-    if input.folder.is_some() {
-        // The register is the one thing a role reads of another's folder, as it is now.
-        if input.baseline {
-            return Err(sheet_refused(
-                "`baseline` reads the copy taken for a task in your own folder, and not the \
-                 procurement folder's",
-            ));
-        }
-        if input.path != REGISTER {
-            return Err(refused(
-                "private_path_refused",
-                format!(
-                    "{:?} is not the register: the procurement folder's {REGISTER} is the one \
-                     workbook there that you read",
-                    input.path
-                ),
-            ));
-        }
+    if input.folder.is_some() && input.baseline {
+        // A copy is the copy of a task in the caller's own folder, not of a folder it names.
+        return Err(sheet_refused(
+            "`baseline` reads the copy taken for a task in your own folder, and not the folder \
+             `folder` names",
+        ));
     }
     let folder = if input.baseline {
         baseline_folder(call, folder)?
@@ -2465,6 +2444,23 @@ mod tests {
                 chat.purpose = SessionPurpose::Chat;
                 chat
             }),
+            // Any session about a task in a private folder reads it (ADR 0061).
+            (
+                "a bystander of the finance task",
+                context("dev-a", "CTV-3", SessionPurpose::Verify),
+            ),
+            (
+                "a plan session about a finance task",
+                context("pm", "CTV-1", SessionPurpose::Plan),
+            ),
+            (
+                "an implement session of a reviewer",
+                context("dev-b", "CTV-3", SessionPurpose::Implement),
+            ),
+            (
+                "a verify session of the Marketing Specialist about a finance task",
+                context("kai", "CTV-1", SessionPurpose::Verify),
+            ),
         ] {
             let answer = run(&context, "catervas_read_sheet", input.clone())
                 .unwrap_or_else(|error| panic!("{who} reads: {error}"));
@@ -2478,22 +2474,6 @@ mod tests {
             (
                 "the Developer's reviewer of its own task",
                 context("dev-b", "CTV-2", SessionPurpose::Verify),
-            ),
-            (
-                "a bystander of the finance task",
-                context("dev-a", "CTV-3", SessionPurpose::Verify),
-            ),
-            (
-                "a plan session",
-                context("pm", "CTV-1", SessionPurpose::Plan),
-            ),
-            (
-                "an implement session of a reviewer",
-                context("dev-b", "CTV-3", SessionPurpose::Implement),
-            ),
-            (
-                "a verify session of the Marketing Specialist",
-                context("kai", "CTV-1", SessionPurpose::Verify),
             ),
             ("a session about no task", project.context("pm", None)),
         ] {
@@ -2627,106 +2607,89 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn finance_reads_the_register_and_nothing_else_there() {
-        let project = a_procurement_project("sheets-finance-register");
+    fn any_role_reads_either_private_folder() {
+        let project = a_procurement_project("sheets-any-role-reads");
         write_register(&project, &the_register()).expect("the register is written");
-        // Catervas writes an order's workbook, as the agent cannot.
+        write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("the books");
+        // Catervas writes an order's workbook and a comparison workbook, as the agent cannot.
         let held = procurement_folder(&project);
         write_new_workbook(
             &held,
-            &held.join("orders/PO-1.xlsx"),
-            &[SheetInput::new("Order", vec![vec![CellInput::text("a")]])],
+            &held.join("comparisons/laptops.xlsx"),
+            &[SheetInput::new("Laptops", vec![vec![CellInput::text("a")]])],
         )
-        .expect("an order is written");
-        let evaluations = procurement_folder(&project).join("evaluations");
-        fs::create_dir_all(&evaluations).expect("the folder");
-        fs::write(evaluations.join("x.md"), "a comparison").expect("a note");
-        write(&project, &one_sheet("books.xlsx", &json!([["rent", 2]]))).expect("the books");
-        let finance =
-            |input: Value| project.call("fin", Some("CTV-1"), "catervas_read_sheet", input);
+        .expect("a comparison is written");
+        let read = |who: &str, task: Option<&str>, input: Value| {
+            project.call(who, task, "catervas_read_sheet", input)
+        };
 
-        let answer = finance(json!({ "folder": "procurement", "path": "vendors.xlsx" }))
-            .expect("the register is read");
-        assert_eq!(pages(&answer)[0]["rows"][1], json!(["Acme", 12]));
-        // Nothing else there: a note, another workbook, a path that climbs, the history.
+        let books = read(
+            "pm",
+            Some("CTV-1"),
+            json!({ "folder": "finance", "path": "books.xlsx" }),
+        )
+        .expect("the Product Manager reads the books");
+        assert_eq!(pages(&books)[0]["rows"][1], json!(["rent", 2]));
+        let vendors = read(
+            "pm",
+            Some("CTV-1"),
+            json!({ "folder": "procurement", "path": "vendors.xlsx" }),
+        )
+        .expect("the Product Manager reads the register");
+        assert_eq!(pages(&vendors)[0]["rows"][1], json!(["Acme", 12]));
+        let laptops = read(
+            "dev-a",
+            Some("CTV-2"),
+            json!({ "folder": "procurement", "path": "comparisons/laptops.xlsx" }),
+        )
+        .expect("a Developer reads any workbook of the procurement folder");
+        assert_eq!(pages(&laptops)[0]["rows"][0], json!(["a"]));
+        // The Finance Specialist reads the procurement folder, and the Procurement Specialist the
+        // finance folder.
+        read(
+            "fin",
+            Some("CTV-1"),
+            json!({ "folder": "procurement", "path": "vendors.xlsx" }),
+        )
+        .expect("the Finance Specialist reads the register");
+        read(
+            "proc",
+            Some("CTV-3"),
+            json!({ "folder": "finance", "path": "books.xlsx" }),
+        )
+        .expect("the Procurement Specialist reads the books");
+
+        // With no `folder`, a role with no private folder, in a session about no task, names none.
+        let reason = refusal_of(read("dev-a", None, json!({ "path": "books.xlsx" })));
+        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+        // No read leaves the folder for the rest of `.catervas/local/`, or reaches the history.
         for path in [
-            "evaluations/x.md",
-            "orders/PO-1.xlsx",
-            "other.xlsx",
+            "../settings.yaml",
             "../finance/books.xlsx",
             ".history/vendors.xlsx",
-            "Vendors.xlsx",
         ] {
-            let reason = refusal_of(finance(json!({ "folder": "procurement", "path": path })));
+            let reason = refusal_of(read(
+                "dev-a",
+                Some("CTV-2"),
+                json!({ "folder": "procurement", "path": path }),
+            ));
             assert!(
                 reason.starts_with("private_path_refused: "),
                 "{path}: {reason}"
             );
         }
-        // No copy of a task is read there, and without `folder` its own folder is read still.
-        let reason = refusal_of(finance(
-            json!({ "folder": "procurement", "path": "vendors.xlsx", "baseline": true }),
+        let reason = refusal_of(read(
+            "dev-a",
+            Some("CTV-2"),
+            json!({ "folder": "finance", "path": "../settings.yaml" }),
         ));
-        assert!(reason.starts_with("sheet_refused: "), "{reason}");
-        let books = finance(json!({ "path": "books.xlsx" })).expect("its own books");
-        assert_eq!(pages(&books)[0]["rows"][1], json!(["rent", 2]));
-        // Nothing is written there: `catervas_write_sheet` takes no folder, and what it writes lands
-        // in the finance folder.
-        let mut input = the_register();
-        input["folder"] = json!("procurement");
-        let refused = project.call("fin", Some("CTV-1"), "catervas_write_sheet", input);
-        assert!(
-            matches!(&refused, Err(ToolError::InvalidInput { .. })),
-            "{refused:?}"
-        );
-        let before = files_under(&procurement_folder(&project));
-        write(&project, &the_register()).expect("the finance folder's own register");
-        assert_eq!(files_under(&procurement_folder(&project)), before);
-        assert!(folder(&project).join("vendors.xlsx").is_file());
-    }
-
-    #[test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn other_roles_never_reach_the_register() {
-        let project = a_procurement_project("sheets-register-closed");
-        write_register(&project, &the_register()).expect("the register is written");
-        let context = |who: &str, task: Option<&str>, purpose: SessionPurpose| {
-            let mut context = project.context(who, task);
-            context.purpose = purpose;
+        assert!(reason.starts_with("private_path_refused: "), "{reason}");
+        // A reviewer reads the reviewed task's folder with no `folder`, as before.
+        let verifying = {
+            let mut context = project.context("pm", Some("CTV-3"));
+            context.purpose = SessionPurpose::Verify;
             context
         };
-        let asking = json!({ "folder": "procurement", "path": "vendors.xlsx" });
-        for (who, context) in [
-            (
-                "the Product Manager",
-                context("pm", Some("CTV-1"), SessionPurpose::Implement),
-            ),
-            (
-                "a Developer",
-                context("dev-a", Some("CTV-2"), SessionPurpose::Implement),
-            ),
-            (
-                "the Marketing Specialist",
-                context("kai", None, SessionPurpose::Chat),
-            ),
-            (
-                "the Procurement Specialist, whose own folder it reads without asking",
-                context("proc", Some("CTV-3"), SessionPurpose::Implement),
-            ),
-            (
-                "the Product Manager reviewing a procurement task",
-                context("pm", Some("CTV-3"), SessionPurpose::Verify),
-            ),
-            (
-                "the reviewer of a Developer's task",
-                context("dev-b", Some("CTV-2"), SessionPurpose::Verify),
-            ),
-        ] {
-            let reason = refusal_of(run(&context, "catervas_read_sheet", asking.clone()));
-            assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
-        }
-        // A reviewer's read resolves against the reviewed task's own folder, with no `folder`.
-        let verifying = context("pm", Some("CTV-3"), SessionPurpose::Verify);
         let answer = run(
             &verifying,
             "catervas_read_sheet",
@@ -2734,17 +2697,12 @@ mod tests {
         )
         .expect("the reviewer reads the register of the task it reviews");
         assert_eq!(pages(&answer)[0]["rows"][1], json!(["Acme", 12]));
-        // Another folder than the one `folder` names is no value of it.
-        let finance = project.call(
-            "fin",
-            Some("CTV-1"),
-            "catervas_read_sheet",
-            json!({ "folder": "finance", "path": "vendors.xlsx" }),
-        );
-        assert!(
-            matches!(&finance, Err(ToolError::InvalidInput { .. })),
-            "{finance:?}"
-        );
+        // Writing stays the owner's: no other role writes either folder.
+        for (who, task) in [("pm", "CTV-1"), ("dev-a", "CTV-2")] {
+            let reason =
+                refusal_of(project.call(who, Some(task), "catervas_write_sheet", the_register()));
+            assert!(reason.starts_with("sheet_refused: "), "{who}: {reason}");
+        }
     }
 
     /// The founder's rule (readiness refuses any reviewer of a private-folder task but the Product
@@ -2810,13 +2768,15 @@ mod tests {
             )
             .expect("its own register");
         assert_eq!(pages(&own)[0]["rows"][1], json!(["Acme", 12]));
-        // `folder` is still the Finance Specialist's alone.
-        let reason = refusal_of(run(
+        // `folder` names a folder for any role (ADR 0061): the register, with the reviewer's own
+        // folder named.
+        let named = run(
             &verifying,
             "catervas_read_sheet",
             json!({ "folder": "procurement", "path": "vendors.xlsx" }),
-        ));
-        assert!(reason.starts_with("sheet_refused: "), "{reason}");
+        )
+        .expect("the register is read by name");
+        assert_eq!(pages(&named)[0]["rows"][1], json!(["Acme", 12]));
     }
 
     /// The register is read as it is now: a copy is the copy of a task in the caller's own folder,
@@ -2840,7 +2800,7 @@ mod tests {
         let reason = refusal_of(project.call("fin", Some("CTV-3"), "catervas_read_sheet", asking));
         assert!(reason.starts_with("sheet_refused: "), "{reason}");
         assert!(
-            reason.contains("in your own folder, and not the procurement folder's"),
+            reason.contains("in your own folder, and not the folder `folder` names"),
             "{reason}"
         );
     }

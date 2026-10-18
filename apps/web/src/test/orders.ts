@@ -4,8 +4,8 @@
 
 import { vi } from "vitest";
 import type { FakeSocket } from "./fake-socket.ts";
+import { at, EFFECTIVE, MARKUP, NOW, TEAM } from "./procurementTeam.ts";
 import { answerQuery, answerStatus, renderApp } from "./render-app.tsx";
-import { at, EFFECTIVE, MARKUP, NOW, TEAM } from "./sites.ts";
 
 export { at, EFFECTIVE, MARKUP, NOW, TEAM };
 
