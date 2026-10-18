@@ -1400,6 +1400,36 @@ pub(super) fn suggested() -> Result<Vec<Agent>, Failure> {
         .collect()
 }
 
+/// An agent the saved team does not have yet gets its role's shipped persona when it came with
+/// none, and a UI/UX Designer the built-in browser when it came with no connectors, as the
+/// suggested team's agents have them (ADR 0069). An agent already saved is never touched, so a
+/// persona the owner cleared stays cleared.
+fn with_role_defaults(before: &Team, wire: &mut Value) -> Result<(), Failure> {
+    let Some(agents) = wire.get_mut("agents").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    for agent in agents {
+        let id = agent["id"].as_str().unwrap_or_default();
+        if before.agents.iter().any(|saved| saved.id.as_str() == id) {
+            continue;
+        }
+        let Ok(role) = serde_json::from_value::<Role>(agent["role"].clone()) else {
+            continue;
+        };
+        if agent["persona"]
+            .as_str()
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            let shipped = load_role(role).map_err(|e| internal(&e))?;
+            agent["persona"] = json!(shipped.persona);
+        }
+        if role == Role::UiUxDesigner && agent.get("mcp_servers").is_none() {
+            agent["mcp_servers"] = json!([{ "name": "playwright", "source": "builtin" }]);
+        }
+    }
+    Ok(())
+}
+
 /// `models.list`: the newest model of each family the prices name.
 fn models(deps: &ToolDeps) -> Result<Value, Failure> {
     let models: Vec<Value> = newest(deps)?
@@ -1640,11 +1670,13 @@ fn code_of(error: &ValidationError) -> &'static str {
 /// seen work from is retired rather than removed, except in `setup`, whose starter team is
 /// replaced.
 fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), Refused> {
-    let mut after = validate_team(wire).map_err(Refused::Errors)?;
     let before = deps
         .files
         .read_team()
         .map_err(|e| Refused::Failed(internal(&e)))?;
+    let mut wire = wire.clone();
+    with_role_defaults(&before, &mut wire).map_err(Refused::Failed)?;
+    let mut after = validate_team(&wire).map_err(Refused::Errors)?;
     keep_pins(&before, &mut after);
     let mut errors = Vec::new();
     for (index, agent) in after.agents.iter().enumerate() {
@@ -2610,6 +2642,63 @@ pub(super) mod tests {
             crate::skills::confirm_skill(&harness.project.deps, &level, "api-style", &hash, false)
                 .expect_err("refused at confirm");
         assert_eq!(confirmed.code(), "skill_file_not_text");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn gives_an_added_agent_its_roles_persona_and_a_designer_its_browser() {
+        let harness = Harness::new("rpc-role-defaults", |_| {});
+        let mut sent = team_file(&harness);
+        let template = sent["agents"][1].clone();
+        // An agent already saved whose persona the save leaves out stays without one.
+        sent["agents"][1]
+            .as_object_mut()
+            .expect("an agent")
+            .remove("persona");
+        for (id, role) in [("noor", "software_developer"), ("iris", "ui_ux_designer")] {
+            let mut agent = template.clone();
+            let fields = agent.as_object_mut().expect("an agent");
+            fields.remove("persona");
+            fields.remove("mcp_servers");
+            fields.remove("skills");
+            agent["id"] = json!(id);
+            agent["display_name"] = json!(id);
+            agent["role"] = json!(role);
+            sent["agents"].as_array_mut().expect("agents").push(agent);
+        }
+
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": sent }),
+            "emptyResult",
+        );
+
+        let saved = team_file(&harness);
+        let agent = |id: &str| {
+            saved["agents"]
+                .as_array()
+                .expect("agents")
+                .iter()
+                .find(|agent| agent["id"] == id)
+                .unwrap_or_else(|| panic!("{id} is saved"))
+                .clone()
+        };
+        let shipped = |role| super::load_role(role).expect("the role ships").persona;
+        assert_eq!(
+            agent("noor")["persona"],
+            json!(shipped(super::Role::SoftwareDeveloper))
+        );
+        assert_eq!(
+            agent("iris")["persona"],
+            json!(shipped(super::Role::UiUxDesigner))
+        );
+        assert_eq!(
+            agent("iris")["mcp_servers"],
+            json!([{ "name": "playwright", "source": "builtin" }])
+        );
+        assert_eq!(agent("noor").get("mcp_servers"), None);
+        assert_eq!(agent("dev-a").get("persona"), None, "a saved agent is left");
     }
 
     #[test]

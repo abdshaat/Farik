@@ -144,7 +144,7 @@ Tests:
   `playwright` as a built-in; an agent already saved whose persona the save leaves out stays without
   one. Fails first: noor has no persona.
 
-- [ ] `fix(runtime): an agent added to the team gets its role's persona`
+- [x] `fix(runtime): an agent added to the team gets its role's persona`
 
 ### Task 20: the credential line is honest
 
