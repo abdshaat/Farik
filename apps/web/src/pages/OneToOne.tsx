@@ -14,6 +14,12 @@ import type { ProductPlanState } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useEvents, useQuery } from "../app/store.ts";
 import { codeOf, sentence } from "../app/words.ts";
+import {
+	AttachButton,
+	AttachedChips,
+	chipsOf,
+	useAttachments,
+} from "../components/Attach.tsx";
 import { Feed } from "../components/Feed.tsx";
 import { Markdown } from "../components/Markdown.tsx";
 import { sendOnEnter } from "../components/MentionBox.tsx";
@@ -36,6 +42,8 @@ type ChatMessage = {
 	request: Proposal | null;
 	heard: HeardSummary | null;
 	sentAs: string | null;
+	/** The documents the owner attached, when they did. */
+	attachments?: { path: string; name: string }[];
 };
 type Because =
 	| "retired"
@@ -262,8 +270,10 @@ function fromEvent(e: Event, chat: string): ChatMessage | undefined {
 		inReplyTo?: number;
 		request?: Proposal;
 		heard?: HeardSummary;
+		attachments?: string[];
 	};
 	if (body.chat !== chat) return undefined;
+	const chips = chipsOf(body.attachments);
 	return {
 		seq: e.seq,
 		at: e.recordedAt,
@@ -273,6 +283,7 @@ function fromEvent(e: Event, chat: string): ChatMessage | undefined {
 		request: body.request ?? null,
 		heard: body.heard ?? null,
 		sentAs: null,
+		...(chips ? { attachments: chips } : {}),
 	};
 }
 
@@ -368,6 +379,9 @@ function Row({
 						<p className={`${channel.text} ${styles.lines}`}>
 							{renderMessageText(message.text, agents, [])}
 						</p>
+						{message.attachments && (
+							<AttachedChips items={message.attachments} />
+						)}
 						{message.sentAs && (
 							<p className={channel.muted}>
 								<Link to={`/tasks/${message.sentAs}`}>
@@ -530,8 +544,9 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
+	const attach = useAttachments();
 	const send = async (asTask: boolean) => {
-		if (!client) return;
+		if (!client || attach.busy) return;
 		// Counted in code points, as the runtime's `chars().count()`.
 		const length = [...text].length;
 		if (length > LIMIT) return setRefusal(t("chatsTooLong", { length }));
@@ -540,12 +555,18 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 		try {
 			const reply = await client.command({
 				command: "chat_message_post",
-				body: asTask
-					? { agentId: agent.id, text, asTask: true }
-					: { agentId: agent.id, text },
+				body: {
+					agentId: agent.id,
+					text,
+					...(asTask ? { asTask: true } : {}),
+					...(attach.paths.length ? { attachments: attach.paths } : {}),
+				},
 			});
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));
-			else setText("");
+			else {
+				setText("");
+				attach.clear();
+			}
 		} catch {
 			// The connection closed: the page shows that it is lost.
 		} finally {
@@ -564,6 +585,7 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 			>
 				{t("chatsLabel", { name: agent.displayName })}
 			</label>
+			<AttachedChips items={attach.items} onRemove={attach.remove} />
 			<div className={channel.row}>
 				<textarea
 					id="chat-post"
@@ -575,9 +597,15 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 					onKeyDown={sendOnEnter}
 				/>
 				<div className={styles.actions}>
-					<Button kind="primary" type="submit" busy={busy}>
+					<Button
+						kind="primary"
+						type="submit"
+						busy={busy}
+						disabled={attach.busy}
+					>
 						{t("chatsSend")}
 					</Button>
+					<AttachButton onPick={(file, kind) => void attach.add(file, kind)} />
 					<span className={styles.task}>
 						<Button
 							kind="secondary"
@@ -596,9 +624,9 @@ function Composer({ agent, wide }: { agent: Agent; wide: boolean }) {
 			<p id="chat-enter" className={wide ? channel.muted : channel.hidden}>
 				{t("chatsEnterSends")}
 			</p>
-			{refusal && (
+			{(refusal ?? attach.refusal) && (
 				<p role="alert" className={channel.alert}>
-					{refusal}
+					{refusal ?? attach.refusal}
 				</p>
 			)}
 		</form>

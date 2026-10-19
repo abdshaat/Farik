@@ -504,3 +504,9 @@ phone, then the total, the order's facts and the file. */
 .pipelineWhy p {
 	margin: 0;
 }
+
+.sendRow {
+	display: flex;
+	align-items: center;
+	gap: var(--catervas-space-2);
+}

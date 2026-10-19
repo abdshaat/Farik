@@ -170,6 +170,11 @@ export function FileDocument({
 			<div className={styles.head}>
 				<div className={styles.headText}>
 					<h2 className={styles.title}>{title}</h2>
+					{data.attached && (
+						<p className={styles.forTeam}>
+							{t("attachedFrom", { name: data.attached.name })}
+						</p>
+					)}
 					{draft ? (
 						pair && <p className={styles.changed}>{t("filesEditing")}</p>
 					) : (

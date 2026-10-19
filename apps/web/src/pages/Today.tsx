@@ -10,6 +10,11 @@ import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { codeOf } from "../app/words.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
+import {
+	AttachButton,
+	AttachedChips,
+	useAttachments,
+} from "../components/Attach.tsx";
 import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { type AdsAsk, AdsRow } from "./AdsRow.tsx";
@@ -592,15 +597,20 @@ function RequestBox({
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
+	const attach = useAttachments();
 	const send = async (e: FormEvent) => {
 		e.preventDefault();
-		if (!client) return;
+		if (!client || attach.busy) return;
 		setBusy(true);
 		setRefusal(undefined);
 		try {
-			const filed = (await client.call("request.file", { text })) as {
+			const filed = (await client.call("request.file", {
+				text,
+				...(attach.paths.length ? { attachments: attach.paths } : {}),
+			})) as {
 				taskId: string;
 			};
+			attach.clear();
 			navigate(`/requests/${filed.taskId}`);
 		} catch (error) {
 			// A coded refusal (the length one) is worded by its code; the store's own sentences as they are.
@@ -617,6 +627,7 @@ function RequestBox({
 					? t("requestLabelSolo", { name: soloName })
 					: t("requestLabel")}
 			</label>
+			<AttachedChips items={attach.items} onRemove={attach.remove} />
 			<div className={styles.prompt}>
 				<span aria-hidden="true">&gt;</span>
 				<textarea
@@ -634,18 +645,24 @@ function RequestBox({
 					? t("requestHintSolo", { name: soloName })
 					: t("requestHint", { name: pmName })}
 			</p>
-			{refusal && (
+			{(refusal ?? attach.refusal) && (
 				<p role="alert" className={styles.alert}>
-					{refusal}
+					{refusal ?? attach.refusal}
 				</p>
 			)}
-			<div>
+			<div className={styles.sendRow}>
 				{/* Without a connection the request cannot be filed: the button waits for one. */}
-				<Button kind="primary" type="submit" busy={busy} disabled={!client}>
+				<Button
+					kind="primary"
+					type="submit"
+					busy={busy}
+					disabled={!client || attach.busy}
+				>
 					{soloName
 						? t("requestSendSolo", { name: soloName })
 						: t("requestSend")}
 				</Button>
+				<AttachButton onPick={(file, kind) => void attach.add(file, kind)} />
 			</div>
 		</form>
 	);

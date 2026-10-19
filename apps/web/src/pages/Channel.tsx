@@ -6,6 +6,12 @@ import { useConnection } from "../app/connection.tsx";
 import { useEvents, useQuery } from "../app/store.ts";
 import { isStatus, movedWords, sentence } from "../app/words.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
+import {
+	AttachButton,
+	AttachedChips,
+	chipsOf,
+	useAttachments,
+} from "../components/Attach.tsx";
 import { Feed } from "../components/Feed.tsx";
 import { MentionBox } from "../components/MentionBox.tsx";
 import {
@@ -40,6 +46,8 @@ type Message = {
 	thread: string | null;
 	inReplyTo: number | null;
 	taskId: string | null;
+	/** The documents the owner attached, when they did. */
+	attachments?: { path: string; name: string }[];
 };
 
 const PAGE = 100;
@@ -49,9 +57,14 @@ const LIMIT = 2000;
 /** A `message.posted` event as the query would answer it. */
 function fromEvent(e: Event): Message | undefined {
 	if (e.kind !== "message.posted") return undefined;
-	const body = e.body as Omit<Message, "seq" | "at" | "taskId">;
+	const { attachments, ...body } = e.body as Omit<
+		Message,
+		"seq" | "at" | "taskId" | "attachments"
+	> & { attachments?: string[] };
+	const chips = chipsOf(attachments);
 	return {
 		...body,
+		...(chips ? { attachments: chips } : {}),
 		thread: body.thread ?? null,
 		inReplyTo: body.inReplyTo ?? null,
 		seq: e.seq,
@@ -366,6 +379,7 @@ function MessageRow({
 						<> {renderMessageText(task, agents, waiting)}</>
 					)}
 				</p>
+				{message.attachments && <AttachedChips items={message.attachments} />}
 			</div>
 		</li>
 	);
@@ -441,9 +455,10 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 	const [text, setText] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refusal, setRefusal] = useState<string>();
+	const attach = useAttachments();
 	const post = async (e: FormEvent) => {
 		e.preventDefault();
-		if (!client) return;
+		if (!client || attach.busy) return;
 		// Counted in code points, as the runtime's `chars().count()`.
 		const length = [...text].length;
 		if (length > LIMIT) return setRefusal(t("channelTooLong", { length }));
@@ -452,10 +467,15 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 		try {
 			const reply = await client.command({
 				command: "message_post",
-				body: { text },
+				body: attach.paths.length
+					? { text, attachments: attach.paths }
+					: { text },
 			});
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));
-			else setText("");
+			else {
+				setText("");
+				attach.clear();
+			}
 		} catch {
 			// The connection closed: the page shows that it is lost.
 		} finally {
@@ -470,6 +490,7 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 			>
 				{t(wide ? "channelPostLabel" : "channelPostPhone")}
 			</label>
+			<AttachedChips items={attach.items} onRemove={attach.remove} />
 			<div className={styles.row}>
 				<MentionBox
 					id="channel-post"
@@ -478,9 +499,10 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 					agents={agents}
 					describedBy="channel-enter channel-hint"
 				/>
-				<Button kind="primary" type="submit" busy={busy}>
+				<Button kind="primary" type="submit" busy={busy} disabled={attach.busy}>
 					{t("channelPost")}
 				</Button>
+				<AttachButton onPick={(file, kind) => void attach.add(file, kind)} />
 			</div>
 			<p id="channel-enter" className={wide ? styles.muted : styles.hidden}>
 				{t("chatsEnterSends")}
@@ -489,9 +511,9 @@ function Composer({ agents, wide }: { agents: Agent[]; wide: boolean }) {
 				{t("channelHintLead")} <Link to="/">{t("channelHintLink")}</Link>{" "}
 				{t("channelHintEnd")}
 			</p>
-			{refusal && (
+			{(refusal ?? attach.refusal) && (
 				<p role="alert" className={styles.alert}>
-					{refusal}
+					{refusal ?? attach.refusal}
 				</p>
 			)}
 		</form>

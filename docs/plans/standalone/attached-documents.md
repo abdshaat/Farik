@@ -153,7 +153,7 @@ Amended in execution (2026-10-19): `chat.messages` and `channel.messages` (`crat
 
 - `attaches_a_document_and_sends_it_with_the_message` (Attach.test.tsx) — with a fake client, asserts that picking `spec.pdf` in Today's box and choosing "The architecture" calls `document.attach` with `kind: "architecture"` and the file's base64, shows a chip "spec.pdf", and "Send" calls `request.file` with `attachments: [path]`; that the chat's and the channel's boxes send `attachments` in their commands; that a refusal `no_text` shows `attach_no_text`'s words; that a sixth file shows `attach_too_many` without a call; and that a sent chat message shows its chip linking to `/files/<path>`.
 
-- [ ] `feat(web): attach documents in the request box, the chats and the channel`
+- [x] `feat(web): attach documents in the request box, the chats and the channel`
 
 ### Task 7: the setup
 

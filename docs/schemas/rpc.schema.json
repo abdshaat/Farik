@@ -6146,6 +6146,16 @@
                   }
                 ]
               },
+              "attachments": {
+                "type": "array",
+                "description": "The documents the owner attached to the message, each with the file's name from its document.attached; the key is absent when there are none.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "name"],
+                  "properties": { "path": { "type": "string" }, "name": { "type": "string" } }
+                }
+              },
               "sent_as": {
                 "oneOf": [
                   { "type": "null" },
@@ -6252,6 +6262,16 @@
                     "pattern": "^CTV-[0-9]{1,6}$"
                   }
                 ]
+              },
+              "attachments": {
+                "type": "array",
+                "description": "The documents the owner attached to the message, each with the file's name from its document.attached; the key is absent when there are none.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "name"],
+                  "properties": { "path": { "type": "string" }, "name": { "type": "string" } }
+                }
               }
             }
           }
