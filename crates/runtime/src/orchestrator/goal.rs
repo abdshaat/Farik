@@ -89,9 +89,7 @@ async fn plan(
     }
     let message = plan_message(deps, team, board, goal, planner)?;
     let end = goal_session(deps, team, planner, GOAL_PLAN_TOOLS, message).await?;
-    // A session that was stopped found nothing and filed nothing: it is no round, and the next
-    // tick with room plans again.
-    if end.reason != EndReason::Aborted {
+    if counts_as_a_round(end.reason) {
         let filed = filed_by(deps, goal, planner, &end.session_id)?;
         record_round(deps, goal, planner, &end.session_id, &filed)?;
     }
@@ -99,6 +97,17 @@ async fn plan(
         goal_id: goal.id.clone(),
         what: ran(planner, "goal planning", &end),
     }))
+}
+
+/// Whether a goal session that ended for `reason` is a round. One that was stopped, or that the
+/// provider refused for its usage or the key, found nothing and filed nothing for a reason that is
+/// not the team's: it is no round, so the goal does not stall, and the next tick with room plans
+/// again. One that ran, into a limit or an error included, is.
+fn counts_as_a_round(reason: EndReason) -> bool {
+    !matches!(
+        reason,
+        EndReason::Aborted | EndReason::ProviderLimit | EndReason::CredentialRefused
+    )
 }
 
 /// The measuring rule: once per UTC day, the agent that reads the goal's service gets one `goal`
@@ -434,6 +443,25 @@ mod tests {
     use crate::recorded::RecordedAdapter;
     use crate::recorded::fixtures::ends_without_a_decision;
     use crate::session::{SessionPurpose, SessionSpec};
+
+    #[test]
+    fn a_round_is_a_session_the_team_ran() {
+        use crate::session::EndReason;
+        // Stopped, or refused by the provider for its usage or the key: the provider's, not the
+        // team's, so the goal does not stall; the next tick with room plans again.
+        for reason in [
+            EndReason::Aborted,
+            EndReason::ProviderLimit,
+            EndReason::CredentialRefused,
+        ] {
+            assert!(!super::counts_as_a_round(reason), "{reason:?}");
+        }
+        // A session that ran, even into a limit or an error, is a round, so a loop that keeps
+        // failing stops at the rounds without progress.
+        for reason in [EndReason::Completed, EndReason::Limit, EndReason::Error] {
+            assert!(super::counts_as_a_round(reason), "{reason:?}");
+        }
+    }
 
     fn a_stripe() -> serde_json::Value {
         json!({
