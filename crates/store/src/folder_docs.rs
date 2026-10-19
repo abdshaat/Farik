@@ -223,15 +223,15 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                 }
             }
             EventBody::DocumentStorageChanged(body) if is_unattended(event) => {
-                if let Some(change) = body.change {
+                if let Some(change) = &body.change {
                     let change = change.get();
                     if change_of(&mut docs, change).is_none() {
                         docs.changes.push(FolderChange {
                             change,
-                            branch: body
-                                .branch
-                                .clone()
-                                .unwrap_or_else(|| format!("docs/folder-{change}")),
+                            branch: body.branch.as_ref().map_or_else(
+                                || format!("docs/folder-{change}"),
+                                |branch| branch.as_str().to_string(),
+                            ),
                             paths: Vec::new(),
                             approved: false,
                             proposals: Vec::new(),
@@ -326,7 +326,7 @@ pub fn switch_state(docs: &FolderDocs, log: &EventLog) -> Result<Option<SwitchSt
         .and_then(|event| match &event.body {
             EventBody::DocumentStorageChanged(body) => Some(SwitchState {
                 local: body.local,
-                waiting: body.change.is_some_and(|change| {
+                waiting: body.change.as_ref().is_some_and(|change| {
                     docs.changes.iter().any(|held| {
                         held.change == change.get() && !held.integrated && !held.escalated
                     })
@@ -382,13 +382,13 @@ pub fn local_writes(log: &EventLog) -> Result<BTreeMap<String, LocalWrite>, Stor
             };
             for path in body.paths.iter().chain(body.removed.iter()) {
                 writes.insert(
-                    path.clone(),
+                    path.to_string(),
                     LocalWrite {
                         seq: i64::try_from(event.envelope.seq).unwrap_or(i64::MAX),
                         at: event.envelope.recorded_at,
                         by,
-                        written_by: body.written_by.clone(),
-                        task_id: body.task_id.clone(),
+                        written_by: body.written_by.as_ref().map(|id| id.as_str().to_string()),
+                        task_id: body.task_id.as_ref().map(|id| id.as_str().to_string()),
                     },
                 );
             }

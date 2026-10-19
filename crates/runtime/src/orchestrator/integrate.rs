@@ -1151,9 +1151,12 @@ fn finish_the_switch(tools: &ToolDeps, change: u64, local: bool) -> Result<(), O
         .rev()
         .find_map(|event| match event.body {
             EventBody::DocumentStorageChanged(body)
-                if body.change.is_some_and(|held| held.get() == change) =>
+                if body
+                    .change
+                    .as_ref()
+                    .is_some_and(|held| held.get() == change) =>
             {
-                body.sha
+                body.sha.as_ref().map(|sha| sha.as_str().to_string())
             }
             _ => None,
         })

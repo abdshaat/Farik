@@ -1790,6 +1790,10 @@
       "description": "The numbers of the proposals one decision covers; a proposal's number is its event's seq."
     },
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "folderDocSha": { "type": "string", "minLength": 1 },
+    "localDocumentPath": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "localWriterId": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "localTaskId": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
     "folderChangeBranch": {
       "type": "string",
       "maxLength": 64,
@@ -2048,9 +2052,9 @@
       "required": ["local", "change", "branch", "sha"],
       "properties": {
         "local": { "type": "boolean" },
-        "change": { "type": ["integer", "null"], "minimum": 1, "maximum": 18446744073709551615 },
-        "branch": { "type": ["string", "null"] },
-        "sha": { "type": ["string", "null"] }
+        "change": { "oneOf": [{ "$ref": "#/$defs/folderChangeNumber" }, { "type": "null" }] },
+        "branch": { "oneOf": [{ "$ref": "#/$defs/folderChangeBranch" }, { "type": "null" }] },
+        "sha": { "oneOf": [{ "$ref": "#/$defs/folderDocSha" }, { "type": "null" }] }
       }
     },
     "localDocumentsWrittenBody": {
@@ -2060,12 +2064,12 @@
       "additionalProperties": false,
       "required": ["paths", "removed", "by", "written_by", "task_id", "set_aside"],
       "properties": {
-        "paths": { "type": "array", "items": { "type": "string" } },
-        "removed": { "type": "array", "items": { "type": "string" } },
+        "paths": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } },
+        "removed": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } },
         "by": { "type": "string", "enum": ["owner", "agent", "task"] },
-        "written_by": { "type": ["string", "null"] },
-        "task_id": { "type": ["string", "null"] },
-        "set_aside": { "type": "array", "items": { "type": "string" } }
+        "written_by": { "oneOf": [{ "$ref": "#/$defs/localWriterId" }, { "type": "null" }] },
+        "task_id": { "oneOf": [{ "$ref": "#/$defs/localTaskId" }, { "type": "null" }] },
+        "set_aside": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } }
       }
     },
     "connectorTag": {
