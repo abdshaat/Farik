@@ -243,7 +243,7 @@ Files: `command.schema.json`, `command.rs`, `crates/runtime/src/goals.rs`, `lib.
   - `goal_end { outcome: reached }` records `goal.ended`, and `goal_book`'s `standing` is `None`;
   - on a team without `daily_usd`, `goal_set` is refused `goal_needs_daily_budget: `, and with `server: "linear"` it is refused `goal_server_not_connected: `.
 
-- [ ] `feat(runtime): the owner sets, edits, pauses, ends and reports on a goal`
+- [x] `feat(runtime): the owner sets, edits, pauses, ends and reports on a goal`
 
 ### Task 5: the two tools
 

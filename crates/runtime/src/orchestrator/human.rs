@@ -263,6 +263,56 @@ pub(super) async fn handle(
             approve,
             note,
         } => folder_doc_decide(tools, &proposals, approve, note),
+        Command::GoalSet {
+            words,
+            target,
+            unit,
+            server,
+        } => {
+            let team = tools.files.read_team().map_err(failed)?;
+            crate::goals::set_goal(
+                tools,
+                &team,
+                None,
+                &words,
+                target,
+                unit.as_deref(),
+                server.as_deref(),
+            )
+        }
+        Command::GoalEdit {
+            goal,
+            words,
+            target,
+            unit,
+            server,
+        } => {
+            let team = tools.files.read_team().map_err(failed)?;
+            crate::goals::set_goal(
+                tools,
+                &team,
+                Some(&goal),
+                &words,
+                target,
+                unit.as_deref(),
+                server.as_deref(),
+            )
+        }
+        Command::GoalPause { goal } => crate::goals::pause_goal(tools, &goal),
+        Command::GoalResume { goal } => crate::goals::resume_goal(tools, &goal),
+        Command::GoalEnd { goal, outcome } => crate::goals::end_goal(
+            tools,
+            &goal,
+            match outcome {
+                catervas_protocol::command::GoalEndBodyOutcome::Reached => {
+                    catervas_core::goal::GoalOutcome::Reached
+                }
+                catervas_protocol::command::GoalEndBodyOutcome::Dropped => {
+                    catervas_core::goal::GoalOutcome::Dropped
+                }
+            },
+        ),
+        Command::GoalReport { goal, value } => crate::goals::report_goal(tools, &goal, value),
         Command::RenewalDismiss { renewal } => renewal_dismiss(tools, renewal),
         Command::ToolApprove { approval, note } => decide_tool_call(tools, approval, note, true),
         Command::ToolRefuse { approval, note } => decide_tool_call(tools, approval, note, false),
@@ -7197,5 +7247,100 @@ mod tests {
         assert_eq!(harness.events(&[EventKind::FolderDocApproved]).len(), 1);
         let again = refused(&orchestrator, command).await;
         assert!(again.starts_with("folder_doc_decided: "), "{again}");
+    }
+
+    /// `dev-a`'s entry for a service named `name`, as the team file holds a custom one.
+    fn a_service(name: &str) -> Value {
+        json!({
+            "name": name, "source": "custom", "transport": "stdio",
+            "command": format!("{name}-mcp"), "args": ["stdio"], "credential_keys": ["API_KEY"],
+            "tools": { "read": "network" }
+        })
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_owner_sets_pauses_reports_and_ends_a_goal() {
+        use catervas_protocol::command::GoalEndBodyOutcome;
+        let harness = Harness::new("human-goal", |wire| {
+            wire["budgets"]["daily_usd"] = json!(10);
+            wire["agents"][1]["mcp_servers"] = json!([a_service("stripe")]);
+        });
+        let orchestrator = an_orchestrator(&harness);
+        let set = |server: Option<&str>| Command::GoalSet {
+            words: "Reach 10 paying customers".to_string(),
+            target: Some(10.0),
+            unit: Some("paying customers".to_string()),
+            server: server.map(str::to_string),
+        };
+        let book = || crate::goals::goal_book(&harness.project.deps.log).expect("the log reads");
+
+        let report = handled(&orchestrator, set(Some("stripe"))).await;
+        let recorded = last(&harness, EventKind::GoalSet).expect("recorded");
+        assert_eq!(report.events, vec![recorded.envelope.seq]);
+        assert_eq!(
+            (
+                &recorded.envelope.ids.agent_id,
+                &recorded.envelope.ids.session_id
+            ),
+            (&None, &None),
+            "the owner's"
+        );
+        let EventBody::GoalSet(body) = &recorded.body else {
+            panic!("a goal.set");
+        };
+        assert_eq!(body.goal.as_str(), "goal-1");
+        assert_eq!(book().standing.expect("it stands").id, "goal-1");
+
+        let reason = refused(&orchestrator, set(None)).await;
+        assert!(reason.starts_with("goal_active: "), "{reason}");
+
+        let pause = Command::GoalPause {
+            goal: "goal-1".to_string(),
+        };
+        handled(&orchestrator, pause.clone()).await;
+        let reason = refused(&orchestrator, pause).await;
+        assert!(reason.starts_with("goal_already_paused: "), "{reason}");
+        assert!(book().standing.expect("it stands").paused);
+
+        handled(
+            &orchestrator,
+            Command::GoalReport {
+                goal: "goal-1".to_string(),
+                value: 3.0,
+            },
+        )
+        .await;
+        let measured = last(&harness, EventKind::GoalMeasured).expect("recorded");
+        let EventBody::GoalMeasured(body) = &measured.body else {
+            panic!("a goal.measured");
+        };
+        assert_eq!(body.source.to_string(), "owner");
+        assert_eq!(measured.envelope.ids.agent_id, None);
+
+        handled(
+            &orchestrator,
+            Command::GoalEnd {
+                goal: "goal-1".to_string(),
+                outcome: GoalEndBodyOutcome::Reached,
+            },
+        )
+        .await;
+        assert!(last(&harness, EventKind::GoalEnded).is_some());
+        assert!(book().standing.is_none());
+
+        let no_budget = Harness::new("human-goal-no-budget", |wire| {
+            wire["budgets"]
+                .as_object_mut()
+                .expect("budgets")
+                .remove("daily_usd");
+        });
+        let reason = refused(&an_orchestrator(&no_budget), set(None)).await;
+        assert!(reason.starts_with("goal_needs_daily_budget: "), "{reason}");
+        let reason = refused(&orchestrator, set(Some("linear"))).await;
+        assert!(
+            reason.starts_with("goal_server_not_connected: "),
+            "{reason}"
+        );
     }
 }
