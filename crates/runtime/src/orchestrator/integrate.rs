@@ -647,6 +647,7 @@ fn through_the_forge(
     match state {
         PullRequestState::Open {
             mergeable: Mergeable::Conflicting,
+            ..
         } => stopped_merging(tools, team, subject, target, &branch, &url).map(Some),
         PullRequestState::Open { .. } => Ok(Some(IntegrationOutcome::AwaitingForge)),
         PullRequestState::Merged { sha } => {

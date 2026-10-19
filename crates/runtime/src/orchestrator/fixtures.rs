@@ -1647,7 +1647,7 @@ impl FakeGh {
         let script = format!(
             "#!/bin/sh\n\
              dir='{dir}'\n\
-             sub=\"$2\"\n\
+             sub=$(printf '%s' \"$2\" | tr '/' '_')\n\
              for arg in \"$@\"; do printf '%s\\0' \"$arg\"; done >> \"$dir/calls\"\n\
              printf '\\n' >> \"$dir/calls\"\n\
              pwd -P >> \"$dir/cwds\"\n\
@@ -1677,7 +1677,10 @@ impl FakeGh {
     }
 
     /// Makes `sub` print `stdout` and `stderr` and exit with `code`.
+    /// A `sub` with slashes (`gh api repos/{owner}/{repo}`) is kept in one file, slashes as
+    /// underscores, as the script does.
     pub(crate) fn answers(&self, sub: &str, stdout: &str, stderr: &str, code: i32) -> &Self {
+        let sub = sub.replace('/', "_");
         std::fs::write(self.dir.join(format!("{sub}.out")), stdout).expect("written");
         std::fs::write(self.dir.join(format!("{sub}.err")), stderr).expect("written");
         std::fs::write(self.dir.join(format!("{sub}.code")), code.to_string()).expect("written");

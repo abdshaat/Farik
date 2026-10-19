@@ -236,7 +236,7 @@ Test:
   - `merge_methods` is `[Squash, Rebase]`;
   - `merge_pull_request(url, Squash, "abc")` runs exactly `pr merge <url> --squash --match-head-commit abc`, with no `--admin` and no `--auto`.
 
-- [ ] `feat(runtime): read a pull request's checks and merge it through gh`
+- [x] `feat(runtime): read a pull request's checks and merge it through gh`
 
 ### Task 5: Catervas merges on its tick
 

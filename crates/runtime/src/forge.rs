@@ -46,6 +46,12 @@ pub enum PullRequestState {
     Open {
         /// Whether it would merge now, as the forge last worked it out.
         mergeable: Mergeable,
+        /// What stands between it and a merge (`mergeStateStatus`).
+        merge_state: MergeState,
+        /// The commit its branch is at (`headRefOid`), which a merge is pinned to.
+        head: String,
+        /// Where its checks stand.
+        checks: Checks,
     },
     /// Merged, leaving this commit on its base branch.
     Merged {
@@ -65,6 +71,68 @@ pub enum Mergeable {
     Conflicting,
     /// The forge has not worked it out yet (it does after a push), or said nothing.
     Unknown,
+}
+
+/// What stands between an open pull request and its merge, as `mergeStateStatus` says; absent or
+/// unknown text is `Unknown`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeState {
+    /// It merges and nothing blocks it.
+    Clean,
+    /// Its branch is behind its base.
+    Behind,
+    /// A rule of the branch blocks it (a review, say).
+    Blocked,
+    /// It conflicts with its base.
+    Dirty,
+    /// It merges, but a check that is not required failed.
+    Unstable,
+    /// It merges, and the repository has pre-receive hooks.
+    HasHooks,
+    /// It is a draft.
+    Draft,
+    /// The forge has not worked it out, or said something else.
+    Unknown,
+}
+
+/// Where the checks of a pull request stand (`statusCheckRollup`): every check run and every
+/// status the forge lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Checks {
+    /// None is configured: the rollup is empty or absent.
+    None,
+    /// None failed and some have not finished.
+    Pending,
+    /// All finished and passed.
+    Passed,
+    /// At least one failed.
+    Failed {
+        /// Each failed check's name, in the rollup's order.
+        names: Vec<String>,
+    },
+}
+
+/// How `gh pr merge` merges.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeMethod {
+    /// A merge commit (`--merge`).
+    Merge,
+    /// A squash (`--squash`).
+    Squash,
+    /// A rebase (`--rebase`).
+    Rebase,
+}
+
+impl MergeMethod {
+    /// The wire word, which `pull_request.merged` records.
+    #[must_use]
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Merge => "merge",
+            Self::Squash => "squash",
+            Self::Rebase => "rebase",
+        }
+    }
 }
 
 /// Why the forge could not answer.
@@ -101,6 +169,88 @@ struct Viewed {
     merge_commit: Option<MergeCommit>,
     #[serde(default)]
     mergeable: Option<String>,
+    #[serde(default, rename = "mergeStateStatus")]
+    merge_state_status: Option<String>,
+    #[serde(default, rename = "headRefOid")]
+    head_ref_oid: Option<String>,
+    #[serde(default, rename = "statusCheckRollup")]
+    status_check_rollup: Option<Vec<RollupItem>>,
+}
+
+/// One entry of `statusCheckRollup`: a check run or a status, whichever `__typename` says.
+#[derive(Deserialize)]
+struct RollupItem {
+    #[serde(default, rename = "__typename")]
+    typename: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    conclusion: Option<String>,
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+}
+
+/// What `gh api repos/{owner}/{repo}` says of the merge methods; a missing field counts as allowed.
+#[derive(Deserialize)]
+struct Repository {
+    allow_merge_commit: Option<bool>,
+    allow_squash_merge: Option<bool>,
+    allow_rebase_merge: Option<bool>,
+}
+
+/// How one rollup entry stands: passed, still pending, or failed under this name.
+enum Standing {
+    Passed,
+    Pending,
+    Failed(String),
+}
+
+fn standing(item: &RollupItem) -> Standing {
+    let held = |text: &Option<String>| text.as_deref().unwrap_or_default().to_string();
+    match item.typename.as_deref() {
+        Some("CheckRun") => match (item.status.as_deref(), item.conclusion.as_deref()) {
+            (Some("COMPLETED"), Some("SUCCESS" | "NEUTRAL" | "SKIPPED")) => Standing::Passed,
+            (Some("COMPLETED"), _) => Standing::Failed(held(&item.name)),
+            _ => Standing::Pending,
+        },
+        Some("StatusContext") => match item.state.as_deref() {
+            Some("SUCCESS") => Standing::Passed,
+            Some("PENDING" | "EXPECTED") => Standing::Pending,
+            _ => Standing::Failed(held(&item.context)),
+        },
+        // Anything else is not read as passed.
+        _ => Standing::Failed(
+            item.name
+                .clone()
+                .or_else(|| item.context.clone())
+                .unwrap_or_else(|| "a check GitHub did not describe".to_string()),
+        ),
+    }
+}
+
+fn checks_of(rollup: &[RollupItem]) -> Checks {
+    let mut failed = Vec::new();
+    let mut pending = false;
+    for item in rollup {
+        match standing(item) {
+            Standing::Passed => {}
+            Standing::Pending => pending = true,
+            Standing::Failed(name) => failed.push(name),
+        }
+    }
+    if !failed.is_empty() {
+        Checks::Failed { names: failed }
+    } else if pending {
+        Checks::Pending
+    } else if rollup.is_empty() {
+        Checks::None
+    } else {
+        Checks::Passed
+    }
 }
 
 /// A merged pull request's commit, `null` until the merge.
@@ -183,7 +333,13 @@ impl Forge {
     /// As `open_pull_request`.
     pub fn pull_request_state(&self, url: &str) -> Result<PullRequestState, ForgeError> {
         let viewed = self.run(
-            &["pr", "view", url, "--json", "state,mergeCommit,mergeable"],
+            &[
+                "pr",
+                "view",
+                url,
+                "--json",
+                "state,mergeCommit,mergeable,mergeStateStatus,headRefOid,statusCheckRollup",
+            ],
             None,
         )?;
         let read: Viewed =
@@ -193,12 +349,73 @@ impl Forge {
             Some("CONFLICTING") => Mergeable::Conflicting,
             _ => Mergeable::Unknown,
         };
+        let merge_state = match read.merge_state_status.as_deref() {
+            Some("CLEAN") => MergeState::Clean,
+            Some("BEHIND") => MergeState::Behind,
+            Some("BLOCKED") => MergeState::Blocked,
+            Some("DIRTY") => MergeState::Dirty,
+            Some("UNSTABLE") => MergeState::Unstable,
+            Some("HAS_HOOKS") => MergeState::HasHooks,
+            Some("DRAFT") => MergeState::Draft,
+            _ => MergeState::Unknown,
+        };
         match (read.state.as_str(), read.merge_commit) {
-            ("OPEN", _) => Ok(PullRequestState::Open { mergeable }),
+            ("OPEN", _) => Ok(PullRequestState::Open {
+                mergeable,
+                merge_state,
+                head: read.head_ref_oid.unwrap_or_default(),
+                checks: checks_of(&read.status_check_rollup.unwrap_or_default()),
+            }),
             ("CLOSED", _) => Ok(PullRequestState::Closed),
             ("MERGED", Some(commit)) => Ok(PullRequestState::Merged { sha: commit.oid }),
             _ => Err(unreadable("gh pr view", &viewed)),
         }
+    }
+
+    /// The merge methods the repository allows, in the order merge commit, squash, rebase:
+    /// `gh api repos/{owner}/{repo}`, whose braces `gh` fills in from the repository it runs in.
+    ///
+    /// # Errors
+    ///
+    /// As `open_pull_request`.
+    pub fn merge_methods(&self) -> Result<Vec<MergeMethod>, ForgeError> {
+        let answer = self.run(&["api", "repos/{owner}/{repo}"], None)?;
+        let read: Repository =
+            serde_json::from_str(&answer).map_err(|_| unreadable("gh api", &answer))?;
+        Ok([
+            (MergeMethod::Merge, read.allow_merge_commit),
+            (MergeMethod::Squash, read.allow_squash_merge),
+            (MergeMethod::Rebase, read.allow_rebase_merge),
+        ]
+        .into_iter()
+        .filter(|(_, allowed)| allowed.unwrap_or(true))
+        .map(|(method, _)| method)
+        .collect())
+    }
+
+    /// Merges the pull request at `url` with `method`, only while its branch is still at `head`
+    /// (`--match-head-commit`), so a push made after the checks were read is never merged
+    /// unchecked. It never passes `--admin` or `--auto`, and it deletes no branch.
+    ///
+    /// # Errors
+    ///
+    /// As `open_pull_request`: `Failed` carries what `gh` said when it refused.
+    pub fn merge_pull_request(
+        &self,
+        url: &str,
+        method: MergeMethod,
+        head: &str,
+    ) -> Result<(), ForgeError> {
+        let flag = match method {
+            MergeMethod::Merge => "--merge",
+            MergeMethod::Squash => "--squash",
+            MergeMethod::Rebase => "--rebase",
+        };
+        self.run(
+            &["pr", "merge", url, flag, "--match-head-commit", head],
+            None,
+        )
+        .map(|_| ())
     }
 
     /// The issue at `url`: `gh issue view <url> --json title,body,url`.
@@ -261,7 +478,10 @@ fn unreadable(command: &str, output: &str) -> ForgeError {
 mod tests {
     use std::path::PathBuf;
 
-    use super::{Forge, ForgeError, Issue, Mergeable, PullRequest, PullRequestState};
+    use super::{
+        Checks, Forge, ForgeError, Issue, MergeMethod, MergeState, Mergeable, PullRequest,
+        PullRequestState,
+    };
     use crate::orchestrator::fixtures::FakeGh;
 
     const BODY: &str = "## Intent\nDone.\n";
@@ -370,7 +590,14 @@ mod tests {
                 sha: "abc".to_string()
             })
         );
-        let open = |mergeable| Ok(PullRequestState::Open { mergeable });
+        let open = |mergeable| {
+            Ok(PullRequestState::Open {
+                mergeable,
+                merge_state: MergeState::Unknown,
+                head: String::new(),
+                checks: Checks::None,
+            })
+        };
         gh.answers(
             "view",
             r#"{"mergeCommit":null,"state":"OPEN","mergeable":"CONFLICTING"}"#,
@@ -398,7 +625,81 @@ mod tests {
         assert_eq!(forge.pull_request_state(url), Ok(PullRequestState::Closed));
         assert_eq!(
             gh.calls()[0],
-            strings(&["pr", "view", url, "--json", "state,mergeCommit,mergeable"])
+            strings(&[
+                "pr",
+                "view",
+                url,
+                "--json",
+                "state,mergeCommit,mergeable,mergeStateStatus,headRefOid,statusCheckRollup"
+            ])
+        );
+    }
+
+    #[test]
+    fn reads_the_checks_and_merges_with_the_allowed_method() {
+        let gh = FakeGh::new("checks");
+        let forge = gh.forge(&std::env::temp_dir());
+        let url = "https://github.com/o/r/pull/7";
+        let viewed = |rollup: &str| {
+            format!(
+                r#"{{"state":"OPEN","mergeCommit":null,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","headRefOid":"abc","statusCheckRollup":{rollup}}}"#
+            )
+        };
+        let pass = r#"{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS"}"#;
+        let fail = r#"{"__typename":"StatusContext","context":"ci/lint","state":"FAILURE"}"#;
+        let waits =
+            r#"{"__typename":"CheckRun","name":"slow","status":"IN_PROGRESS","conclusion":""}"#;
+        let checks = |rollup: &str| {
+            gh.answers("view", &viewed(rollup), "", 0);
+            match forge.pull_request_state(url) {
+                Ok(PullRequestState::Open {
+                    merge_state,
+                    head,
+                    checks,
+                    ..
+                }) => {
+                    assert_eq!((merge_state, head.as_str()), (MergeState::Clean, "abc"));
+                    checks
+                }
+                other => panic!("expected an open pull request, got {other:?}"),
+            }
+        };
+        assert_eq!(
+            checks(&format!("[{pass},{fail}]")),
+            Checks::Failed {
+                names: vec!["ci/lint".to_string()]
+            }
+        );
+        assert_eq!(checks(&format!("[{pass},{waits}]")), Checks::Pending);
+        assert_eq!(checks(&format!("[{pass}]")), Checks::Passed);
+        assert_eq!(checks("[]"), Checks::None);
+
+        gh.answers(
+            "repos/{owner}/{repo}",
+            r#"{"allow_merge_commit":false,"allow_squash_merge":true}"#,
+            "",
+            0,
+        );
+        assert_eq!(
+            forge.merge_methods(),
+            Ok(vec![MergeMethod::Squash, MergeMethod::Rebase])
+        );
+
+        gh.answers("merge", "", "", 0);
+        assert_eq!(
+            forge.merge_pull_request(url, MergeMethod::Squash, "abc"),
+            Ok(())
+        );
+        assert_eq!(
+            gh.calls().last(),
+            Some(&strings(&[
+                "pr",
+                "merge",
+                url,
+                "--squash",
+                "--match-head-commit",
+                "abc"
+            ]))
         );
     }
 
