@@ -16,7 +16,7 @@ So Catervas still opens the pull request, waits for GitHub's checks to pass, the
 
 - Label: **Let Catervas merge finished work**
 - Info button (ⓘ), three bullets:
-  - "Catervas merges a pull request only after all of GitHub's checks pass."
+  - "Catervas merges a pull request once its checks pass, or once its own checks pass when your repository has none."
   - "It uses a merge method your repository allows, and never skips a rule of the branch."
   - "It asks only on this computer. Anyone else who clones the project turns it on for themselves."
 - Offline (no `origin`; the page already knows it as `online`): the switch is disabled and the line under it reads "Needs your project on GitHub."

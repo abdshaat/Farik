@@ -355,7 +355,7 @@ export const en = {
 		"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
 	mergingSwitch: "Let Catervas merge finished work",
 	mergingSwitchNote:
-		"Catervas merges a pull request only after all of GitHub's checks pass.\nIt uses a merge method your repository allows, and never skips a rule of the branch.\nIt asks only on this computer. Anyone else who clones the project turns it on for themselves.",
+		"Catervas merges a pull request once its checks pass, or once its own checks pass when your repository has none.\nIt uses a merge method your repository allows, and never skips a rule of the branch.\nIt asks only on this computer. Anyone else who clones the project turns it on for themselves.",
 	mergingOffline: "Needs your project on GitHub.",
 	mergingWarnTitle: "Let Catervas merge?",
 	mergingWarn:
