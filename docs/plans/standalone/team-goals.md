@@ -219,7 +219,7 @@ Files: `crates/store/src/requests.rs`. `Filing` gains `goal: Option<&str>`, `Non
   - with `Small` and `given_to: Some("theo")` it files CTV-2, whose `given_to` is `theo`;
   - `goal_of` answers goal-1 for both, and `None` for a request filed with `file_request`.
 
-- [ ] `feat(store): file a request towards the goal, triaged as its planner sized it`
+- [x] `feat(store): file a request towards the goal, triaged as its planner sized it`
 
 ### Task 4: the owner's commands
 
