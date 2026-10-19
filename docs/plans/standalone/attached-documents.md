@@ -142,7 +142,7 @@ Files: modified `prompt.rs`, `session.rs`, `rules.rs`, `chat.rs` (interview).
 
 - `the_answering_session_reads_the_attached_documents` — asserts that a refine session of a task with one attachment, a Chat session after a message with one, and a Conversation session after a post with one each have the section with the document's text inside its untrusted block, read from the folder change's branch before integration and the integration branch after; that two documents of 40 KiB give the first's text and the second's "read it from the folder." line; and that the interview after a setup attach ends its first paragraph with `They attached: docs/catervas/product/attached/trip-spec.md.`
 
-- [ ] `feat(runtime): the session answering the owner reads the documents they attached`
+- [x] `feat(runtime): the session answering the owner reads the documents they attached`
 
 ### Task 6: the attach button in the request box, the chats and the channel
 

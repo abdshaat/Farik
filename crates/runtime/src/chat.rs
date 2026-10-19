@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
-    CatervasEvent, ChatMessagePostedBody, EventBody, EventIds, EventKind,
+    AttachmentPaths, CatervasEvent, ChatMessagePostedBody, EventBody, EventIds, EventKind,
     SessionStartedBodyPurpose, attachment_paths, new_event,
 };
 use catervas_store::product_plan::new_project;
@@ -543,8 +543,14 @@ pub fn interview(
     let Some(project) = new_project(log)? else {
         return Ok(None);
     };
+    let attached = attached_paths(log)?;
+    let attached = if attached.is_empty() {
+        String::new()
+    } else {
+        format!("\nThey attached: {}.", attached.join(", "))
+    };
     let first = format!(
-        "When they started the project, the owner wrote:\n{}\n\nYour interview so far:\n",
+        "When they started the project, the owner wrote:\n{}{attached}\n\nYour interview so far:\n",
         project.description
     );
     let lines = recent_lines(log, agent_id, budget.saturating_sub(first.len()))?;
@@ -553,6 +559,113 @@ pub fn interview(
     } else {
         format!("{first}{}", lines.join("\n\n"))
     }))
+}
+
+/// Every document the owner attached (`document.attached`), in log order.
+fn attached_paths(log: &EventLog) -> Result<Vec<String>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            kinds: vec![EventKind::DocumentAttached],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::DocumentAttached(body) => Some(body.path.to_string()),
+            _ => None,
+        })
+        .collect())
+}
+
+/// The paths of the documents an event body names, as the strings they are written.
+fn named(attachments: Option<&AttachmentPaths>) -> Vec<String> {
+    attachments.map_or_else(Vec::new, |paths| {
+        paths.iter().map(|path| path.as_str().to_string()).collect()
+    })
+}
+
+/// The documents the newest message of the user's in `agent_id`'s chat names, which the chat
+/// session answering it is shown (ADR 0073); none when that message names none.
+///
+/// # Errors
+///
+/// `StoreError` when the log cannot be read.
+pub fn chat_attachments(log: &EventLog, agent_id: &str) -> Result<Vec<String>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            agent_id: Some(agent_id.to_string()),
+            kinds: vec![EventKind::ChatMessagePosted],
+            newest_first: true,
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| match event.body {
+            EventBody::ChatMessagePosted(body) if awaits_a_reply(&body) => {
+                Some(named(body.attachments.as_ref()))
+            }
+            _ => None,
+        })
+        .unwrap_or_default())
+}
+
+/// The documents the channel post `event` names, when it is a post.
+#[must_use]
+pub fn post_attachments(event: &CatervasEvent) -> Vec<String> {
+    match &event.body {
+        EventBody::MessagePosted(body) => named(body.attachments.as_ref()),
+        _ => Vec::new(),
+    }
+}
+
+/// The documents the task `task_id` was created with, which the sessions that work on it are shown.
+///
+/// # Errors
+///
+/// `StoreError` when the log cannot be read.
+pub fn task_attachments(log: &EventLog, task_id: &str) -> Result<Vec<String>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            task_id: task_id.parse().ok(),
+            kinds: vec![EventKind::TaskCreated],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| match event.body {
+            EventBody::TaskCreated(body) => Some(named(body.attachments.as_ref())),
+            _ => None,
+        })
+        .unwrap_or_default())
+}
+
+/// The attached documents `paths` name, each with its text when it can be read: from the
+/// integration branch, else from the branch of the newest folder change that holds it and has not
+/// reached the integration branch, else `None` (ADR 0073). A git or log error leaves a text out.
+#[must_use]
+pub fn read_attached(
+    log: &EventLog,
+    git: &catervas_store::Git,
+    team: &Team,
+    paths: &[String],
+) -> Vec<(String, Option<String>)> {
+    let integration = catervas_store::git::integration_branch(team, git).ok();
+    let changes = catervas_store::folder_docs::folder_docs(log)
+        .map(|docs| docs.changes)
+        .unwrap_or_default();
+    paths
+        .iter()
+        .map(|path| {
+            let on_integration = integration
+                .as_deref()
+                .and_then(|branch| git.file_at(branch, path).ok());
+            let text = on_integration.or_else(|| {
+                changes
+                    .iter()
+                    .rev()
+                    .filter(|change| !change.integrated && change.paths.contains(path))
+                    .find_map(|change| git.file_at(&change.branch, path).ok())
+            });
+            (path.clone(), text)
+        })
+        .collect()
 }
 
 /// The newest messages of `agent_id`'s chat as lines, oldest first, that fit in `budget` bytes, the
