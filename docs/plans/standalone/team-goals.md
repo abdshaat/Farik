@@ -351,7 +351,7 @@ Files: `GoalCard.tsx`, `GoalCard.module.css`, `GoalCard.test.tsx`, `Today.tsx` (
   - a `stalled` goal with `no_progress` shows "Five rounds of work and the count hasn't moved." and Keep going sends `goal_resume`;
   - `goal: null` with a `last_ended` shows "Set a goal" and "Reached on".
 
-- [ ] `feat(web): set the team's goal and follow it on Today`
+- [x] `feat(web): set the team's goal and follow it on Today`
 
 ### Task 10: the spec
 

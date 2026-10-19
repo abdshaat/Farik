@@ -148,6 +148,16 @@ const WORDS: Record<string, keyof typeof en> = {
 	not_html: "refuseNotHtml",
 	rewrite_open: "refuseRewriteOpen",
 	nothing_to_rewrite: "refuseNothingToRewrite",
+	// The owner's goal (SPEC 5.18).
+	goal_active: "refuseGoalActive",
+	goal_needs_daily_budget: "goalNeedsBudget",
+	goal_target_unit: "refuseGoalTargetUnit",
+	goal_server_without_target: "refuseGoalServerWithoutTarget",
+	goal_server_not_connected: "refuseGoalServerNotConnected",
+	goal_unknown: "refuseGoalUnknown",
+	goal_already_paused: "refuseGoalAlreadyPaused",
+	goal_not_measured: "refuseGoalNotMeasured",
+	goal_value: "refuseGoalValue",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */
