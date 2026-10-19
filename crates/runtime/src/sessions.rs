@@ -129,6 +129,8 @@ fn effort_wire(effort: Effort) -> SessionStartedBodyEffort {
         Effort::Low => SessionStartedBodyEffort::Low,
         Effort::Medium => SessionStartedBodyEffort::Medium,
         Effort::High => SessionStartedBodyEffort::High,
+        Effort::Xhigh => SessionStartedBodyEffort::Xhigh,
+        Effort::Max => SessionStartedBodyEffort::Max,
     }
 }
 
@@ -238,6 +240,8 @@ mod tests {
             (Effort::Low, "low"),
             (Effort::Medium, "medium"),
             (Effort::High, "high"),
+            (Effort::Xhigh, "xhigh"),
+            (Effort::Max, "max"),
         ];
         let reasons = [
             (EndReason::Completed, "completed"),

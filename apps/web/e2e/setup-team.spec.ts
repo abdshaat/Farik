@@ -26,7 +26,7 @@ async function screenshots(page: Page, name: string) {
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 
-test("the team's setup keeps the five this computer can run, sets the rules, and starts them", async ({
+test("the team's setup starts the suggested team this computer can run, sets the rules, and starts them", async ({
 	page,
 }) => {
 	const serve = await startServe({
@@ -43,25 +43,17 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 
 		await expect(page).toHaveURL(/\/setup\/team$/);
 		await screenshots(page, "setup-team");
-		// Sandboxing is off here, so the Designer, who needs Docker's sandbox, starts unticked.
-		const iris = page.getByRole("checkbox", {
-			name: "Include the UI/UX Designer",
-		});
-		await expect(iris).not.toBeChecked();
-		await expect(iris).toBeDisabled();
-		await expect(page.getByText("Needs Docker’s sandbox")).toBeVisible();
+		// Sandboxing is off here, so the Designer, who needs Docker's sandbox, is held off.
+		const iris = page.getByRole("button", { name: "Change Iris" });
+		await expect(iris).toContainText("Needs Docker");
+		await iris.click();
+		await expect(
+			page.getByRole("dialog").getByText("Needs Docker’s sandbox"),
+		).toBeVisible();
+		await page.getByRole("button", { name: "Done" }).click();
 		await page.getByRole("button", { name: "Continue with this team" }).click();
 
-		await expect(page).toHaveURL(/\/setup\/permissions$/);
-		await expect(
-			page.getByLabel(/^Yes, the Developer and Architect may/),
-		).toBeChecked();
-		await expect(
-			page.getByLabel(/^No, keep work in progress on this computer/),
-		).toBeChecked();
-		await screenshots(page, "setup-permissions");
-		await page.getByRole("button", { name: "Continue", exact: true }).click();
-
+		// A ready-made team carries its answers about what it may do, so that step is not asked.
 		await expect(page).toHaveURL(/\/setup\/spending$/);
 		await page.getByLabel(/^Stop the team after a set amount each day/).check();
 		await page.getByLabel("Limit per day, in US dollars").fill("10");
@@ -84,10 +76,10 @@ test("the team's setup keeps the five this computer can run, sets the rules, and
 			join(serve.project, ".catervas/team.yaml"),
 			"utf8",
 		);
-		for (const id of ["mira", "sol", "ada", "theo", "kai"])
+		for (const id of ["mira", "ada", "theo", "kai"])
 			expect(yaml).toMatch(new RegExp(`id: ${id}\\b`));
 		expect(yaml).not.toMatch(/id: iris\b/);
-		expect(yaml.match(/^ {2}id: /gm)).toHaveLength(5);
+		expect(yaml.match(/^ {2}id: /gm)).toHaveLength(4);
 		expect(yaml).toMatch(/daily_usd: 10\b/);
 		expect(yaml).toMatch(/run_commands: true/);
 

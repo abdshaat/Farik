@@ -145,6 +145,9 @@ pub struct ReadinessContext {
     /// The names of the project folder's member repositories (ADR 0057), or `None` for a project
     /// of one repository.
     pub repos: Option<Vec<String>>,
+    /// Whether the team is one agent alone (ADR 0071): no agent reviews a task, so no reviewer is
+    /// named or needed.
+    pub solo: bool,
 }
 
 /// One rule the contract fails, with a message that says what to change.
@@ -288,9 +291,9 @@ fn criteria_methods_valid(
 /// `review` criterion, which an agent would answer, and no `human` one, which waits on the owner.
 fn no_review_outside_code(
     contract: &TaskContract,
-    _: &ReadinessContext,
+    context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
-    if reviewed_by_an_agent(contract) {
+    if reviewed_by_an_agent(contract) && !context.solo {
         return None;
     }
     let asked = criterion_ids(contract, |verification, _| {
@@ -350,6 +353,9 @@ fn reviewer_available(
     contract: &TaskContract,
     context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
+    if context.solo {
+        return None;
+    }
     if contract.reviewer_role == Role::Human {
         if contract.kind == Kind::Epic {
             return None;
@@ -478,7 +484,7 @@ fn required_criteria_present(
     let runs_none = in_a_folder || (context.repos.is_some() && contract.kind == Kind::Epic);
     // Only a code change is reviewed (ADR 0061), so no other contract can hold a review or a human
     // criterion to satisfy a rule that requires one.
-    let reviewed = reviewed_by_an_agent(contract);
+    let reviewed = reviewed_by_an_agent(contract) && !context.solo;
     let missing: Vec<&str> = context
         .rules
         .required_criteria
@@ -951,8 +957,11 @@ fn private_folder_task(contract: &TaskContract, _: &ReadinessContext) -> Option<
 /// other role's does.
 fn private_folder_reviewer(
     contract: &TaskContract,
-    _: &ReadinessContext,
+    context: &ReadinessContext,
 ) -> Option<ReadinessFailure> {
+    if context.solo {
+        return None;
+    }
     let folder = task_private_folder(contract)?;
     (contract.reviewer_role != Role::ProductManager).then(|| {
         failure(

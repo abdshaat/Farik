@@ -199,6 +199,11 @@ export function May(part: Part) {
 				commands={now?.runCommands}
 				push={now?.push}
 				developers={developers}
+				solo={
+					saved.policy.solo
+						? saved.agents.find((a) => a.status !== "retired")?.displayName
+						: undefined
+				}
 				onAnswer={({ commands, push }) =>
 					setMine({
 						...now,

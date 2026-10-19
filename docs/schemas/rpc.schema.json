@@ -4942,12 +4942,43 @@
               }
             }
           }
+        },
+        "suggested_teams": {
+          "type": "array",
+          "description": "Every ready-made team once, the one that fits the folder best first (design/team-picker.md section 5).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "signal", "language", "tests"],
+            "properties": {
+              "slug": { "type": "string" },
+              "signal": { "enum": ["code", "money", "shop", "new"] },
+              "language": { "type": ["string", "null"] },
+              "tests": { "type": "boolean" }
+            }
+          }
+        },
+        "role_defaults": {
+          "type": "object",
+          "description": "Each role's shipped model, effort and persona, keyed by the role's wire name.",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["model", "effort", "persona"],
+            "properties": {
+              "model": { "type": "string" },
+              "effort": { "enum": ["low", "medium", "high", "xhigh", "max"] },
+              "persona": { "type": "string" }
+            }
+          }
         }
       },
       "required": [
         "team",
         "criteria",
-        "unavailable"
+        "unavailable",
+        "suggested_teams",
+        "role_defaults"
       ]
     },
     "teamValidateResult": {
@@ -5827,7 +5858,9 @@
               "enum": [
                 "low",
                 "medium",
-                "high"
+                "high",
+                "xhigh",
+                "max"
               ]
             }
           }
@@ -6210,6 +6243,9 @@
             "question_length",
             "integration_branch_name",
             "integration_branch_missing",
+            "too_few",
+            "solo_one_agent",
+            "solo_role",
             "invalid"
           ],
           "description": "The refusal as the page words it for a person; the message is for a log, and invalid is any refusal with no words of its own."

@@ -33,10 +33,12 @@ pub mod fixtures;
 
 mod defaults;
 mod describe;
+mod suggest;
 mod template;
 
 pub use defaults::{SMALL_ENOUGH_QUESTION, TeamDefaults, defaults};
-pub use describe::{MODEL_FAMILIES, describe_change};
+pub use describe::{MODEL_FAMILIES, describe_change, model_name};
+pub use suggest::{Signal, SuggestedTeam, suggest_teams};
 pub use template::{
     TeamTemplate, TemplateAgent, TemplateApplied, apply_template, template_from_team,
     template_slug, validate_template,
@@ -317,7 +319,9 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     }
     errors.extend(connector_errors(&team));
     errors.extend(skill_errors(&team));
-    for (role, what) in REQUIRED_ROLES {
+    errors.extend(size_errors(&team));
+    for (role, what) in REQUIRED_ROLES.iter().filter(|_| !team.is_solo()) {
+        let (role, what) = (*role, *what);
         if !team.has_active(Role::from(role)) {
             errors.push(ValidationError {
                 path: "/agents".to_string(),
@@ -336,6 +340,57 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     } else {
         Err(errors)
     }
+}
+
+/// How many agents the team has, which the schema cannot say: two for a team, and for one agent
+/// alone (`policy.solo`, ADR 0071) exactly one that is not retired, of a role that can work with
+/// no Product Manager.
+fn size_errors(team: &Team) -> Vec<ValidationError> {
+    let live: Vec<(usize, &Agent)> = team
+        .agents
+        .iter()
+        .enumerate()
+        .filter(|(_, agent)| agent.status != AgentStatus::Retired)
+        .collect();
+    if !team.is_solo() {
+        return if team.agents.len() < 2 {
+            vec![ValidationError {
+                path: "/agents".to_string(),
+                message: "A team needs two agents at least. Add another, or make this one agent \
+                          working alone."
+                    .to_string(),
+            }]
+        } else {
+            Vec::new()
+        };
+    }
+    if live.len() != 1 {
+        return vec![ValidationError {
+            path: "/agents".to_string(),
+            message: format!(
+                "solo_one_agent: one agent working alone is exactly one agent that is not \
+                 retired, and this has {}.",
+                live.len()
+            ),
+        }];
+    }
+    let (index, agent) = live[0];
+    let role = Role::from(agent.role);
+    if matches!(role, Role::ScrumMaster | Role::UiUxDesigner) {
+        return vec![ValidationError {
+            path: format!("/agents/{index}/role"),
+            message: format!(
+                "solo_role: a {} cannot work alone: {}.",
+                plain_role(role),
+                if role == Role::ScrumMaster {
+                    "it has nothing to run without a team"
+                } else {
+                    "its plans wait for a Product Manager's approval"
+                }
+            ),
+        }];
+    }
+    Vec::new()
 }
 
 /// Every connector rule the schema cannot say (spec 5.6, F8), each refusal at its own field: a
@@ -1229,6 +1284,13 @@ impl Team {
         self.agents
             .iter()
             .filter(|agent| agent.status == AgentStatus::Active)
+    }
+
+    /// Whether this is one agent alone (`policy.solo`, ADR 0071), as the file says: never worked
+    /// out from how many agents there are.
+    #[must_use]
+    pub fn is_solo(&self) -> bool {
+        self.policy.solo == Some(true)
     }
 
     /// Whether an active agent holds this role.
@@ -3722,5 +3784,65 @@ mod tests {
                 paths(&wire)
             );
         }
+    }
+
+    #[test]
+    fn holds_one_agent_alone_to_solo_s_rules() {
+        let mut solo = a_team_wire();
+        solo["agents"] = json!([an_agent_wire("theo", "software_developer")]);
+        solo["policy"]["solo"] = json!(true);
+        let alone = team(&solo);
+        assert!(alone.is_solo(), "policy.solo makes it one agent alone");
+        assert!(!team(&a_team_wire()).is_solo(), "a team is not solo");
+
+        // A paused agent is still the one agent; a retired one is not counted.
+        let mut paused = solo.clone();
+        paused["agents"][0]["status"] = json!("paused");
+        team(&paused);
+        let mut past = solo.clone();
+        past["agents"].as_array_mut().expect("agents").push(
+            json!({"id": "old", "display_name": "old", "role": "architect", "status": "retired"}),
+        );
+        team(&past);
+
+        let mut two = solo.clone();
+        two["agents"]
+            .as_array_mut()
+            .expect("agents")
+            .push(an_agent_wire("ada", "product_manager"));
+        let mut none = solo.clone();
+        none["agents"][0]["status"] = json!("retired");
+        for refused in [two, none] {
+            let found = refusals(&refused);
+            assert_eq!(found[0].0, "/agents");
+            assert!(found[0].1.starts_with("solo_one_agent: "), "{found:?}");
+        }
+        for role in ["scrum_master", "ui_ux_designer"] {
+            let mut wrong = solo.clone();
+            wrong["agents"][0]["role"] = json!(role);
+            let found = refusals(&wrong);
+            assert_eq!(found[0].0, "/agents/0/role");
+            assert!(found[0].1.starts_with("solo_role: "), "{found:?}");
+        }
+        // Any other role may work alone, with no Product Manager.
+        let mut pm = solo.clone();
+        pm["agents"][0]["role"] = json!("finance_specialist");
+        team(&pm);
+
+        // Without the flag a team still needs two agents and a Product Manager.
+        let mut one = a_team_wire();
+        one["agents"] = json!([an_agent_wire("ada", "product_manager")]);
+        let found = refusals(&one);
+        assert!(
+            found[0].1.starts_with("A team needs two agents"),
+            "{found:?}"
+        );
+        let mut no_pm = a_team_wire();
+        no_pm["agents"][0]["role"] = json!("architect");
+        assert!(
+            refusals(&no_pm)[0]
+                .1
+                .starts_with("A team needs an active Product Manager")
+        );
     }
 }

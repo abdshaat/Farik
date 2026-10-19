@@ -47,8 +47,13 @@ use crate::transitions::{
 /// The human, as the reviewer of an epic the Product Manager holds (5.16 item 4).
 pub(super) const HUMAN: &str = "human";
 
-/// The Product Manager: the first active agent of that role in team-file order.
+/// The Product Manager: the first active agent of that role in team-file order. One agent alone
+/// has none, whatever its role (ADR 0071): nothing that waits for a Product Manager (epics,
+/// deliveries, the product plan's interview, the Catervafication, the document refresh) runs.
 pub(super) fn product_manager(team: &Team) -> Option<&Agent> {
+    if team.is_solo() {
+        return None;
+    }
     team.active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
 }
@@ -74,8 +79,19 @@ pub(super) async fn draft(
     row: &TaskProjection,
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    let Some(pm) = product_manager(team) else {
-        return Ok(None);
+    // One agent alone has no Product Manager: the agent it was given to moves its own draft on
+    // (ADR 0071).
+    let pm = if team.is_solo() {
+        let contract = deps.tools.files.read_contract(&row.task_id)?;
+        match given_agent(deps, team, &contract)? {
+            Given::Active(agent) => agent,
+            Given::Waits | Given::No => return Ok(None),
+        }
+    } else {
+        let Some(pm) = product_manager(team) else {
+            return Ok(None);
+        };
+        pm
     };
     if !row.triaged {
         let triager = triager(team).unwrap_or(pm);
@@ -819,7 +835,7 @@ pub(super) async fn verifying_epic(
     }
     // An epic whose every criterion Catervas ran is accepted or rejected by the governor, with no
     // Product Manager's session and no human (ADR 0061).
-    if catervas_verifies_alone(contract) {
+    if catervas_verifies_alone(contract, team.is_solo()) {
         return decide_alone(deps, team, row, contract, 0);
     }
     if !the_human_reviews_the_epic(contract.kind, row.reviewer_id.as_deref()) {

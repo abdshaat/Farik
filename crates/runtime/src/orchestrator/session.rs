@@ -1367,6 +1367,7 @@ fn session_spec_without(
         connectors: &connectors,
         active_roles: &active_roles,
         stale_twins: &stale_twins,
+        solo: team.is_solo(),
         members: &members,
         own_repo,
         document_format: team.document_format(),

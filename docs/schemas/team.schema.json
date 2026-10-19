@@ -21,11 +21,11 @@
     },
     "agents": {
       "type": "array",
-      "minItems": 2,
+      "minItems": 1,
       "items": {
         "$ref": "#/$defs/agent"
       },
-      "description": "Two agents at least, and at most seven that are not retired: a retired agent stays so that its past events still name someone, and does not count. The seven, and two more rules, are validate_team's rather than this schema's, because a schema cannot count only some items and typify cannot generate a usable type from an array that carries a `contains`: ids are unique, and the team has an active Product Manager."
+      "description": "Two agents at least, or one that is not retired when policy.solo is true, and at most seven that are not retired: a retired agent stays so that its past events still name someone, and does not count. The seven, and two more rules, are validate_team's rather than this schema's, because a schema cannot count only some items and typify cannot generate a usable type from an array that carries a `contains`: ids are unique, and the team has an active Product Manager."
     },
     "budgets": {
       "$ref": "#/$defs/budgets"
@@ -356,7 +356,9 @@
           "enum": [
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh",
+            "max"
           ],
           "description": "How hard the model thinks. The runtime passes this value to the program as it is (catervas_runtime::SessionSpec::effort)."
         }
@@ -448,6 +450,10 @@
             "pull_request"
           ],
           "description": "What happens to a task's branch after it is accepted (spec 5.14)."
+        },
+        "solo": {
+          "type": "boolean",
+          "description": "One agent alone (ADR 0071): the team is exactly one agent that is not retired, of any role but the Scrum Master and the UI/UX Designer, with no Product Manager, no reviewer and no planning. Absent means false."
         },
         "integration_branch": {
           "type": "string",

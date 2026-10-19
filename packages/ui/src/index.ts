@@ -11,6 +11,7 @@ export { List } from "./List.tsx";
 export { type DiffFile, parseDiff } from "./parse-diff.ts";
 export { RoleTag } from "./RoleTag.tsx";
 export type { Role } from "./role.ts";
+export { Segmented } from "./Segmented.tsx";
 export { StatusWord } from "./StatusWord.tsx";
 export { Stepper } from "./Stepper.tsx";
 export { Switch } from "./Switch.tsx";

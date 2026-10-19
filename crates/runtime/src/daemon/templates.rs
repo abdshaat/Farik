@@ -589,8 +589,8 @@ mod tests {
         assert_eq!(
             shown["effects"],
             json!([
-                "Ada's model changes from the role's model to the everyday model.",
-                "Ada now works quickly.",
+                "Ada's model changes from the role's model to Sonnet 5.",
+                "Ada now works at low effort.",
                 "The team has no daily spending limit.",
                 "Developers and Architects may no longer run commands.",
                 "Catervas still runs every check itself; the agents cannot run commands.",

@@ -91,9 +91,11 @@ fn model_change(name: &str, before: &Agent, agent: &Agent) -> Vec<String> {
     }
     if effort(before) != effort(agent) {
         said.push(match effort(agent) {
-            Some(Effort::Low) => format!("{name} now works quickly."),
-            Some(Effort::Medium) => format!("{name} now works in a balanced way."),
-            Some(Effort::High) => format!("{name} now works carefully."),
+            Some(Effort::Low) => format!("{name} now works at low effort."),
+            Some(Effort::Medium) => format!("{name} now works at medium effort."),
+            Some(Effort::High) => format!("{name} now works at high effort."),
+            Some(Effort::Xhigh) => format!("{name} now thinks longer."),
+            Some(Effort::Max) => format!("{name} now thinks as long as it can."),
             None => format!("{name} now works as its role usually does."),
         });
     }
@@ -112,33 +114,41 @@ fn effort(agent: &Agent) -> Option<Effort> {
     agent.model.as_ref().and_then(|model| model.effort)
 }
 
-/// Each model family a person may choose, as its ids start, the words its card shows, and the
-/// words a sentence names it by.
-pub const MODEL_FAMILIES: [(&str, &str, &str); 4] = [
-    (
-        "claude-fable-",
-        "Most capable model",
-        "the most capable model",
-    ),
-    (
-        "claude-opus-",
-        "Strongest model, thinks hard",
-        "the strongest model",
-    ),
-    ("claude-sonnet-", "Everyday model", "the everyday model"),
-    ("claude-haiku-", "Quick model", "the quick model"),
+/// Each model family a person may choose, as its ids start and the word Anthropic names it by.
+pub const MODEL_FAMILIES: [(&str, &str); 4] = [
+    ("claude-fable-", "Fable"),
+    ("claude-opus-", "Opus"),
+    ("claude-sonnet-", "Sonnet"),
+    ("claude-haiku-", "Haiku"),
 ];
 
-/// The words a sentence names the model `id` by: its family's, the role's when there is none, or
-/// the id itself when no family Catervas names it.
-fn model_words(id: Option<&str>) -> &str {
-    let Some(id) = id else {
-        return "the role's model";
-    };
-    MODEL_FAMILIES
+/// A model as Anthropic names it: its family's word and the version numbers of its id joined by
+/// dots ("claude-opus-5-5" is "Opus 5.5"). A part of a thousand or more is a date, not a version.
+/// `None` for an id no family names.
+#[must_use]
+pub fn model_name(id: &str) -> Option<String> {
+    let (rest, word) = MODEL_FAMILIES
         .iter()
-        .find(|(prefix, _, _)| id.starts_with(prefix))
-        .map_or(id, |(_, _, words)| words)
+        .find_map(|(prefix, word)| id.strip_prefix(prefix).map(|rest| (rest, *word)))?;
+    let version: Vec<String> = rest
+        .split('-')
+        .map_while(|part| part.parse::<u32>().ok().filter(|n| *n < 1000))
+        .map(|n| n.to_string())
+        .collect();
+    Some(if version.is_empty() {
+        word.to_string()
+    } else {
+        format!("{word} {}", version.join("."))
+    })
+}
+
+/// The words a sentence names the model `id` by: its name, the role's when there is none, or the
+/// id itself when no family Catervas names it.
+fn model_words(id: Option<&str>) -> String {
+    match id {
+        None => "the role's model".to_string(),
+        Some(id) => model_name(id).unwrap_or_else(|| id.to_string()),
+    }
 }
 
 /// What a tier lets an agent do, after "may".
@@ -158,7 +168,7 @@ fn may(tier: PermissionTier) -> &'static str {
 mod tests {
     use serde_json::{Value, json};
 
-    use super::describe_change;
+    use super::{describe_change, model_name};
     use crate::team::fixtures::{a_team_wire, an_agent_wire};
     use crate::team::{Team, validate_team};
 
@@ -172,14 +182,40 @@ mod tests {
         let mut new = a_team_wire();
         new["agents"][1]["model"] = json!({ "effort": "low" });
         let new = validate_team(&new).expect("an effort without a model is a team");
-        assert_eq!(describe_change(&old, &new), ["linus now works quickly."]);
+        assert_eq!(
+            describe_change(&old, &new),
+            ["linus now works at low effort."]
+        );
+        for (wire, said) in [
+            ("medium", "linus now works at medium effort."),
+            ("high", "linus now works at high effort."),
+            ("xhigh", "linus now thinks longer."),
+            ("max", "linus now thinks as long as it can."),
+        ] {
+            let mut to = a_team_wire();
+            to["agents"][1]["model"] = json!({ "effort": wire });
+            assert_eq!(describe_change(&old, &team(&to)), [said]);
+        }
+    }
+
+    #[test]
+    fn names_a_model_by_its_family_and_version() {
+        assert_eq!(model_name("claude-opus-5-5").as_deref(), Some("Opus 5.5"));
+        assert_eq!(model_name("claude-fable-5-1").as_deref(), Some("Fable 5.1"));
+        assert_eq!(model_name("claude-sonnet-5").as_deref(), Some("Sonnet 5"));
+        assert_eq!(
+            model_name("claude-haiku-4-5-20251001").as_deref(),
+            Some("Haiku 4.5"),
+            "a date is not a version"
+        );
+        assert_eq!(model_name("local-model"), None);
     }
 
     #[test]
     fn names_models_in_the_words_the_page_uses() {
         let mut old = a_team_wire();
         old["agents"][0]["model"] = json!({ "id": "claude-opus-5", "effort": "high" });
-        old["agents"][1]["model"] = json!({ "id": "claude-haiku-4-5" });
+        old["agents"][1]["model"] = json!({ "id": "claude-haiku-4-5-20251001" });
         let old = team(&old);
         let mut new = serde_json::to_value(&old).expect("a team is JSON");
         new["agents"][0]["model"] = json!({ "id": "claude-opus-5-5", "effort": "medium" });
@@ -187,9 +223,9 @@ mod tests {
         assert_eq!(
             describe_change(&old, &team(&new)),
             [
-                "ada moves to another version of the strongest model.",
-                "ada now works in a balanced way.",
-                "linus's model changes from the quick model to local-model.",
+                "ada's model changes from Opus 5 to Opus 5.5.",
+                "ada now works at medium effort.",
+                "linus's model changes from Haiku 4.5 to local-model.",
             ],
             "a model of no family Catervas names keeps its id"
         );
@@ -197,7 +233,7 @@ mod tests {
         fable["agents"][0]["model"] = json!({ "id": "claude-fable-5", "effort": "high" });
         assert_eq!(
             describe_change(&old, &team(&fable)),
-            ["ada's model changes from the strongest model to the most capable model."]
+            ["ada's model changes from Opus 5 to Fable 5."]
         );
     }
 
@@ -226,8 +262,8 @@ mod tests {
             describe_change(&old, &new),
             [
                 "Ada may no longer use the internet.",
-                "Linus's model changes from the role's model to the everyday model.",
-                "Linus now works carefully.",
+                "Linus's model changes from the role's model to Sonnet 5.",
+                "Linus now works at high effort.",
                 "The team may spend up to $10 a day.",
                 "Developers and Architects may no longer run commands.",
                 "Catervas still runs every check itself; the agents cannot run commands.",
@@ -274,7 +310,7 @@ mod tests {
         assert_eq!(
             describe_change(&back, &cleared),
             [
-                "Linus's model changes from the everyday model to the role's model.",
+                "Linus's model changes from Sonnet 5 to the role's model.",
                 "The team has no daily spending limit.",
             ]
         );

@@ -74,7 +74,9 @@
           "enum": [
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh",
+            "max"
           ],
           "description": "How hard the model thinks by default."
         }

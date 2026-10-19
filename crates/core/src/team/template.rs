@@ -117,6 +117,7 @@ fn team_wire(template: &TeamTemplate) -> Value {
     let mut policy = defaults().policy;
     policy.permissions = Some(template.policy.permissions.clone());
     policy.integration = template.policy.integration;
+    policy.solo = template.policy.solo;
     let agents: Vec<Value> = template
         .agents
         .iter()
@@ -176,6 +177,9 @@ pub fn template_from_team(
     });
     if let Some(document_format) = team.policy.document_format {
         policy["document_format"] = json!(document_format);
+    }
+    if team.is_solo() {
+        policy["solo"] = json!(true);
     }
     validate_template(&json!({
         "version": 1,
@@ -283,6 +287,7 @@ pub fn apply_template(
     }
     team.policy.permissions = Some(template.policy.permissions.clone());
     team.policy.integration = template.policy.integration;
+    team.policy.solo = template.policy.solo;
     if let Some(document_format) = template.policy.document_format {
         team.policy.document_format = Some(match document_format {
             TemplatePolicyDocumentFormat::Html => PolicyDocumentFormat::Html,
@@ -1028,6 +1033,30 @@ mod tests {
             serde_json::to_value(&result.team).expect("serialises"),
             expected,
             "the four answers are the template's; rules, name and every other key the project's"
+        );
+    }
+
+    #[test]
+    fn templates_carry_one_agent_alone() {
+        let mut solo = a_team_wire();
+        solo["agents"] = json!([an_agent_wire("theo", "software_developer")]);
+        solo["policy"]["solo"] = json!(true);
+        let template = template_of(&solo);
+        assert_eq!(template["policy"]["solo"], json!(true));
+        assert!(template_of(&a_team_wire())["policy"].get("solo").is_none());
+
+        let made = applied(&a_team_wire(), &template, &[]);
+        assert!(made.errors.is_empty(), "{:?}", made.errors);
+        assert!(
+            made.team.is_solo(),
+            "applying a solo template makes it solo"
+        );
+
+        let back = applied(&solo, &template_of(&a_team_wire()), &[]);
+        assert!(back.errors.is_empty(), "{:?}", back.errors);
+        assert!(
+            !back.team.is_solo(),
+            "applying a team's template makes it a team"
         );
     }
 

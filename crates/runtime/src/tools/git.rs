@@ -115,12 +115,69 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
                 deps.clock.as_ref(),
                 &call.ids(Some(task)),
                 Some(task.clone()),
-                &format!("{} could not be committed: {error}", task.as_str()),
+                &format!(
+                    "{} could not be committed: {}",
+                    task.as_str(),
+                    why_in_words(&error)
+                ),
             )
             .map_err(failed)?;
             Err(failed(error))
         }
     }
+}
+
+/// Why git refused, for the channel: the lines of what it said that name a failure, else its
+/// first, without colour codes. A hook's whole log (its banner, an install's progress, timings)
+/// would bury the reason; the agent still gets git's full answer.
+/// ponytail: a failure is found by its words; a hook whose reason uses none of them shows its first line.
+fn why_in_words(error: &catervas_store::git::GitError) -> String {
+    let catervas_store::git::GitError::CommandFailed { stderr, .. } = error else {
+        return error.to_string();
+    };
+    let plain = without_colour(stderr);
+    let lines: Vec<&str> = plain
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.chars().any(char::is_alphanumeric))
+        .collect();
+    let failing: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            [
+                "error", "fatal", "fail", "refus", "reject", "denied", "invalid", " is not ",
+            ]
+            .iter()
+            .any(|word| lower.contains(word))
+        })
+        .collect();
+    match (failing.is_empty(), lines.first()) {
+        (false, _) => failing.join(" "),
+        (true, Some(first)) => (*first).to_string(),
+        (true, None) => error.to_string(),
+    }
+}
+
+/// `text` without its terminal escape sequences (`ESC [` up to a letter).
+fn without_colour(text: &str) -> String {
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            plain.push(c);
+        }
+    }
+    plain
 }
 
 /// Whether the file at `path` has a line that opens or closes a conflict (`<<<<<<< ` or
@@ -203,6 +260,48 @@ mod tests {
 
     use crate::tools::ToolError;
     use crate::tools::fixtures::{TestProject, a_team_of_three};
+
+    #[test]
+    fn tells_the_channel_why_a_commit_was_refused_without_the_hooks_log() {
+        // What lefthook printed when a commit's subject had no scope, as git passed it on.
+        let stderr = "\u{1b}[38;2;56;56;56m╭──────────────╮\u{1b}[m\n\
+            \u{1b}[38;2;56;56;56m│\u{1b}[m 🥊 lefthook  v2.2.1   hook:  \u{1b}[1mpre-commit\u{1b}[m \u{1b}[38;2;56;56;56m│\u{1b}[m\n\
+            \u{1b}[38;2;56;56;56m╰──────────────╯\u{1b}[m\n\
+            ┃  pre-commit ❯\n\
+            Packages: +543\n\
+            ++++++++++++++++++++++++++++++++\n\
+            Progress: resolved 543, reused 543, downloaded 0, added 543, done\n\
+            Checked 1411 files in 204ms. No fixes applied.\n\
+            \u{1b}[38;2;56;56;56m  ────────────────────\u{1b}[m\n\
+            summary: (done in 0.99 seconds)\n\
+            ✔️ pre-commit (0.99 seconds)\n\
+            ┃  commit-msg ❯\n\
+            $ node tools/check/src/tools.ts commit-msg /home/x/.git/worktrees/CTV-14/COMMIT_EDITMSG\n\
+            commit-msg: subject \"docs: add delivery 1\" is not <type>(<scope>): <subject>\n\
+            [ELIFECYCLE] Command failed with exit code 1.\n\
+            \n\
+            exit status 1\n\
+            summary: (done in 0.14 seconds)\n\
+            🥊 commit-msg (0.14 seconds)";
+        let error = catervas_store::git::GitError::CommandFailed {
+            command: "commit -m docs: add delivery 1".to_string(),
+            stderr: stderr.to_string(),
+        };
+        assert_eq!(
+            super::why_in_words(&error),
+            "commit-msg: subject \"docs: add delivery 1\" is not <type>(<scope>): <subject> \
+             [ELIFECYCLE] Command failed with exit code 1."
+        );
+        // git's own refusal is its first line; nothing it says is lost when no line names a failure.
+        let error = catervas_store::git::GitError::CommandFailed {
+            command: "commit".to_string(),
+            stderr: "fatal: pathspec 'src/login/form.ts' did not match any files".to_string(),
+        };
+        assert_eq!(
+            super::why_in_words(&error),
+            "fatal: pathspec 'src/login/form.ts' did not match any files"
+        );
+    }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
@@ -468,7 +567,12 @@ mod tests {
             line.envelope.ids.task_id.as_ref().map(|id| id.as_str()),
             Some("CTV-1")
         );
-        assert_eq!(body.text, format!("CTV-1 could not be committed: {detail}"));
+        assert!(
+            body.text.starts_with("CTV-1 could not be committed: ")
+                && body.text.contains("src/login/form.ts"),
+            "{}",
+            body.text
+        );
     }
 
     #[test]

@@ -322,6 +322,8 @@ fn parse_role(
             CatervasRoleModelEffort::Low => Effort::Low,
             CatervasRoleModelEffort::Medium => Effort::Medium,
             CatervasRoleModelEffort::High => Effort::High,
+            CatervasRoleModelEffort::Xhigh => Effort::Xhigh,
+            CatervasRoleModelEffort::Max => Effort::Max,
         },
         system_prompt: system.to_string(),
         skills,

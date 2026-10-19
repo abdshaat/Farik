@@ -115,7 +115,7 @@ pub struct DoneFailure {
 #[must_use]
 pub fn result_awaits_human(contract: &TaskContract) -> bool {
     contract.status == TaskStatus::Verifying
-        && !catervas_verifies_alone(contract)
+        && !catervas_verifies_alone(contract, false)
         && (contract.kind == Kind::Epic
             || contract
                 .exit_criteria
@@ -126,10 +126,11 @@ pub fn result_awaits_human(contract: &TaskContract) -> bool {
 /// Whether Catervas accepts or rejects the contract on its own (ADR 0061): no agent reviews it
 /// (it is not a code task) and every exit criterion is one Catervas runs (`command`, `test` or
 /// `artifact`). A contract that is not reviewed but still carries a `review` or `human` criterion,
-/// written before readiness refused them, takes the old path.
+/// written before readiness refused them, takes the old path. In a team of one agent alone (`solo`,
+/// ADR 0071) no agent reviews any task, so Catervas verifies it whatever it changes.
 #[must_use]
-pub fn catervas_verifies_alone(contract: &TaskContract) -> bool {
-    !reviewed_by_an_agent(contract)
+pub fn catervas_verifies_alone(contract: &TaskContract, solo: bool) -> bool {
+    (solo || !reviewed_by_an_agent(contract))
         && contract.exit_criteria.iter().all(|criterion| {
             matches!(
                 wire_method(&criterion.verification),

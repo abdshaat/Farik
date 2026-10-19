@@ -15,8 +15,8 @@ use catervas_core::governor::gates::DesignerBrowser;
 use catervas_core::governor::paths::{PathRefusal, check_protected_paths};
 use catervas_core::team::{
     Agent, AgentStatus, CustomServer, CustomTransport, MODEL_FAMILIES, McpServerSource,
-    McpServerWire, Team, ValidationError, custom_server, describe_change, spec_sha256,
-    validate_team,
+    McpServerWire, Signal, SuggestedTeam, Team, ValidationError, custom_server, describe_change,
+    model_name, spec_sha256, suggest_teams, validate_team,
 };
 use catervas_protocol::command::{Command, CommandReply};
 use catervas_protocol::event::{EventBody, new_event};
@@ -1367,15 +1367,71 @@ fn propose(deps: &ToolDeps) -> Result<Value, Failure> {
     team["agents"] = serde_json::to_value(agents).map_err(|e| internal(&e))?;
     // A team with no preview is proposed the one the scan found, if it found one (ADR 0054); a scan
     // that fails proposes none.
-    let found = scan_project(&deps.git, deps.clock.now())
-        .ok()
-        .and_then(|scan| scan.app_start);
+    let scan = scan_project(&deps.git, deps.clock.now()).ok();
+    let found = scan.as_ref().and_then(|scan| scan.app_start.clone());
     if let (true, Some(app)) = (team.get("preview").is_none_or(Value::is_null), found) {
         team["preview"] = json!({ "prepare": app.prepare, "start": app.start, "path": "/" });
     }
     let criteria = serde_json::to_value(deps.files.read_criteria().map_err(|e| internal(&e))?)
         .map_err(|e| internal(&e))?;
-    Ok(json!({ "team": team, "criteria": criteria, "unavailable": unavailable }))
+    let suggested_teams = suggested_teams(deps, scan.as_ref());
+    let role_defaults = role_defaults()?;
+    Ok(json!({
+        "team": team,
+        "criteria": criteria,
+        "unavailable": unavailable,
+        "suggested_teams": suggested_teams,
+        "role_defaults": role_defaults,
+    }))
+}
+
+/// Every ready-made team once, best fit for the folder first (design section 5). A scan that
+/// failed, or a folder with nothing tracked, gives the order of a new project. A ready-made team
+/// the rules do not name follows, in the order it ships.
+fn suggested_teams(deps: &ToolDeps, scan: Option<&catervas_store::ProjectScan>) -> Vec<Value> {
+    let tracked = scan
+        .and_then(|_| deps.git.tracked_paths().ok())
+        .unwrap_or_default();
+    let language = scan.and_then(|scan| scan.facts.language.as_deref());
+    let tests = scan.is_some_and(|scan| scan.facts.tests_in.is_some());
+    let mut teams = suggest_teams(&tracked, language, tests);
+    for (slug, _) in catervas_roles::BUILTIN_TEAMS {
+        if teams.iter().all(|team| team.slug != slug) {
+            teams.push(SuggestedTeam {
+                slug: slug.to_string(),
+                signal: Signal::New,
+                language: language.map(ToString::to_string),
+                tests,
+            });
+        }
+    }
+    teams
+        .iter()
+        .map(|team| serde_json::to_value(team).unwrap_or(Value::Null))
+        .collect()
+}
+
+/// Each role's shipped model, effort and persona, keyed by the role's wire name, for an agent
+/// that setup adds whose role is not among the suggested agents.
+fn role_defaults() -> Result<Value, Failure> {
+    let mut defaults = serde_json::Map::new();
+    for role in [
+        Role::ProductManager,
+        Role::ScrumMaster,
+        Role::Architect,
+        Role::SoftwareDeveloper,
+        Role::UiUxDesigner,
+        Role::MarketingSpecialist,
+        Role::FinanceSpecialist,
+        Role::ProcurementSpecialist,
+    ] {
+        let shipped = load_role(role).map_err(|e| internal(&e))?;
+        defaults.insert(
+            role.to_string(),
+            json!({ "model": shipped.model, "effort": shipped.effort, "persona": shipped.persona }),
+        );
+    }
+    Ok(Value::Object(defaults))
 }
 
 /// The six setup suggests, one of each role, active, each with its role's persona, model and
@@ -1441,13 +1497,13 @@ fn models(deps: &ToolDeps) -> Result<Value, Failure> {
     Ok(json!({ "models": models }))
 }
 
-/// The newest model of each family the prices name, with its words. A dated snapshot is the same
+/// The newest model of each family the prices name, with its name. A dated snapshot is the same
 /// model as its alias, so it is passed over.
-fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
+fn newest(deps: &ToolDeps) -> Result<Vec<(String, String)>, Failure> {
     let prices = deps.files.effective_prices().map_err(|e| internal(&e))?;
     Ok(MODEL_FAMILIES
         .iter()
-        .filter_map(|(prefix, label, _)| {
+        .filter_map(|(prefix, _)| {
             prices
                 .prices
                 .keys()
@@ -1460,21 +1516,28 @@ fn newest(deps: &ToolDeps) -> Result<Vec<(String, &'static str)>, Failure> {
                     Some((version, id))
                 })
                 .max()
-                .map(|(_, id)| (id.clone(), *label))
+                .and_then(|(_, id)| Some((id.clone(), model_name(id)?)))
         })
         .collect())
 }
 
-/// The words for `id`: its family's, marked older when a newer one of the family is priced, or
+/// The name of `id` ("Opus 5.5"), marked older when a newer version of its family is priced, or
 /// the id itself when no family Catervas names it.
-fn model_label(id: &str, newest: &[(String, &str)]) -> String {
-    match MODEL_FAMILIES
+fn model_label(id: &str, newest: &[(String, String)]) -> String {
+    let Some(name) = model_name(id) else {
+        return id.to_string();
+    };
+    let family = MODEL_FAMILIES
         .iter()
-        .find(|(prefix, _, _)| id.starts_with(prefix))
-    {
-        Some((_, label, _)) if newest.iter().any(|(new, _)| new == id) => (*label).to_string(),
-        Some((_, label, _)) => format!("{label} (older)"),
-        None => id.to_string(),
+        .find(|(prefix, _)| id.starts_with(prefix))
+        .map(|(prefix, _)| *prefix);
+    let current = newest.iter().any(|(newest_id, label)| {
+        *label == name && family.is_some_and(|f| newest_id.starts_with(f))
+    });
+    if current {
+        name
+    } else {
+        format!("{name} (older)")
     }
 }
 
@@ -1659,6 +1722,9 @@ fn code_of(error: &ValidationError) -> &'static str {
             "needs_product_manager"
         }
         ["agents"] if message.starts_with("an agent id names") => "repeated_id",
+        ["agents"] if message.starts_with("A team needs two agents") => "too_few",
+        ["agents"] if message.starts_with("solo_one_agent: ") => "solo_one_agent",
+        ["agents", _, "role"] if message.starts_with("solo_role: ") => "solo_role",
         ["agents"] if message.ends_with(WORKED) => "worked",
         ["agents", _, "display_name"] => "name",
         ["agents", _, "revokes"] => "keeps_read",
@@ -3093,6 +3159,67 @@ pub(super) mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn proposes_teams_for_the_folder_and_each_roles_defaults() {
+        let harness = driven("team-propose-folder");
+        let proposed = query(
+            &harness.daemon,
+            "team.propose",
+            &json!({}),
+            "teamProposeResult",
+        );
+        // The folder is a new project: every ready-made team once, the software team first.
+        let suggested: Vec<(&str, &str)> = proposed["suggested_teams"]
+            .as_array()
+            .expect("suggested_teams")
+            .iter()
+            .map(|team| {
+                (
+                    team["slug"].as_str().expect("a slug"),
+                    team["signal"].as_str().expect("a signal"),
+                )
+            })
+            .collect();
+        assert_eq!(
+            suggested,
+            [
+                ("software-product", "new"),
+                ("online-store", "new"),
+                ("financial-analysis", "new")
+            ]
+        );
+        assert_eq!(proposed["suggested_teams"][0]["language"], Value::Null);
+        assert_eq!(proposed["suggested_teams"][0]["tests"], json!(false));
+        // Every role's shipped model, effort and persona, for an agent setup adds.
+        let defaults = proposed["role_defaults"]
+            .as_object()
+            .expect("role_defaults");
+        let mut roles: Vec<&str> = defaults.keys().map(String::as_str).collect();
+        roles.sort_unstable();
+        assert_eq!(
+            roles,
+            [
+                "architect",
+                "finance_specialist",
+                "marketing_specialist",
+                "procurement_specialist",
+                "product_manager",
+                "scrum_master",
+                "software_developer",
+                "ui_ux_designer"
+            ]
+        );
+        assert_eq!(
+            defaults["architect"],
+            json!({
+                "model": "claude-opus-5-5",
+                "effort": "high",
+                "persona": "Thinks about how it all fits together"
+            })
+        );
+    }
+
     /// Whether `act` wakes an orchestrator of `harness` waiting for an hour, within 5 s, and
     /// what `act` answered.
     pub(crate) async fn wakes<T>(
@@ -3969,8 +4096,8 @@ pub(super) mod tests {
             json!({
                 "errors": [],
                 "effects": [
-                    "dev-a's model changes from the role's model to the strongest model.",
-                    "dev-a now works quickly.",
+                    "dev-a's model changes from the role's model to Opus 5.",
+                    "dev-a now works at low effort.",
                 ],
             })
         );
@@ -4047,25 +4174,25 @@ pub(super) mod tests {
             json!([
                 {
                     "id": "pm",
-                    "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
+                    "model": { "id": "claude-opus-5-5", "label": "Opus 5.5", "effort": "high" },
                     "tiers": ["read", "network", "write_workspace", "git_local"],
                     "base_tiers": ["read", "network", "write_workspace", "git_local"],
                 },
                 {
                     "id": "dev-a",
-                    "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
+                    "model": { "id": "claude-opus-5-5", "label": "Opus 5.5", "effort": "high" },
                     "tiers": ["read", "write_workspace", "network", "git_remote"],
                     "base_tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                 },
                 {
                     "id": "dev-b",
-                    "model": { "id": "claude-sonnet-5", "label": "Everyday model (older)", "effort": "low" },
+                    "model": { "id": "claude-sonnet-5", "label": "Sonnet 5 (older)", "effort": "low" },
                     "tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                     "base_tiers": ["read", "write_workspace", "network", "git_local", "git_remote"],
                 },
                 {
                     "id": "ada",
-                    "model": { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard", "effort": "high" },
+                    "model": { "id": "claude-opus-5-5", "label": "Opus 5.5", "effort": "high" },
                     "tiers": ["read", "write_workspace", "network", "git_local"],
                     "base_tiers": ["read", "write_workspace", "network", "git_local"],
                 },
@@ -4188,6 +4315,11 @@ pub(super) mod tests {
         assert_eq!(
             codes(&|team| team["agents"][1]["id"] = json!("pm")),
             ["/agents repeated_id"]
+        );
+        assert_eq!(
+            codes(&|team| team["policy"]["solo"] = json!(true)),
+            ["/agents solo_one_agent"],
+            "one agent alone is one agent"
         );
         assert_eq!(
             codes(&|team| team["agents"][1]["display_name"] = json!("")),
@@ -4788,10 +4920,10 @@ pub(super) mod tests {
                 "modelsListResult"
             ),
             json!({ "models": [
-                { "id": "claude-fable-5-1", "label": "Most capable model" },
-                { "id": "claude-opus-5-5", "label": "Strongest model, thinks hard" },
-                { "id": "claude-sonnet-5-5", "label": "Everyday model" },
-                { "id": "claude-haiku-4-5", "label": "Quick model" },
+                { "id": "claude-fable-5-1", "label": "Fable 5.1" },
+                { "id": "claude-opus-5-5", "label": "Opus 5.5" },
+                { "id": "claude-sonnet-5-5", "label": "Sonnet 5.5" },
+                { "id": "claude-haiku-4-5", "label": "Haiku 4.5" },
             ] })
         );
     }

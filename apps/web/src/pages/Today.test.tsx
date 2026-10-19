@@ -12,6 +12,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConnectionProvider } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
+import { t } from "../strings/t.ts";
 import {
 	BUDGET_ROW,
 	PLAN_BUDGET_ROW,
@@ -260,6 +261,32 @@ describe("today", () => {
 					.params,
 			).toEqual({ task_id: "CTV-3" }),
 		);
+	});
+
+	it("names_the_one_agent_in_the_request_box_when_it_works_alone", async () => {
+		const theo = TEAM.agents[2] as (typeof TEAM.agents)[number];
+		const { s } = await today({
+			team: { ...TEAM, agents: [theo], policy: { solo: true } },
+			activity: { activity: [] },
+		});
+		const box = await screen.findByRole("textbox", {
+			name: t("requestLabelSolo", { name: "Theo" }),
+		});
+		expect(
+			screen.getByText(t("requestHintSolo", { name: "Theo" })),
+		).toBeTruthy();
+		fireEvent.change(box, {
+			target: { value: "Add gift cards to the checkout page" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: "Send to Theo" }));
+		const sentRequest = await waitFor(() => {
+			const f = s.calls("request.file")[0];
+			if (!f) throw new Error("no request.file was sent");
+			return f;
+		});
+		expect(sentRequest.params).toEqual({
+			text: "Add gift cards to the checkout page",
+		});
 	});
 
 	it("waits_for_the_connection_before_a_request_can_be_sent", async () => {

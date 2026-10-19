@@ -45,6 +45,10 @@ export function RequestFiled() {
 
 	const agents = team.team.agents;
 	const pm = active(agents, "product_manager");
+	// One agent alone takes the request itself: no sizing, no Product Manager (ADR 0071).
+	const solo = team.team.policy.solo
+		? agents.find((a) => a.status !== "retired")
+		: undefined;
 	// SPEC 5.16: the Scrum Master sizes and breaks down, or the PM when there is none.
 	const sizer = active(agents, "scrum_master") ?? pm;
 	const pmName = pm?.displayName ?? uiStrings.roleName.product_manager;
@@ -85,7 +89,11 @@ export function RequestFiled() {
 		<div className={styles.page}>
 			<Link to="/">{t("backToToday")}</Link>
 			<div className={styles.section}>
-				<h1 className={styles.title}>{t("requestTitle")}</h1>
+				<h1 className={styles.title}>
+					{solo
+						? t("requestTitleSolo", { name: solo.displayName })
+						: t("requestTitle")}
+				</h1>
 				{created && (
 					<p className={styles.muted}>
 						{t("requestSent", { id, time: created.recordedAt.slice(11, 16) })}
@@ -96,7 +104,18 @@ export function RequestFiled() {
 				<h2 id="asked">{t("youAsked")}</h2>
 				<p className={own.asked}>{contract.contract.intent}</p>
 			</section>
-			{size ? (
+			{solo ? (
+				<section className={styles.section} aria-labelledby="next">
+					<h2 id="next">{t("nextTitle")}</h2>
+					<ol aria-labelledby="next">
+						{([1, 2, 3, 4] as const).map((n) => (
+							<li key={n}>
+								{t(`nextSolo${n}` as const, { name: solo.displayName })}
+							</li>
+						))}
+					</ol>
+				</section>
+			) : size ? (
 				<section className={styles.section} aria-labelledby="sized">
 					<h2 id="sized">
 						{t(byHuman ? "youSizedAs" : "sizedAs", {
@@ -149,7 +168,7 @@ export function RequestFiled() {
 			) : (
 				<p>{t("sizing", { name: sizerName })}</p>
 			)}
-			{size && (
+			{size && !solo && (
 				<section className={styles.section} aria-labelledby="next">
 					<h2 id="next">{t("nextTitle")}</h2>
 					<ol aria-labelledby="next">
@@ -178,10 +197,14 @@ export function RequestFiled() {
 								})
 							: t("notYet")}
 					</dd>
-					<dt>{t("aboutSizedBy")}</dt>
-					<dd>{byHuman ? t("you") : nameRole(size ? by : undefined)}</dd>
+					{!solo && (
+						<>
+							<dt>{t("aboutSizedBy")}</dt>
+							<dd>{byHuman ? t("you") : nameRole(size ? by : undefined)}</dd>
+						</>
+					)}
 					<dt>{t("aboutPlannedBy")}</dt>
-					<dd>{nameRole(pm)}</dd>
+					<dd>{nameRole(solo ?? pm)}</dd>
 					<dt>{t("aboutPlanId")}</dt>
 					<dd>{id}</dd>
 					<dt>{t("aboutStatus")}</dt>

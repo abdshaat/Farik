@@ -48,12 +48,15 @@ export function PermissionChoices({
 	commands,
 	push,
 	developers,
+	solo,
 	onAnswer,
 	putBack,
 }: {
 	commands: boolean | undefined;
 	push: boolean | undefined;
 	developers: Agent[];
+	/** The one agent's name, when it works alone (ADR 0071): the questions name it, not a team. */
+	solo?: string | undefined;
 	onAnswer: (next: Draft["answers"]) => void;
 	putBack: (() => void) | undefined;
 }) {
@@ -62,20 +65,26 @@ export function PermissionChoices({
 			<div className={styles.card}>
 				<Choice<Answer>
 					name="commands"
-					legend={t("mayCommands")}
+					legend={
+						solo ? t("mayCommandsSolo", { name: solo }) : t("mayCommands")
+					}
 					info={<Bullets text={t("mayCommandsNote")} />}
 					value={word(commands)}
 					onChange={(v) => onAnswer({ commands: v === "yes" })}
 					options={[
 						{
 							value: "yes",
-							label: t("mayCommandsYes"),
+							label: solo
+								? t("mayCommandsYesSolo", { name: solo })
+								: t("mayCommandsYes"),
 							description: t("mayCommandsYesNote"),
 						},
 						{
 							value: "no",
 							label: t("mayCommandsNo"),
-							description: t("mayCommandsNoNote"),
+							description: solo
+								? t("mayCommandsNoNoteSolo", { name: solo })
+								: t("mayCommandsNoNote"),
 						},
 					]}
 				/>
@@ -86,16 +95,18 @@ export function PermissionChoices({
 			<div className={styles.card}>
 				<Choice<Answer>
 					name="push"
-					legend={t("mayPush")}
+					legend={solo ? t("mayPushSolo", { name: solo }) : t("mayPush")}
 					info={
 						<Bullets
 							text={
-								developers.length === 1
-									? t("mayPushNoteOne").replace(
-											"{name}",
-											developers[0]?.displayName ?? "",
-										)
-									: t("mayPushNoteMany")
+								solo
+									? t("mayPushNoteSolo")
+									: developers.length === 1
+										? t("mayPushNoteOne").replace(
+												"{name}",
+												developers[0]?.displayName ?? "",
+											)
+										: t("mayPushNoteMany")
 							}
 						/>
 					}
@@ -130,6 +141,7 @@ export function SetupPermissions() {
 	const team = teamOf(draft);
 	const agents = team.agents;
 	const developers = agents.filter((a) => a.role === "software_developer");
+	const solo = team.policy.solo ? agents[0]?.displayName : undefined;
 	// What each agent may do is the daemon's answer for the team as the answers leave it.
 	const { data: checked } = useQuery<{
 		agents?: { id: string; tiers: Tier[] }[];
@@ -161,11 +173,16 @@ export function SetupPermissions() {
 	}, [defaults, commands, push]);
 
 	return (
-		<Wizard step={5} title={t("mayTitle")} lead={t("mayLead")}>
+		<Wizard
+			step={5}
+			title={solo ? t("mayTitleSolo", { name: solo }) : t("mayTitle")}
+			lead={t("mayLead")}
+		>
 			<PermissionChoices
 				commands={commands}
 				push={push}
 				developers={developers}
+				solo={solo}
 				onAnswer={answer}
 				putBack={
 					defaults &&

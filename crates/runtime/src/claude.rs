@@ -1082,6 +1082,24 @@ mod tests {
     }
 
     #[test]
+    fn passes_each_of_the_five_efforts_to_claude_code() {
+        let project = a_project("claude-efforts");
+        let config = config(&project);
+        for (effort, flag) in [
+            (catervas_core::team::Effort::Low, "low"),
+            (catervas_core::team::Effort::Medium, "medium"),
+            (catervas_core::team::Effort::High, "high"),
+            (catervas_core::team::Effort::Xhigh, "xhigh"),
+            (catervas_core::team::Effort::Max, "max"),
+        ] {
+            let spec = SessionSpec { effort, ..spec() };
+            let dir = session_dir(&config, &spec);
+            let args = claude_args(&spec, &config, &dir, false).expect("the args are built");
+            assert_eq!(value_after(&args, "--effort"), flag);
+        }
+    }
+
+    #[test]
     fn builds_the_command_line_claude_code_needs() {
         let project = a_project("claude-args");
         let config = config(&project);

@@ -2,7 +2,6 @@ import {
 	Avatar,
 	type AvatarKey,
 	Button,
-	Choice,
 	Dialog,
 	InfoTip,
 	Switch,
@@ -13,6 +12,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
+import { type Effort, ModelFields } from "../components/ModelFields.tsx";
 import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
 import { type AllowanceRow, countSaid, useAllowances } from "./allowances.tsx";
@@ -61,7 +61,6 @@ type SkillRow = {
 	state: "in_use" | "replaced" | "review" | "missing";
 };
 
-type Effort = "low" | "medium" | "high";
 type Edited = Omit<Agent, "model"> & {
 	model?: { id?: string; effort?: Effort } | undefined;
 	grants?: Tier[] | undefined;
@@ -215,19 +214,6 @@ function Editor({
 	const base = known.baseTiers;
 	const tiers = new Set<Tier>([...base, ...(agent.grants ?? [])]);
 	for (const r of agent.revokes ?? []) tiers.delete(r);
-	const effort = agent.model?.effort ?? known.model.effort;
-	const modelId = agent.model?.id ?? "";
-	// The agent's own model in words when the list has no newer label for it, never its id.
-	const options =
-		models.some((m) => m.id === modelId) || !modelId
-			? models
-			: [
-					{
-						id: modelId,
-						label: modelId === known.model.id ? known.model.label : modelId,
-					},
-					...models,
-				];
 
 	const save = async (team: TeamFile) => {
 		if (!client) return;
@@ -389,54 +375,13 @@ function Editor({
 				value={agent.persona ?? ""}
 				onChange={(persona) => setDraft({ ...agent, persona })}
 			/>
-			<Choice<Effort>
-				name="effort"
-				legend={say("agentEffort")}
-				value={effort}
-				info={t("effortInfo", {
-					low: t("effortLowNote"),
-					medium: t("effortMediumNote"),
-					high: t("effortHighNote"),
-				})}
-				onChange={(e) =>
-					// How carefully an agent works never changes what it runs on.
-					setDraft({
-						...agent,
-						model: { ...(modelId && { id: modelId }), effort: e },
-					})
-				}
-				options={[
-					{ value: "low", label: t("effortLow") },
-					{ value: "medium", label: t("effortMedium") },
-					{ value: "high", label: t("effortHigh") },
-				]}
+			<ModelFields
+				id="agent"
+				model={agent.model ?? {}}
+				role={{ id: known.model.id, effort: known.model.effort }}
+				models={models}
+				onChange={(model) => setDraft({ ...agent, model })}
 			/>
-			<div className={styles.field}>
-				<label htmlFor="agent-model">{t("agentModel")}</label>
-				<select
-					id="agent-model"
-					className={styles.select}
-					value={modelId}
-					onChange={(e) =>
-						setDraft({
-							...agent,
-							model: {
-								...(e.target.value && { id: e.target.value }),
-								...(agent.model?.effort && { effort: agent.model.effort }),
-							},
-						})
-					}
-				>
-					{!modelId && (
-						<option value="">{`${t("agentModelRole")}: ${known.model.label}`}</option>
-					)}
-					{options.map((m) => (
-						<option key={m.id} value={m.id}>
-							{advanced ? `${m.label} (${m.id})` : m.label}
-						</option>
-					))}
-				</select>
-			</div>
 			{saved.role === "procurement_specialist" && (
 				<MailboxSection id={saved.id} name={name} />
 			)}
@@ -781,8 +726,15 @@ function Editor({
 					<InfoTip id="agentReplaceNote-info">
 						{say("agentReplaceNote")}
 					</InfoTip>
-					<Button onClick={retire}>{say("agentRetire")}</Button>
-					<InfoTip id="agentRetireNote-info">{say("agentRetireNote")}</InfoTip>
+					{/* One agent alone cannot leave: there would be nobody to work (ADR 0071). */}
+					{!team.policy.solo && (
+						<>
+							<Button onClick={retire}>{say("agentRetire")}</Button>
+							<InfoTip id="agentRetireNote-info">
+								{say("agentRetireNote")}
+							</InfoTip>
+						</>
+					)}
 				</div>
 			</section>
 		</div>

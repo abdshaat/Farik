@@ -112,6 +112,8 @@ pub struct AssignmentInput {
     /// task of that lane and role is not cancelled and has an active assignee: the one of them
     /// with the highest id. `None` for the first task of a lane to be assigned.
     pub lane_builder: Option<String>,
+    /// Whether the team is one agent alone (ADR 0071): the task names no reviewer.
+    pub solo: bool,
 }
 
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
@@ -157,7 +159,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     } else {
         contract.reviewer_role
     };
-    if input.reviewer_role != expected_reviewer {
+    if !input.solo && input.reviewer_role != expected_reviewer {
         reasons.push(format!(
             "the reviewer has role {} and this contract is reviewed by role {expected_reviewer}",
             input.reviewer_role
@@ -171,7 +173,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     }
     // An epic the Product Manager holds is reviewed by the human (5.16 item 4), and the human
     // is not an agent: there is no id to name, and nothing for the reviewer to be the assignee of.
-    if expected_reviewer != Role::Human {
+    if expected_reviewer != Role::Human && !input.solo {
         if input.reviewer_id.trim().is_empty() {
             reasons.push(
                 "the runtime named no agent for the reviewer, and a task is reviewed by one"
@@ -1191,6 +1193,7 @@ mod tests {
             designer_browser: DesignerBrowser::Ready,
             private_folder_busy: false,
             lane_builder: None,
+            solo: false,
         }
     }
 

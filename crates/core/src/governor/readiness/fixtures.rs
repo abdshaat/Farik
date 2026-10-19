@@ -40,6 +40,7 @@ pub fn a_ready_context() -> ReadinessContext {
         rules: TeamRules::default(),
         awaits_the_product_plan: false,
         is_the_product_plan: false,
+        solo: false,
         repos: None,
     }
 }

@@ -13,6 +13,7 @@ import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import { ChangeProject } from "../pages/ChangeProject.tsx";
+import type { Team } from "../pages/setup/TeamSetup.tsx";
 import { t } from "../strings/t.ts";
 import { PauseControl } from "./PauseControl.tsx";
 import styles from "./Shell.module.css";
@@ -56,6 +57,16 @@ export function Shell() {
 	const { status, client } = useConnection();
 	const navigate = useNavigate();
 	const { data, again } = useQuery<ServeStatus>("serve.status", {});
+	// One agent alone is paused and resumed by its name, not as a team (ADR 0071).
+	// Asked only once a project is open: before that there is no team.
+	const { data: held } = useQuery<{ team: Team }>(
+		"team.get",
+		{},
+		!data?.projectRoot,
+	);
+	const solo = held?.team?.policy?.solo
+		? held.team.agents.find((a) => a.status !== "retired")?.displayName
+		: undefined;
 	const path = useLocation().pathname;
 	// The chats fill the window and scroll inside it, so the window itself does not.
 	const filled = path === "/channel" || path.startsWith("/channel/");
@@ -96,7 +107,9 @@ export function Shell() {
 	};
 	const copied = data.keysCopied;
 	const name = data.projectRoot?.split(/[\\/]/).at(-1);
-	const pause = data && <PauseControl paused={data.paused} short={!wide} />;
+	const pause = data && (
+		<PauseControl paused={data.paused} short={!wide} solo={solo} />
+	);
 	return (
 		<div
 			className={`${wide ? styles.wide : styles.narrow}${filled ? ` ${styles.fill}` : ""}`}
@@ -128,7 +141,15 @@ export function Shell() {
 							/>
 							{t(status === "open" ? "connected" : "connecting")}
 						</p>
-						{data && <p>{t(data.paused ? "teamPaused" : "teamWorking")}</p>}
+						{data && (
+							<p>
+								{solo
+									? t(data.paused ? "soloPaused" : "soloWorking", {
+											name: solo,
+										})
+									: t(data.paused ? "teamPaused" : "teamWorking")}
+							</p>
+						)}
 						{pause}
 					</div>
 				</header>

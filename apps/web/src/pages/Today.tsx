@@ -303,6 +303,11 @@ export function Today() {
 			</div>
 			<RequestBox
 				pmName={pm?.displayName ?? uiStrings.roleName.product_manager}
+				soloName={
+					team?.team.policy.solo
+						? team.team.agents.find((a) => a.status !== "retired")?.displayName
+						: undefined
+				}
 			/>
 			{documenting?.offered && (
 				<CatervaficationCard again={askDocumentingAgain} />
@@ -574,7 +579,14 @@ function AgentEntry({
 }
 
 /** The request box: the person's words, sent as `request.file`, and the request's page after. */
-function RequestBox({ pmName }: { pmName: string }) {
+/** The request box; with one agent alone (ADR 0071) it names that agent, who takes the request itself. */
+function RequestBox({
+	pmName,
+	soloName,
+}: {
+	pmName: string;
+	soloName?: string | undefined;
+}) {
 	const { client } = useConnection();
 	const navigate = useNavigate();
 	const [text, setText] = useState("");
@@ -601,7 +613,9 @@ function RequestBox({ pmName }: { pmName: string }) {
 	return (
 		<form className={styles.request} onSubmit={send}>
 			<label htmlFor="request" className={styles.label}>
-				{t("requestLabel")}
+				{soloName
+					? t("requestLabelSolo", { name: soloName })
+					: t("requestLabel")}
 			</label>
 			<div className={styles.prompt}>
 				<span aria-hidden="true">&gt;</span>
@@ -616,7 +630,9 @@ function RequestBox({ pmName }: { pmName: string }) {
 				{text === "" && <span className={styles.cursor} aria-hidden="true" />}
 			</div>
 			<p id="request-hint" className={styles.muted}>
-				{t("requestHint", { name: pmName })}
+				{soloName
+					? t("requestHintSolo", { name: soloName })
+					: t("requestHint", { name: pmName })}
 			</p>
 			{refusal && (
 				<p role="alert" className={styles.alert}>
@@ -626,7 +642,9 @@ function RequestBox({ pmName }: { pmName: string }) {
 			<div>
 				{/* Without a connection the request cannot be filed: the button waits for one. */}
 				<Button kind="primary" type="submit" busy={busy} disabled={!client}>
-					{t("requestSend")}
+					{soloName
+						? t("requestSendSolo", { name: soloName })
+						: t("requestSend")}
 				</Button>
 			</div>
 		</form>

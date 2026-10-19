@@ -758,6 +758,19 @@ const FIT: &str = concat!(
     "</style>"
 );
 
+/// `FIT`, then the app's page and ink (the brand's `--catervas-color-page` and `-ink`, light or
+/// `dark`), which win over a document's own: a page colour of its own would not match the app's.
+fn fit(dark: bool) -> String {
+    let (page, ink) = if dark {
+        ("#161616", "#F3E7D3")
+    } else {
+        ("#F3E7D3", "#161616")
+    };
+    format!(
+        "{FIT}<style>html, body {{ background: {page} !important; color: {ink} !important }}</style>"
+    )
+}
+
 /// The end of the first `open` tag (`<head`, `<html`) in `lower`, which is not a longer name.
 fn after_tag(lower: &str, open: &str) -> Option<usize> {
     let mut from = 0;
@@ -774,9 +787,9 @@ fn after_tag(lower: &str, open: &str) -> Option<usize> {
     None
 }
 
-/// `document` with `FIT` after its `<head>`, else its `<html>`, else its doctype, else first.
+/// `document` with `fit(dark)` after its `<head>`, else its `<html>`, else its doctype, else first.
 /// ponytail: the tag is found by text, not by parsing; use a parser if a document defeats it.
-fn fit_to_screen(document: &str) -> String {
+fn fit_to_screen(document: &str, dark: bool) -> String {
     let lower = document.to_ascii_lowercase();
     let at = ["<head", "<html"]
         .iter()
@@ -787,7 +800,7 @@ fn fit_to_screen(document: &str) -> String {
                 .and_then(|n| lower[n..].find('>').map(|end| n + end + 1))
         })
         .unwrap_or(0);
-    format!("{}{FIT}{}", &document[..at], &document[at..])
+    format!("{}{}{}", &document[..at], fit(dark), &document[at..])
 }
 
 /// A regular file with no link on the way down from `base` along `path`, as text.
@@ -884,6 +897,7 @@ pub(super) async fn raw(
     let (Some(path), task) = (named("path"), named("task")) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let dark = named("theme").as_deref() == Some("dark");
     let deps = Arc::clone(deps);
     let text = off_the_worker(move || {
         raw_text(&deps, &path, task.as_deref()).ok_or_else(|| Failure::new(NOT_FOUND, ""))
@@ -899,7 +913,7 @@ pub(super) async fn raw(
                 (HeaderName::from_static("x-dns-prefetch-control"), "off"),
                 (header::CACHE_CONTROL, "no-store"),
             ],
-            fit_to_screen(&text),
+            fit_to_screen(&text, dark),
         )
             .into_response(),
         Err(_) => StatusCode::NOT_FOUND.into_response(),
@@ -1943,7 +1957,7 @@ mod tests {
         assert_eq!(header("x-dns-prefetch-control"), "off");
         assert_eq!(header("cache-control"), "no-store");
         assert!(body.contains("<h1>the overview</h1>"), "{body}");
-        assert_eq!(body.matches(super::FIT).count(), 1, "{body}");
+        assert_eq!(body.matches(&super::fit(false)).count(), 1, "{body}");
     }
 
     #[test]
@@ -1957,17 +1971,35 @@ mod tests {
             ("<!DOCTYPE html><p>x</p>", "<!DOCTYPE html>"),
             ("<p>x</p>", ""),
         ] {
-            let fitted = super::fit_to_screen(document);
-            assert_eq!(fitted.matches(super::FIT).count(), 1, "{fitted}");
-            assert_eq!(fitted.replacen(super::FIT, "", 1), document);
-            let at = fitted.find(super::FIT).expect("the block");
-            let wanted = document.find(after).map_or(0, |n| n + after.len());
-            assert_eq!(at, wanted, "{fitted}");
+            for dark in [false, true] {
+                let block = super::fit(dark);
+                let fitted = super::fit_to_screen(document, dark);
+                assert_eq!(fitted.matches(&block).count(), 1, "{fitted}");
+                assert_eq!(fitted.replacen(&block, "", 1), document);
+                let at = fitted.find(&block).expect("the block");
+                let wanted = document.find(after).map_or(0, |n| n + after.len());
+                assert_eq!(at, wanted, "{fitted}");
+            }
         }
         assert!(
-            super::FIT.contains(
+            super::fit(false).contains(
                 r#"<meta name="viewport" content="width=device-width, initial-scale=1">"#
             )
+        );
+        // The app's page and ink, light or dark, over whatever the document paints its page with.
+        let light = super::fit(false);
+        assert!(
+            light.contains(
+                "html, body { background: #F3E7D3 !important; color: #161616 !important }"
+            ),
+            "{light}"
+        );
+        let dark = super::fit(true);
+        assert!(
+            dark.contains(
+                "html, body { background: #161616 !important; color: #F3E7D3 !important }"
+            ),
+            "{dark}"
         );
     }
 
