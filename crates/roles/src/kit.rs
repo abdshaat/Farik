@@ -2608,7 +2608,10 @@ mod tests {
             "making-posters",
         ] {
             let (_, text) = kit_skill(Role::MarketingSpecialist, name);
-            assert!(text.contains("\n## Drawn from\n"), "{name} has no Drawn from");
+            assert!(
+                text.contains("\n## Drawn from\n"),
+                "{name} has no Drawn from"
+            );
         }
         // Exa reads Reddit's threads and public pages; both of its tools are network.
         let (exa, _) = service(Role::MarketingSpecialist, "exa");
@@ -3940,7 +3943,14 @@ mod tests {
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
         assert_eq!(
             names,
-            ["higgsfield", "recraft", "buffer", "kit", "google-ads", "exa"]
+            [
+                "higgsfield",
+                "recraft",
+                "buffer",
+                "kit",
+                "google-ads",
+                "exa"
+            ]
         );
         // The four services of the web are signed in to by route 1; Google Ads is Catervas's own
         // connector, held by `google_ads_runs_only_inside_the_plan`; Exa is keyless, held by

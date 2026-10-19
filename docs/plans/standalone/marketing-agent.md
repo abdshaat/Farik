@@ -68,7 +68,7 @@ Files: modified `folders.rs`.
 
 - `names_the_known_documents_and_the_rest_plainly` (extended) — asserts `DOCUMENT_STEMS.len()` is 20, `marketing/research/audience.html` is named "The people it is for", and `marketing/research/product.md` sits right after `marketing/kickoff.md` with the other four after it in the design's order.
 
-- [ ] `feat(core): name the marketing research documents on the Files page`
+- [x] `feat(core): name the marketing research documents on the Files page`
 
 ### Task 4: spec and design
 
