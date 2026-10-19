@@ -11,8 +11,9 @@ use axum::response::{IntoResponse, Response};
 
 use catervas_core::contract::{TaskKind, TaskStatus};
 use catervas_core::folders::{
-    DocumentFormat, Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin, check_owner_edit,
-    document_name, document_order, human_of_twin, is_human_document, named_in_subject, plain_name,
+    AttachKind, DocumentFormat, Named, OwnerEditRefusal, ROLE_FOLDERS, agent_twin,
+    check_owner_edit, document_name, document_order, free_attached_path, human_of_twin,
+    is_human_document, named_in_subject, plain_name,
 };
 use catervas_core::governor::paths::normalise;
 use catervas_core::team::{Role, Team};
@@ -40,7 +41,12 @@ use crate::transitions::integration_lock;
 pub(super) const QUERIES: [&str; 2] = ["files.tree", "files.read"];
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 3] = ["files.save", "files.ask_change", "files.rewrite"];
+pub(super) const METHODS: [&str; 4] = [
+    "files.save",
+    "files.ask_change",
+    "files.rewrite",
+    "document.attach",
+];
 
 /// Where the team's documents live.
 const ROOT: &str = "docs/catervas";
@@ -179,6 +185,137 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     .map_err(|e| internal(&e))?;
     append(deps, EventBody::FolderDocEdited(body))?;
     Ok(json!({ "change": landed.change, "branch": landed.branch }))
+}
+
+/// The words a refused attachment is shown, by its code.
+fn attach_words(code: &str) -> &'static str {
+    match code {
+        "unsupported_type" => "Catervas reads Markdown, text, PDF and Word files.",
+        "no_text" => "This file has no text Catervas can read. It may be a scan.",
+        "too_large" => {
+            "This file is too large. Catervas takes up to 10 MB, and up to 256 KB of text."
+        }
+        _ => "Catervas could not open this file.",
+    }
+}
+
+/// `document.attach { name, kind, data_base64 }`: the file turned into Markdown and committed, as
+/// the owner's own change (as `files.save` does), at a free `attached/<slug>.md` of the kind's
+/// folder; recorded as `folder_doc.edited` then `document.attached`. Its integration files the task
+/// that writes the agent version.
+fn attach(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
+    use base64::Engine as _;
+    let kind = AttachKind::parse(params["kind"].as_str().unwrap_or_default())
+        .ok_or_else(|| internal(&"the schema let through a kind that is not one"))?;
+    let name = params["name"].as_str().unwrap_or_default();
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    if !team
+        .active_agents()
+        .any(|agent| Role::from(agent.role) == kind.role())
+    {
+        return Err(refusal(
+            "no_folder_owner",
+            "/kind",
+            "No one on the team keeps these documents. Add a Product Manager or an Architect.",
+        ));
+    }
+    let unreadable = || refusal("unreadable", "/data_base64", attach_words("unreadable"));
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(params["data_base64"].as_str().unwrap_or_default())
+        .map_err(|_| unreadable())?;
+    let converted = crate::attach::to_markdown(name, &bytes)
+        .map_err(|why| refusal(why.code(), "/data_base64", attach_words(why.code())))?;
+    let _lock = integration_lock(deps.files.root()).map_err(|e| internal(&e))?;
+    let branch = integration_branch(&team, &deps.git).map_err(|e| internal(&e))?;
+    // A path is taken when the integration branch holds it or its agent version, or a folder
+    // change not yet integrated does.
+    let mut held: Vec<String> = deps
+        .git
+        .tree_entries(&branch, &format!("{}/attached", kind.folder()))
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect();
+    for change in folder_docs(&deps.log)
+        .map_err(|e| internal(&e))?
+        .changes
+        .iter()
+        .filter(|change| !change.integrated)
+    {
+        held.extend(change.paths.iter().cloned());
+    }
+    let path = free_attached_path(kind, name, |path| {
+        held.iter()
+            .any(|held| held == path || Some(held) == agent_twin(path).as_ref())
+    });
+    let file = path.rsplit('/').next().unwrap_or(&path);
+    let scope = kind.folder().rsplit('/').next().unwrap_or_default();
+    let message = format!("docs({scope}): attach {file}");
+    let landed = match land(
+        deps,
+        &team,
+        &[(path.clone(), converted.text)],
+        &[],
+        &message,
+        None,
+    ) {
+        Ok(Some(landed)) => landed,
+        Ok(None) => return Err(internal(&format!("{path} was already there"))),
+        Err(LandRefusal::Busy(_)) => {
+            return Err(refusal(
+                "file_busy",
+                "/name",
+                "A file of this name was also changed on your computer, outside Catervas. Finish or undo that change, then attach it again.",
+            ));
+        }
+        Err(LandRefusal::Link(_)) => {
+            return Err(refusal(
+                "is_a_link",
+                "/name",
+                "This folder holds a link, which Catervas does not write through.",
+            ));
+        }
+        Err(LandRefusal::Waiting { .. }) => {
+            return Err(refusal(
+                "change_waiting",
+                "/name",
+                "An earlier change to this file is not in your project yet. Attach it again once it is.",
+            ));
+        }
+        Err(LandRefusal::Git(detail)) => return Err(Failure::new(INTERNAL_ERROR, detail)),
+    };
+    let edited = serde_json::from_value(json!({
+        "path": path, "change": landed.change, "sha": landed.sha, "branch": landed.branch,
+    }))
+    .map_err(|e| internal(&e))?;
+    append(deps, EventBody::FolderDocEdited(edited))?;
+    let attached = serde_json::from_value(json!({
+        "path": path, "name": name, "media_type": converted.media_type,
+    }))
+    .map_err(|e| internal(&e))?;
+    append(deps, EventBody::DocumentAttached(attached))?;
+    Ok(json!({ "path": path, "change": landed.change }))
+}
+
+/// The name of the file the owner attached as `path`, from the newest `document.attached`.
+fn attached_from(deps: &ToolDeps, path: &str) -> Result<Value, Failure> {
+    let events = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::DocumentAttached],
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    Ok(events
+        .iter()
+        .find_map(|event| match &event.body {
+            EventBody::DocumentAttached(body) if body.path.to_string() == path => {
+                Some(json!({ "name": body.name.to_string() }))
+            }
+            _ => None,
+        })
+        .unwrap_or(Value::Null))
 }
 
 /// `files.ask_change { path, words }`: a small, whole task for the role that owns the document,
@@ -366,6 +503,11 @@ pub(super) async fn call(
         let filed = off_the_worker(move || ask_change(&deps, &params)).await?;
         state.wakes().notify_one();
         return Ok(filed);
+    }
+    if method == "document.attach" {
+        let attached = off_the_worker(move || attach(&deps, &params)).await?;
+        state.wakes().notify_one();
+        return Ok(attached);
     }
     if method == "files.rewrite" {
         let filed = off_the_worker(move || rewrite(&deps)).await?;
@@ -701,6 +843,7 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
             "editable": false,
             "askable": false,
             "waiting": null,
+            "attached": attached_from(deps, &path)?,
         }));
     }
     let waiting = waiting_change(deps, &docs, &path);
@@ -740,6 +883,7 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
         "editable": editable,
         "askable": editable && !path.starts_with("docs/catervas/delivery/"),
         "waiting": waiting.map(|(change, held)| json!({ "change": change, "branch": held })),
+        "attached": attached_from(deps, &path)?,
     }))
 }
 
@@ -2598,5 +2742,131 @@ mod tests {
         );
         commit(&harness, "the rewrite lands");
         refused(&rewrite(&harness), "rewrite_open", open);
+    }
+
+    /// The reply to `document.attach`.
+    fn attach(harness: &Harness, name: &str, kind: &str, bytes: &[u8]) -> Value {
+        use base64::Engine as _;
+        rpc(
+            &harness.daemon,
+            "document.attach",
+            &json!({
+                "name": name,
+                "kind": kind,
+                "data_base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+            }),
+        )
+    }
+
+    const TRIP_SPEC: &str = "docs/catervas/product/attached/trip-spec.md";
+    const TRIP_SPEC_TWIN: &str = "docs/catervas/product/attached/trip-spec.agent.md";
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn attaches_a_file_as_the_owners_change_and_its_agent_writes_the_twin() {
+        let harness = project("files-attach", "manual");
+        put_documents(&harness);
+        let reply = attach(
+            &harness,
+            "Trip spec.md",
+            "product",
+            b"# Trips\n\nPlan a trip.\n",
+        );
+        conforms(&reply["result"], "documentAttachResult", &reply);
+        assert_eq!(
+            reply["result"],
+            json!({ "path": TRIP_SPEC, "change": 1 }),
+            "{reply}"
+        );
+        let branch = git_output(
+            &harness,
+            &["branch", "--list", "docs/*", "--format=%(refname:short)"],
+        );
+        assert_eq!(
+            git_output(&harness, &["show", &format!("{branch}:{TRIP_SPEC}")]),
+            "# Trips\n\nPlan a trip."
+        );
+        assert_eq!(
+            git_output(&harness, &["log", "-1", "--format=%s", &branch]),
+            "docs(product): attach trip-spec.md"
+        );
+        let kinds = harness
+            .project
+            .events(&[EventKind::FolderDocEdited, EventKind::DocumentAttached]);
+        let wire: Vec<Value> = kinds
+            .iter()
+            .map(|event| {
+                let mut value = catervas_protocol::event::event_to_value(event);
+                value["body"].as_object_mut().map(|body| body.remove("sha"));
+                json!({ "kind": value["kind"], "body": value["body"] })
+            })
+            .collect();
+        assert_eq!(
+            wire,
+            [
+                json!({ "kind": "folder_doc.edited", "body": {
+                    "path": TRIP_SPEC, "change": 1, "branch": branch
+                } }),
+                json!({ "kind": "document.attached", "body": {
+                    "path": TRIP_SPEC, "name": "Trip spec.md", "media_type": "text/markdown"
+                } }),
+            ]
+        );
+        assert_eq!(kinds[1].envelope.ids.agent_id, None);
+        assert_eq!(kinds[1].envelope.ids.session_id, None);
+
+        // Integrated, the change files the task that writes the twin.
+        harness.merge_branch_by_hand(&branch);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime")
+            .block_on(orchestrator.handle(Command::FolderChangeIntegrate { change: 1 }))
+            .expect("the owner adds it");
+        let rederives = catervas_store::requests::rederive_tasks(&harness.project.deps.log)
+            .expect("the log reads");
+        assert_eq!(
+            rederives
+                .iter()
+                .map(|(_, twin)| twin.as_str())
+                .collect::<Vec<_>>(),
+            [TRIP_SPEC_TWIN]
+        );
+        let read = read_path(&harness, TRIP_SPEC);
+        assert_eq!(read["attached"], json!({ "name": "Trip spec.md" }));
+        assert_eq!(read_path(&harness, ROADMAP)["attached"], Value::Null);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_an_attachment_with_a_code_at_its_field() {
+        // The team of three has no Architect.
+        let harness = Harness::new("files-attach-refused", |_| {});
+        let scan = include_bytes!("../../tests/fixtures/attach/scan.pdf");
+        let refused = |name: &str, kind: &str, bytes: &[u8], code: &str, at: &str| {
+            let reply = attach(&harness, name, kind, bytes);
+            assert_eq!(
+                refusal(&reply),
+                (code.to_string(), at.to_string()),
+                "{reply}"
+            );
+            assert!(!said(&reply).is_empty(), "{reply}");
+            assert!(
+                harness
+                    .project
+                    .events(&[EventKind::FolderDocEdited, EventKind::DocumentAttached])
+                    .is_empty()
+            );
+            assert_eq!(git_output(&harness, &["branch", "--list", "docs/*"]), "");
+        };
+        refused(
+            "api.md",
+            "architecture",
+            b"# API\n",
+            "no_folder_owner",
+            "/kind",
+        );
+        refused("scan.pdf", "product", scan, "no_text", "/data_base64");
     }
 }

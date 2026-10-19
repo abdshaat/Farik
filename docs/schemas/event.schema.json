@@ -164,6 +164,7 @@
         "folder_doc.approved",
         "folder_doc.returned",
         "folder_doc.edited",
+        "document.attached",
         "folder_change.opened",
         "folder_change.integrated",
         "folder_change.escalated",
@@ -282,6 +283,7 @@
         { "$ref": "#/$defs/folderDocApprovedBody" },
         { "$ref": "#/$defs/folderDocReturnedBody" },
         { "$ref": "#/$defs/folderDocEditedBody" },
+        { "$ref": "#/$defs/documentAttachedBody" },
         { "$ref": "#/$defs/folderChangeOpenedBody" },
         { "$ref": "#/$defs/folderChangeIntegratedBody" },
         { "$ref": "#/$defs/folderChangeEscalatedBody" },
@@ -1856,6 +1858,25 @@
         "change": { "$ref": "#/$defs/folderChangeNumber" },
         "sha": { "type": "string", "minLength": 1 },
         "branch": { "description": "The branch the change was made on (ADR 0066); absent in a log from before 0.119, where it is docs/folder-<change>.", "$ref": "#/$defs/folderChangeBranch" }
+      }
+    },
+    "documentAttachedBody": {
+      "title": "Document Attached Body",
+      "description": "The owner attached a file (docs/SPEC.md 5.17, ADR 0073): Catervas turned it into the Markdown document at path, an attached document under the product or the architecture folder, which folder_doc.edited, recorded just before, committed as a folder change. name is the file's own name and media_type what it was read as. The envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "name", "media_type"],
+      "properties": {
+        "path": { "$ref": "#/$defs/folderDocPath" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "media_type": {
+          "enum": [
+            "text/markdown",
+            "text/plain",
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          ]
+        }
       }
     },
     "folderChangeOpenedBody": {

@@ -523,6 +523,9 @@
           "$ref": "#/$defs/filesSaveRequest"
         },
         {
+          "$ref": "#/$defs/documentAttachRequest"
+        },
+        {
           "$ref": "#/$defs/repoAddRequest"
         },
         {
@@ -2623,6 +2626,38 @@
         "branch": { "type": ["string", "null"] }
       }
     },
+    "documentAttachRequest": {
+      "title": "Document Attach Request",
+      "description": "The owner attaches a file (docs/SPEC.md 5.17, ADR 0073): data_base64 (standard base64, at most 10 MiB decoded) is turned into Markdown and committed as the owner's own folder change at docs/catervas/<kind>/attached/<slug>.md, recorded as folder_doc.edited then document.attached, and the integrated change files the task that writes its agent version. Answers the document's path and the change. Refused with -32005 and data.errors, each with path, message and code, in this order: no_folder_owner (/kind: no active agent of the kind's role), unreadable (/data_base64: not base64), unsupported_type, no_text, unreadable and too_large (/data_base64: the file or its text), then file_busy, is_a_link and change_waiting (/name).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "document.attach" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "kind", "data_base64"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "kind": { "enum": ["product", "architecture"] },
+            "data_base64": { "type": "string", "maxLength": 14000000 }
+          }
+        }
+      }
+    },
+    "documentAttachResult": {
+      "description": "The attached document's path and the folder change that holds it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "change"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "change": { "type": "integer", "minimum": 1 }
+      }
+    },
     "filesAskChangeRequest": {
       "title": "Files Ask Change Request",
       "description": "The owner asks the role that owns a document to change it (docs/SPEC.md 5.17): files a small, whole task for that role, with no triage or refine session, whose title is Change and the document's name and whose intent quotes words. A change to the spec or the roadmap still waits for the owner's acceptance. words is trimmed. Refused with -32005 and data.errors, each with path, message and code, in this order: not_editable (/path: outside the team's folders, not a document, an agent version or a marketing plan), no_words (/words: blank), no_task_taker (/path: the Scrum Master's folder, whose documents it keeps up to date at its retro), no_owner (/path: no active agent of the folder's role) and not_editable again (/path: a document files.tree does not list).",
@@ -2868,8 +2903,15 @@
       "description": "document and its twin (null when it has none that is a file) as the integration branch holds them, except that while the owner's own saved change to the document waits to be added (waiting: its folder change and branch) they are read from that branch, with by_you true. stale: the twin is behind the document (read from git; an owner's change not yet added makes nothing stale). rederiving: a task that brings the twin up to date is neither accepted nor cancelled. editable: false for a marketing plan, which changes through a new version on its page. askable: false for a document under docs/catervas/delivery/, which the Scrum Master alone writes, otherwise equal to editable.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["document", "twin", "stale", "rederiving", "editable", "askable", "waiting"],
+      "required": ["document", "twin", "stale", "rederiving", "editable", "askable", "waiting", "attached"],
       "properties": {
+        "attached": {
+          "description": "For a document the owner attached (ADR 0073), the name of the file it came from; null for any other.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": { "name": { "type": "string" } }
+        },
         "document": { "$ref": "#/$defs/fileVersion" },
         "twin": { "oneOf": [{ "$ref": "#/$defs/fileVersion" }, { "type": "null" }] },
         "stale": { "type": "boolean" },

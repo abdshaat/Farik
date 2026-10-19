@@ -319,6 +319,11 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "sha": "a1b2c3d4",
             "branch": "docs/roadmap"
         }),
+        EventKind::DocumentAttached => json!({
+            "path": "docs/catervas/product/attached/spec.md",
+            "name": "Spec.docx",
+            "media_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        }),
         EventKind::CatervaficationStarted => json!({ "project": "existing" }),
         EventKind::ConnectionRequested => json!({
             "server": "buffer",

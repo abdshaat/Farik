@@ -40,6 +40,7 @@ export type MethodName =
 	| "request.file"
 	| "contract.save"
 	| "files.save"
+	| "document.attach"
 	| "repo.add"
 	| "repo.remove"
 	| "repo.locate"

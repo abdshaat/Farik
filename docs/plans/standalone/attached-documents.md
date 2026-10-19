@@ -125,7 +125,7 @@ Files: modified `documents.rs`, `web.rs`, the three schemas' `document.attach` a
 - `attaches_a_file_as_the_owners_change_and_its_agent_writes_the_twin` — with a fixture team holding a Product Manager, asserts `document.attach { name: "Trip spec.md", kind: "product", data_base64 }` answers `{ path: "docs/catervas/product/attached/trip-spec.md", change: 1 }`; the folder change's branch holds the text at that path; the log has `folder_doc.edited` then `document.attached { name: "Trip spec.md", media_type: "text/markdown" }`; after the fixture integrates change 1, a `task.created` with `rederives: "docs/catervas/product/attached/trip-spec.agent.md"` exists; and `files.read` of the path answers `attached: { name: "Trip spec.md" }`.
 - `refuses_an_attachment_with_a_code_at_its_field` — asserts `-32005` with `{ path: "/kind", code: "no_folder_owner" }` for `architecture` when the team has no Architect, `{ path: "/data_base64", code: "no_text" }` for `scan.pdf`, and that neither leaves a commit or an event.
 
-- [ ] `feat(runtime): the owner attaches a document to a role's folder`
+- [x] `feat(runtime): the owner attaches a document to a role's folder`
 
 ### Task 4: messages and requests carry attachments
 
