@@ -345,6 +345,11 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "url": "https://github.com/o/r/pull/7",
             "sha": "0123456789abcdef0123456789abcdef01234567"
         }),
+        EventKind::GoalSet => json!({ "goal": "goal-1", "words": "Reach 10 paying customers" }),
+        EventKind::GoalPaused | EventKind::GoalResumed => json!({ "goal": "goal-1" }),
+        EventKind::GoalEnded => json!({ "goal": "goal-1", "outcome": "reached" }),
+        EventKind::GoalMeasured => json!({ "goal": "goal-1", "value": 4.0, "source": "owner" }),
+        EventKind::GoalPlanned => json!({ "goal": "goal-1", "filed": ["CTV-2"] }),
         EventKind::TaskReassigned => {
             json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" })
         }

@@ -485,6 +485,7 @@ fn gives_connectors(ask: &SessionAsk<'_>) -> bool {
             | SessionPurpose::Explore
             | SessionPurpose::Implement
             | SessionPurpose::Verify
+            | SessionPurpose::Goal
     ) && ask.only_tool.is_none()
 }
 

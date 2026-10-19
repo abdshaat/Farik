@@ -109,7 +109,7 @@ pub const PROMPT_SECTIONS: [&str; 11] = [
 ];
 
 /// The `This session` section of each purpose: what the session is for and the tool it ends with.
-pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
+pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
     (
         SessionPurpose::Triage,
         "This session sizes the request you were given. Decide whether it is large (an epic) or \
@@ -190,6 +190,11 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
          in one line naming the task. When it asks for work another role does, put a request in \
          your reply, a title and what it asks for, for the user to send. Otherwise answer. Then \
          end the session.",
+    ),
+    (
+        SessionPurpose::Goal,
+        "This session works towards the owner's goal; the first message says what to do. Change \
+         nothing in the project. Then end the session.",
     ),
 ];
 

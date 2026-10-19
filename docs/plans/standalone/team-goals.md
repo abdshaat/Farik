@@ -172,7 +172,7 @@ Files as the map's T1 lines. `SessionPurpose::Goal`'s wire is `goal`. Its "This 
 
 - `reads_the_goal_events` (`event.rs` `mod tests`): `event_from_value` reads one fixture of each of the six kinds, with the bodies of the design's table and every optional field present. It refuses `goal.set` with an extra body field `"x": 1`. It refuses `goal.measured` with `"source": "guess"`. It reads `task.created` with `"goal": "goal-1"`, and `session.started` with `"purpose": "goal"`.
 
-- [ ] `feat(protocol): record the owner's goal, its readings and its rounds`
+- [x] `feat(protocol): record the owner's goal, its readings and its rounds`
 
 ### Task 2: the fold
 

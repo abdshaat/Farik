@@ -1049,6 +1049,7 @@ fn creation_bodies(
             })
             .transpose()?,
         filed_as: filed_as.map(|(kind, _)| kind),
+        goal: None,
         given_to: given_to
             .map(|agent| {
                 agent

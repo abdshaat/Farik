@@ -121,6 +121,7 @@ pub(crate) fn purpose_wire(purpose: SessionPurpose) -> SessionStartedBodyPurpose
         SessionPurpose::Ceremony => SessionStartedBodyPurpose::Ceremony,
         SessionPurpose::Conversation => SessionStartedBodyPurpose::Conversation,
         SessionPurpose::Chat => SessionStartedBodyPurpose::Chat,
+        SessionPurpose::Goal => SessionStartedBodyPurpose::Goal,
     }
 }
 
@@ -235,6 +236,7 @@ mod tests {
             (SessionPurpose::Ceremony, "ceremony"),
             (SessionPurpose::Conversation, "conversation"),
             (SessionPurpose::Chat, "chat"),
+            (SessionPurpose::Goal, "goal"),
         ];
         let efforts = [
             (Effort::Low, "low"),
