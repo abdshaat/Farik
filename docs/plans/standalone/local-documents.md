@@ -195,7 +195,7 @@ Files: `TeamRules.tsx` (`Documents` gains the switch, its ⓘ bullets, the two `
 
 `docs/SPEC.md` revision 0.129: 4.1 (setup's switch), 4.5 (the Files page's words), 5.2 (no commit, nothing to integrate), 5.4 (document changes in the diff, the tidy), 5.12 (`documents_local`), 5.14 (the switch's folder changes, the landing), 5.17 (the four modes, the copy, the log's last change and staleness; the Product Manager's docs task "reaches `verifying` only with a commit" except in a disk-reading mode), 8.5 (two kinds, 124); `docs/design/catervas-folders.md` gains a line that ADR 0074 amends it.
 
-- [ ] `docs(spec): record the documents kept on this computer (0.129)`
+- [x] `docs(spec): record the documents kept on this computer (0.129)`
 
 ## Verification
 
