@@ -273,7 +273,7 @@ Files: `tools/goals.rs`, `tools.rs`. Both are tier `Read`. The `TOOLS` entries g
   - `-1` is refused `goal_value: `;
   - on a solo team of `theo` (a Developer), `large` is refused `goal_large_in_solo: `, and `small` files a task given to `theo`.
 
-- [ ] `feat(runtime): a goal session files the next steps and records the goal's number`
+- [x] `feat(runtime): a goal session files the next steps and records the goal's number`
 
 ### Task 6: `goal.get`
 

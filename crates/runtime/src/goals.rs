@@ -90,7 +90,10 @@ pub fn goal_book(log: &EventLog) -> Result<GoalBook, StoreError> {
 
 /// Who plans the team's next steps towards the goal: the active Product Manager, or, for one agent
 /// alone, that agent.
-#[expect(dead_code, reason = "the goal session's tools use it (task 5)")]
+#[expect(
+    dead_code,
+    reason = "the goal card and the loop use it (tasks 6 and 7)"
+)]
 pub(crate) fn planner(team: &Team) -> Option<&Agent> {
     if team.is_solo() {
         return team.active_agents().next();

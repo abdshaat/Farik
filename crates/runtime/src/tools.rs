@@ -42,6 +42,7 @@ mod exec;
 pub(crate) mod fixtures;
 pub(crate) mod folders;
 mod git;
+mod goals;
 mod marketing;
 pub(crate) mod media;
 mod memory;
@@ -257,6 +258,16 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             "catervas_request_connection",
             Read,
             "Ask the owner to connect a service your kit offers that your work needs, and why. The owner sees it on Today; carry on without it.",
+        ),
+        tool::<goals::FileGoalWorkInput>(
+            "catervas_file_goal_work",
+            Read,
+            "File the next step towards the owner's goal: a title, the request in plain words, and large (an epic) or small (a task). Up to five per session.",
+        ),
+        tool::<goals::RecordGoalProgressInput>(
+            "catervas_record_goal_progress",
+            Read,
+            "Record the goal's number as you read it from its service, with a short note on what you counted.",
         ),
         tool::<bugs::FileBugInput>(
             "catervas_file_bug",
@@ -505,6 +516,8 @@ pub async fn call_tool(
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
         "catervas_request_connection" => connections::request_connection(&call, &parse(input)?),
+        "catervas_file_goal_work" => goals::file_goal_work(&call, &parse(input)?),
+        "catervas_record_goal_progress" => goals::record_goal_progress(&call, &parse(input)?),
         "catervas_file_bug" => bugs::file_bug(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
@@ -848,6 +861,8 @@ mod tests {
             "catervas_write_note",
             "catervas_ask_human",
             "catervas_request_connection",
+            "catervas_file_goal_work",
+            "catervas_record_goal_progress",
             "catervas_file_bug",
             "catervas_write_folder_doc",
             "catervas_post_message",
