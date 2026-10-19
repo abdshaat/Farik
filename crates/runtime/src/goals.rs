@@ -93,6 +93,29 @@ pub fn goal_book(log: &EventLog) -> Result<GoalBook, StoreError> {
     Ok(fold_goals(&records))
 }
 
+/// The words of the goal `id`, as its newest `goal.set` has them: `None` for no id or a goal the
+/// log never set.
+///
+/// # Errors
+///
+/// The log could not be read.
+pub(crate) fn goal_words(log: &EventLog, id: Option<&str>) -> Result<Option<String>, StoreError> {
+    let Some(id) = id else {
+        return Ok(None);
+    };
+    Ok(log
+        .read(&EventQuery {
+            kinds: vec![EventKind::GoalSet],
+            newest_first: true,
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| match event.body {
+            EventBody::GoalSet(body) if body.goal.as_str() == id => Some(body.words.to_string()),
+            _ => None,
+        }))
+}
+
 /// Who plans the team's next steps towards the goal: the active Product Manager, or, for one agent
 /// alone, that agent.
 pub(crate) fn planner(team: &Team) -> Option<&Agent> {

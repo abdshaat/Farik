@@ -39,6 +39,7 @@ pub(crate) mod human;
 pub(crate) use human::{
     forget_removed_keys, status_effects, update_agent_held, with_status, without_connector,
 };
+mod goal;
 mod integrate;
 mod messages;
 mod recover;
@@ -245,6 +246,13 @@ pub enum TickReport {
     Chat {
         /// The agent.
         agent_id: String,
+        /// What was done.
+        what: String,
+    },
+    /// An agent planned towards the owner's goal, or read its number (ADR 0075).
+    Goal {
+        /// The goal's id.
+        goal_id: String,
         /// What was done.
         what: String,
     },

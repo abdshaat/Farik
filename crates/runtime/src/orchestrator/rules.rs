@@ -292,6 +292,9 @@ pub(super) async fn tick(
             }
         }
     }
+    if let Some(report) = super::goal::goal_rules(deps, scope, &team, &board, &mut waiting).await? {
+        return Ok(report);
+    }
     Ok(idle(&waiting))
 }
 
@@ -2126,6 +2129,7 @@ mod tests {
             | TickReport::Delivery { .. }
             | TickReport::Conversation { .. }
             | TickReport::Chat { .. }
+            | TickReport::Goal { .. }
             | TickReport::FolderChange { .. } => None,
         }
     }
@@ -6399,6 +6403,8 @@ mod tests {
                     "catervas_schedule_post",
                     "catervas_write_folder_doc",
                     "catervas_file_bug",
+                    "catervas_file_goal_work",
+                    "catervas_record_goal_progress",
                 ]
                 .contains(&tool.name)
             })

@@ -327,7 +327,7 @@ A spent day sets `waiting.day_spent`, and a sleeping agent sets `waiting.slept`,
   - an orchestrator from `harness.orchestrator_at` one day later starts one again.
 - `one_agent_alone_plans_its_own_goal` (solo `theo`, `budgets.daily_usd` 10, goal-1): the tick starts a `Goal` session of `theo` whose prompt contains "Each step you file is your own task".
 
-- [ ] `feat(runtime): the planner plans towards the goal whenever the board is quiet, and its reader reads it daily`
+- [x] `feat(runtime): the planner plans towards the goal whenever the board is quiet, and its reader reads it daily`
 
 ### Task 8: the Product Manager's skill
 

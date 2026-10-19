@@ -25,7 +25,8 @@ use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
-    given_task_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
+    given_task_message, goal_task_message, plan_task_message, plan_tasks_message, refine_message,
+    triage_message,
 };
 use super::rules::{Waiting, acted, active, has_room, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
@@ -190,9 +191,21 @@ pub(super) async fn refining(
         .any(|event| event.envelope.seq > began && event.body.kind() == EventKind::QuestionAsked);
     let failures = last_readiness_failures(&history, began);
     let stuck = came_back_from_a_block(&history);
-    let initial_prompt = match lead {
-        Some(agent) => given_task_message(&contract, agent, !asked, &failures, stuck.as_ref()),
-        None => refine_message(&contract, !asked, &failures, stuck.as_ref()),
+    let goal = match lead {
+        Some(_) => crate::goals::goal_words(
+            &deps.tools.log,
+            catervas_store::requests::goal_of(&deps.tools.log, &contract.id)?.as_deref(),
+        )?,
+        None => None,
+    };
+    let initial_prompt = match (lead, goal) {
+        (Some(agent), Some(goal)) => {
+            goal_task_message(&contract, agent, &goal, !asked, &failures, stuck.as_ref())
+        }
+        (Some(agent), None) => {
+            given_task_message(&contract, agent, !asked, &failures, stuck.as_ref())
+        }
+        (None, _) => refine_message(&contract, !asked, &failures, stuck.as_ref()),
     };
     let end = run_session(
         deps,
@@ -1323,6 +1336,15 @@ mod tests {
             .map(|spec| (spec.agent_id.as_str(), spec.purpose))
             .collect();
         assert_eq!(who, [("dev", SessionPurpose::Refine)]);
+        // The goal's two tools belong to a goal session alone.
+        assert!(
+            !started[0]
+                .catervas_tools
+                .iter()
+                .any(|tool| tool.contains("goal")),
+            "{:?}",
+            started[0].catervas_tools
+        );
         let lead = GIVEN_TASK_LEAD
             .replace("{name}", "dev")
             .replace("{role}", "software_developer");
@@ -1330,6 +1352,34 @@ mod tests {
             started[0].initial_prompt.starts_with(&lead),
             "{}",
             started[0].initial_prompt
+        );
+
+        // A task its agent filed towards the owner's goal says so, in the goal's words.
+        let towards = Harness::with_the_suggested_six("req-given-refine-goal");
+        towards.project.record(
+            "",
+            "goal.set",
+            &json!({ "goal": "goal-1", "words": "Reach 10 paying customers" }),
+        );
+        towards.file_given_with(
+            "CTV-1",
+            "refining",
+            "dev",
+            &json!({ "goal": "goal-1" }),
+            |_| {},
+        );
+        let adapter = towards.recorded(vec![implement_stops_early()]);
+        towards
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(
+            prompt.starts_with(
+                "dev, you filed this task working towards the owner's goal \u{201c}Reach 10 paying customers\u{201d}, and you write its contract yourself"
+            ),
+            "{prompt}"
         );
 
         // A paused agent's task waits: no session starts.
