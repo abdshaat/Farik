@@ -538,6 +538,9 @@
           "$ref": "#/$defs/filesRewriteRequest"
         },
         {
+          "$ref": "#/$defs/mergingSetRequest"
+        },
+        {
           "$ref": "#/$defs/teamSaveRequest"
         },
         {
@@ -1025,6 +1028,10 @@
             }
           }
         },
+        "merging_allowed": {
+          "type": "boolean",
+          "description": "Whether Catervas may merge its pull requests once GitHub's checks pass: policy.merge_when_checks_pass is true and the newest of merge_permission.granted and merge_permission.withdrawn in this project's log is the grant (ADR 0073). A clone whose team file says true answers false until its owner confirms the warning here."
+        },
         "online": {
           "type": "boolean",
           "description": "Whether the project is online: its repository has an origin, and for a project folder every member's repository has one. Finished work then opens a pull request; otherwise it waits on this computer for a merge by hand (spec 5.6, 5.14)."
@@ -1188,6 +1195,7 @@
         "preview_env_present",
         "members_present",
         "online",
+        "merging_allowed",
         "requested_connections"
       ]
     },
@@ -2668,6 +2676,36 @@
           "additionalProperties": false,
           "properties": {}
         }
+      }
+    },
+    "mergingSetRequest": {
+      "title": "Merging Set Request",
+      "description": "The owner turns on or off letting Catervas merge its pull requests once GitHub's checks pass (docs/SPEC.md 5.12, ADR 0073), on this computer. Turning on writes policy.merge_when_checks_pass and records merge_permission.granted; turning off removes the key and records merge_permission.withdrawn; a call that changes nothing records nothing. Answers mergingSetResult. Refused with -32005 and data.errors at /policy/merge_when_checks_pass: merge_warning_unconfirmed (on without confirmed true: the web app sends it only from the warning's Turn on) and merging_offline (on when the project has no origin).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "merging.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["on"],
+          "properties": {
+            "on": { "type": "boolean" },
+            "confirmed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "mergingSetResult": {
+      "description": "Whether Catervas may merge now: the team file says so and this computer's owner confirmed the warning.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["merging_allowed"],
+      "properties": {
+        "merging_allowed": { "type": "boolean" }
       }
     },
     "filesRewriteResult": {
@@ -6243,6 +6281,8 @@
             "question_length",
             "integration_branch_name",
             "integration_branch_missing",
+            "merge_warning_unconfirmed",
+            "merging_offline",
             "too_few",
             "solo_one_agent",
             "solo_role",

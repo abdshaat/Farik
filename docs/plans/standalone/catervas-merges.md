@@ -199,7 +199,7 @@ Test, watched to fail before the method exists:
 
   The offline refusal is part of the same guarantee. The same test asserts it on a second harness with no `origin` (`merging_offline`).
 
-- [ ] `feat(runtime): turn merging on only after the owner confirms the warning`
+- [x] `feat(runtime): turn merging on only after the owner confirms the warning`
 
 ### Task 4: the forge reads the checks and merges
 
