@@ -170,7 +170,7 @@ A branchless documents task: `pub(crate) fn task_rev(git: &Git, files: &ProjectF
 - `a_documents_task_lands_on_acceptance_with_no_pull_request` — asserts, with the orchestrator harness in `local` mode, that a Product Manager task on `docs/catervas/product/spec.*` finds the root's `spec.html` in its worktree, writes it there, reaches `verifying` with no commit, is accepted with `NothingToIntegrate`, opens no pull request, and leaves the new `spec.html` in the root, a `local_documents.written{by:"task"}` and no worktree or start copy; and that its `catervas_git_commit` of `docs/catervas/product/spec.html` is refused `documents_stay_local`.
 - `a_code_task_lands_its_documents_and_opens_its_pull_request` — asserts that a Developer task on `src/**` and `docs/catervas/engineering/**` commits `src/a.rs`, writes `engineering/conventions.html`, and once accepted has the document in the root and a pull request whose diff holds only `src/a.rs`; and that a document it wrote outside its `allowed_paths` was put back by the tidy before `verifying`.
 
-- [ ] `feat(runtime): a task's documents are a copy that lands when it is accepted`
+- [x] `feat(runtime): a task's documents are a copy that lands when it is accepted`
 
 ### Task 6: readers and writers use the one folder
 

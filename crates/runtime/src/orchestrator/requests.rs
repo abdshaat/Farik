@@ -989,6 +989,8 @@ async fn run_on_the_integration_branch(
     let tools = Arc::clone(&deps.tools);
     let factory = Arc::clone(&deps.sandboxes);
     let contract = contract.clone();
+    // The documents kept on this computer are not in the commit: the criteria read a copy of them.
+    let documents_on_disk = catervas_store::document_source::documents_on_disk(team, &tools.log)?;
     tokio::task::spawn_blocking(move || -> Result<EpicRan, OrchestratorError> {
         let git = &tools.git;
         let worktree = tools
@@ -1005,6 +1007,13 @@ async fn run_on_the_integration_branch(
             git.create_detached_worktree(&worktree, &sha)
                 .map_err(Into::into)
         }) {
+            return Ok(unrunnable(pending[0].id.as_str(), &error));
+        }
+        if documents_on_disk
+            && let Err(error) =
+                catervas_store::local_documents::copy_in(git, tools.files.root(), &worktree, None)
+        {
+            let _ = remove_base_worktree(git, &worktree);
             return Ok(unrunnable(pending[0].id.as_str(), &error));
         }
         let sandbox = match factory.create_base(&tools.ids.project_id, &contract.id, &worktree) {

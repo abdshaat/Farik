@@ -1322,6 +1322,16 @@ impl Git {
         }
     }
 
+    /// The commit the worktree at `worktree` has checked out.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `worktree` is not a working tree of this repository.
+    pub fn head_of(&self, worktree: &Path) -> Result<String, GitError> {
+        self.require_worktree_of_this_repository(worktree)?;
+        run_git(worktree, &["rev-parse", "HEAD"])
+    }
+
     /// The git store a worktree of this repository uses, as an absolute path: what the checks'
     /// container mounts read-only so that the worktree's `.git` file resolves (ADR 0069).
     ///

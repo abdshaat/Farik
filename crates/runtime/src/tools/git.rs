@@ -50,11 +50,12 @@ pub(super) fn diff(call: &Call<'_>) -> Result<Value, ToolError> {
     let task = call.task()?;
     let (contract, _) = call.contract(task)?;
     let repository = call.task_repository(&contract)?;
+    let deps = call.deps();
     let diff = repository
         .git
         .diff(
             &task_base(&repository.git, &repository.integration_branch, task),
-            &task_branch(&contract),
+            &crate::orchestrator::rev_of(deps, &call.team, &contract),
         )
         .map_err(failed)?;
     Ok(json!({ "diff": diff }))
@@ -84,6 +85,18 @@ pub(super) fn commit(call: &Call<'_>, input: &CommitInput) -> Result<Value, Tool
         return Err(Refusal::ConflictMarkers { path: path.clone() }.into());
     }
     let removed = removals(&worktree, &input.removed)?;
+    // The team's documents kept on this computer are never committed (ADR 0074).
+    if catervas_store::document_source::documents_on_disk(&call.team, &call.deps().log)
+        .map_err(failed)?
+        && let Some(path) = input
+            .paths
+            .iter()
+            .chain(&removed)
+            .filter_map(|path| normalise(path))
+            .find(|path| path.starts_with("docs/catervas/"))
+    {
+        return Err(Refusal::DocumentsStayLocal { path }.into());
+    }
     // A deletion is not undone by a refused verification, so the contract's paths are checked now.
     let (contract, _) = call.contract(task)?;
     let allowed: Vec<String> = contract
@@ -221,6 +234,13 @@ fn removals(worktree: &std::path::Path, removed: &[String]) -> Result<Vec<String
 pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
     let task = assignees_task(call)?;
     let (contract, _) = call.contract(task)?;
+    if catervas_store::document_source::is_branchless(&call.team, &call.deps().log, &contract)
+        .map_err(failed)?
+    {
+        return Err(failed(
+            "this task has no branch: its documents are not committed",
+        ));
+    }
     let branch = task_branch(&contract);
     call.task_repository(&contract)?
         .git

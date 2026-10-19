@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use catervas_core::branch::task_branch;
 use catervas_core::budget::{
     BudgetScope, BudgetState, CHAT_SESSION_LIMITS, SessionLedger, SessionLimits, add_usage, tighter,
 };
@@ -650,7 +649,7 @@ async fn open_preview(
         }
         Err(error) => return Err(repository_refused(&contract.id, &error)),
     };
-    let tree = repository.git.tree(&task_branch(contract))?;
+    let tree = repository.git.tree(&super::rev_of(tools, team, contract))?;
     let cache = tools
         .files
         .root()

@@ -1595,7 +1595,7 @@ fn resume(
         };
         if repository.git.commit_count(
             &task_base(&repository.git, &repository.integration_branch, task_id),
-            &task_branch(contract),
+            &super::rev_of(&deps.tools, team, contract),
         )? > 0
         {
             Git::open(worktree).head_summary()?
@@ -1645,12 +1645,23 @@ fn resume(
             _ => {}
         }
     }
+    let local_documents =
+        if catervas_store::document_source::documents_on_disk(team, &deps.tools.log)? {
+            Some(catervas_store::document_source::is_branchless(
+                team,
+                &deps.tools.log,
+                contract,
+            )?)
+        } else {
+            None
+        };
     Ok(Some(Resume {
         last_commit,
         last_note,
         rejection,
         conflicts,
         posts: posts_heard_by(deps, agent)?,
+        local_documents,
     }))
 }
 
@@ -1724,7 +1735,7 @@ fn assigned(
         format!("in its private folder {folder}")
     } else {
         let worktree = worktree(deps, &row.task_id);
-        let mut branch = task_branch(&contract);
+        let mut branch = Some(task_branch(&contract));
         if !worktree.is_dir() {
             let repository = match task_repository_of(deps, team, &contract) {
                 Ok(repository) => repository,
@@ -1733,12 +1744,43 @@ fn assigned(
                 Err(TaskRepositoryError::Missing { .. }) => return Ok(None),
                 Err(error) => return Err(repository_refused(&row.task_id, &error)),
             };
-            branch = chosen_branch(deps, &contract, &repository)?;
-            if !start_worktree(deps, board, &contract, &repository, &worktree, &branch)? {
+            // A task that changes only documents kept on this computer has no branch (ADR 0074).
+            branch = if catervas_store::document_source::is_branchless(
+                team,
+                &deps.tools.log,
+                &contract,
+            )? {
+                None
+            } else {
+                Some(chosen_branch(deps, &contract, &repository)?)
+            };
+            if !start_worktree(
+                deps,
+                board,
+                &contract,
+                &repository,
+                &worktree,
+                branch.as_deref(),
+            )? {
                 return Ok(None);
             }
+            if catervas_store::document_source::documents_on_disk(team, &deps.tools.log)? {
+                let copied = catervas_store::local_documents::copy_in(
+                    &repository.git,
+                    deps.tools.files.root(),
+                    &worktree,
+                    Some(&contract.id),
+                );
+                if let Err(error) = copied {
+                    undo_start(&repository.git, &worktree, branch.as_deref());
+                    return Err(error.into());
+                }
+            }
         }
-        format!("in its worktree on {branch}")
+        match branch {
+            Some(branch) => format!("in its worktree on {branch}"),
+            None => "in its worktree, which has no branch".to_string(),
+        }
     };
     let outcome = deps.tools.transitions.request(
         &TransitionRequest {
@@ -1792,11 +1834,14 @@ fn start_worktree(
     contract: &TaskContract,
     repository: &catervas_store::repos::TaskRepository,
     worktree: &std::path::Path,
-    branch: &str,
+    branch: Option<&str>,
 ) -> Result<bool, OrchestratorError> {
     let git = &repository.git;
     let starts = requests::start_point(deps, board, contract, repository)?;
-    git.create_worktree(worktree, branch, &starts[0])?;
+    match branch {
+        Some(branch) => git.create_worktree(worktree, branch, &starts[0])?,
+        None => git.create_detached_worktree(worktree, &starts[0])?,
+    }
     for from in &starts[1..] {
         let message = format!("chore: start from {from}");
         let merged = match git.merge_in(worktree, from, &message) {
@@ -1812,16 +1857,18 @@ fn start_worktree(
         }
     }
     if starts != [repository.integration_branch.clone()] {
-        let start = git.merge_base(branch, branch)?;
+        let start = git.head_of(worktree)?;
         git.set_ref(&catervas_store::git::task_start_ref(&contract.id), &start)?;
     }
     Ok(true)
 }
 
-/// Takes back a worktree and its branch that could not be started.
-fn undo_start(git: &Git, worktree: &std::path::Path, branch: &str) {
+/// Takes back a worktree and its branch, when it has one, that could not be started.
+fn undo_start(git: &Git, worktree: &std::path::Path, branch: Option<&str>) {
     let _ = git.remove_worktree(worktree);
-    let _ = git.delete_branch(branch);
+    if let Some(branch) = branch {
+        let _ = git.delete_branch(branch);
+    }
 }
 
 /// The team's agent of that id, when it is active.

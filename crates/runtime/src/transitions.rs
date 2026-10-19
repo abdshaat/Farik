@@ -774,7 +774,7 @@ impl Transitions {
             extra_iterations: extra_tries(&history),
             design_plan_returns: crate::tools::design::returns(&history),
             solo: team.is_solo(),
-            documents_stay_local: false,
+            documents_stay_local: self.has_no_branch(team, &contract)?,
             design_reviewer: match (review.state, review.recorded_by) {
                 (ReviewState::Failed, Some((designer, _))) => Some(designer),
                 _ => None,
@@ -910,6 +910,14 @@ impl Transitions {
         Ok((budget, readiness))
     }
 
+    /// Whether the task has no branch: it changes documents only, and they stay on this computer
+    /// (ADR 0074).
+    fn has_no_branch(&self, team: &Team, contract: &TaskContract) -> Result<bool, TransitionError> {
+        Ok(catervas_store::document_source::is_branchless(
+            team, &self.log, contract,
+        )?)
+    }
+
     /// What the task's branch holds, read from git only when its worktree
     /// `.catervas/local/worktrees/<id>` exists; otherwise no commits, not clean, and no paths, which
     /// refuses `verifying` truthfully. The integration branch is resolved only then, so that no git
@@ -947,6 +955,34 @@ impl Transitions {
             Err(error) => return Err(error.into()),
         };
         let git = &repository.git;
+        let on_disk = catervas_store::document_source::documents_on_disk(team, &self.log)?;
+        let documents_only = on_disk && catervas_core::folders::is_documents_only(contract);
+        let changed_documents = if on_disk {
+            catervas_store::local_documents::document_changes(
+                self.files.root(),
+                &worktree,
+                &contract.id,
+            )
+            .map_err(|error| TransitionError::Files {
+                detail: error.to_string(),
+            })?
+        } else {
+            Vec::new()
+        };
+        let documents = on_disk.then(|| catervas_core::governor::gates::DocumentWork {
+            only: documents_only,
+            changed: changed_documents.clone(),
+        });
+        if documents_only {
+            // No branch and no commit: what it did is what differs from its copy of the folder.
+            let work = WorkState {
+                commits: 0,
+                worktree_clean: git.is_clean(&worktree)?,
+                folder: None,
+                documents,
+            };
+            return Ok((work, changed_documents));
+        }
         let base = &task_base(git, &repository.integration_branch, &contract.id);
         let branch = task_branch(contract);
         let work = WorkState {
@@ -954,9 +990,11 @@ impl Transitions {
             worktree_clean: git.is_clean(&worktree)?,
             // A task with a worktree does not work in a private folder.
             folder: None,
-            documents: None,
+            documents,
         };
-        Ok((work, git.changed_paths(base, &branch)?))
+        let mut changed = git.changed_paths(base, &branch)?;
+        changed.extend(changed_documents);
+        Ok((work, changed))
     }
 
     /// Puts back what tools changed in the task's worktree outside its allowed paths before a move
@@ -1029,16 +1067,25 @@ impl Transitions {
                 _ => {}
             }
         }
-        if put_back.is_empty() && removed.is_empty() {
+        let (documents_put_back, documents_removed) =
+            self.tidy_documents(team, &contract, &worktree)?;
+        if put_back.is_empty()
+            && removed.is_empty()
+            && documents_put_back.is_empty()
+            && documents_removed.is_empty()
+        {
             return Ok(());
         }
-        let put_back: Vec<String> = put_back.into_iter().collect();
-        git.put_back(&worktree, &put_back)?;
+        let tracked: Vec<String> = put_back.iter().cloned().collect();
+        git.put_back(&worktree, &tracked)?;
         for path in &removed {
             std::fs::remove_file(worktree.join(path)).map_err(|error| TransitionError::Files {
                 detail: format!("{path} in the task's worktree cannot be deleted: {error}"),
             })?;
         }
+        put_back.extend(documents_put_back);
+        removed.extend(documents_removed);
+        let put_back: Vec<String> = put_back.into_iter().collect();
         let (agent_id, session_id) = match by {
             Some((request, ask)) => (
                 match request.actor {
@@ -1058,6 +1105,39 @@ impl Transitions {
                 removed: removed.into_iter().collect(),
             }),
         )
+    }
+
+    /// The documents kept on this computer are ignored by git, so the tidy of git's own files never
+    /// sees them: a document changed outside the task's paths is put back from the task's copy of
+    /// the folder, or removed when the task added it (ADR 0074). The paths put back and the paths
+    /// removed.
+    fn tidy_documents(
+        &self,
+        team: &Team,
+        contract: &TaskContract,
+        worktree: &std::path::Path,
+    ) -> Result<(BTreeSet<String>, BTreeSet<String>), TransitionError> {
+        let mut put_back = BTreeSet::new();
+        let mut removed = BTreeSet::new();
+        if catervas_store::document_source::documents_on_disk(team, &self.log)? {
+            let touched = catervas_store::local_documents::put_back_outside(
+                self.files.root(),
+                worktree,
+                &contract.id,
+                &contract.allowed_paths,
+            )
+            .map_err(|error| TransitionError::Files {
+                detail: error.to_string(),
+            })?;
+            for path in touched {
+                if worktree.join(&path).exists() {
+                    put_back.insert(path);
+                } else {
+                    removed.insert(path);
+                }
+            }
+        }
+        Ok((put_back, removed))
     }
 
     /// What a task in the private `folder` has done there (6.6): the workbooks it `named`, which of

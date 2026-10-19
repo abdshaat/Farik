@@ -169,3 +169,27 @@ pub fn documents_mode_of(team: &Team, log: &EventLog) -> Result<DocumentsMode, S
         newest,
     ))
 }
+
+/// Whether the team's documents are read from the disk now (`local`, or on their way back), so
+/// that a task works on a copy of them and lands it at acceptance.
+///
+/// # Errors
+///
+/// What the log refuses.
+pub fn documents_on_disk(team: &Team, log: &EventLog) -> Result<bool, StoreError> {
+    Ok(documents_mode_of(team, log)?.reads_disk())
+}
+
+/// Whether the task has no branch: it changes documents only while they stay on this computer, so
+/// it has nothing to commit and its acceptance has nothing to integrate.
+///
+/// # Errors
+///
+/// What the log refuses.
+pub fn is_branchless(
+    team: &Team,
+    log: &EventLog,
+    contract: &catervas_core::contract::TaskContract,
+) -> Result<bool, StoreError> {
+    Ok(catervas_core::folders::is_documents_only(contract) && documents_on_disk(team, log)?)
+}
