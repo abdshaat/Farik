@@ -43,7 +43,6 @@ use catervas_store::Uncommitted;
 use catervas_store::baseline::{changes_since_baseline, folder_in};
 use catervas_store::files::{FilesError, ProjectFiles, Sandbox};
 pub use catervas_store::git::integration_branch;
-use catervas_store::git::stale_twins;
 use catervas_store::git::task_base;
 use catervas_store::product_plan::{is_the_product_plan, new_project, product_plan_tasks};
 use catervas_store::repos::{TaskRepositoryError, task_repository};
@@ -712,14 +711,7 @@ impl Transitions {
         }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
-        let stale_twins = if changed_paths
-            .iter()
-            .any(|path| human_of_twin(path).is_some())
-        {
-            stale_twins(&self.git, &integration_branch(team, &self.git)?)?
-        } else {
-            Vec::new()
-        };
+        let stale_twins = self.stale_twins_among(team, &changed_paths)?;
         let (results, completion_note, review_note) = evidence_since_work_began(&history);
         let done = with_the_humans_acceptance(
             &contract,
@@ -908,6 +900,24 @@ impl Transitions {
         };
 
         Ok((budget, readiness))
+    }
+
+    /// The agent versions behind their documents, when a path the task changed is one of them.
+    fn stale_twins_among(
+        &self,
+        team: &Team,
+        changed_paths: &[String],
+    ) -> Result<Vec<String>, TransitionError> {
+        if !changed_paths
+            .iter()
+            .any(|path| human_of_twin(path).is_some())
+        {
+            return Ok(Vec::new());
+        }
+        let mode = catervas_store::document_source::documents_mode_of(team, &self.log)?;
+        Ok(catervas_store::document_source::stale_twins_now(
+            &self.git, &self.log, team, mode,
+        ))
     }
 
     /// Whether the task has no branch: it changes documents only, and they stay on this computer

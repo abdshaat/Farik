@@ -20,7 +20,7 @@ use catervas_protocol::event::{
     Thread, new_event,
 };
 use catervas_store::baseline::{copy_baseline, folder_in};
-use catervas_store::git::{held_document, task_base};
+use catervas_store::git::task_base;
 use catervas_store::marketing::{marketing_plans, social_posts};
 use catervas_store::product_plan::new_project;
 use catervas_store::repos::TaskRepositoryError;
@@ -52,7 +52,7 @@ use crate::exec::Executor;
 use crate::marketing::{hold_plans, record_plan_end};
 use crate::session::{EndReason, SessionPurpose};
 use crate::sleep::asleep_until;
-use crate::transitions::{self, TransitionAsk, TransitionOutcome, integration_branch};
+use crate::transitions::{self, TransitionAsk, TransitionOutcome};
 use catervas_core::delivery::{DeliveryTrigger, TASKS_PER_DELIVERY};
 
 /// What a tick says when no rule matched.
@@ -499,10 +499,10 @@ fn delivery_to_rewrite(
     if asked.is_empty() {
         return Ok(false);
     }
-    let branch = integration_branch(team, &tools.git)?;
-    Ok(tools
-        .git
-        .tree_entries(&branch, "docs/catervas/delivery")?
+    let mode = catervas_store::document_source::documents_mode_of(team, &tools.log)?;
+    let source = catervas_store::document_source::team_documents(team, &tools.git, mode)?;
+    Ok(source
+        .entries(&tools.git, "docs/catervas/delivery")?
         .iter()
         .any(|entry| DocumentFormat::of(&entry.path) == Some(DocumentFormat::Markdown)))
 }
@@ -735,12 +735,9 @@ fn held_on_the_integration_branch(
     stem: &str,
 ) -> Result<Option<String>, OrchestratorError> {
     let git = &deps.tools.git;
-    match held_document(
-        git,
-        &integration_branch(team, git)?,
-        stem,
-        team.document_format(),
-    ) {
+    let mode = catervas_store::document_source::documents_mode_of(team, &deps.tools.log)?;
+    let source = catervas_store::document_source::team_documents(team, git, mode)?;
+    match source.held_document(git, stem, team.document_format()) {
         Err(GitError::CommandFailed { .. }) => Ok(None),
         other => Ok(other?),
     }

@@ -16,11 +16,17 @@ use catervas_core::folders::{
 };
 use catervas_core::governor::paths::normalise;
 use catervas_core::team::{Role, Team};
-use catervas_store::document_source::documents_mode_of;
-use catervas_store::folder_docs::{FolderChange, FolderDocs, folder_docs};
-use catervas_store::git::{PathCommit, TreeEntry, integration_branch, stale_twins};
+use catervas_store::document_source::{
+    DocumentSource, documents_mode_of, documents_on_disk, stale_twins_now, team_documents,
+};
+use catervas_store::folder_docs::{
+    FolderChange, FolderDocs, LocalWriter, folder_docs, local_writes,
+};
+use catervas_store::git::{PathCommit, TreeEntry, integration_branch};
+use catervas_store::local_documents::write_document;
 use catervas_store::marketing::marketing_plans;
 use catervas_store::requests::rederive_tasks;
+use catervas_store::waiting::name_of;
 use serde_json::{Value, json};
 
 use catervas_protocol::event::{EventBody, EventKind, TaskCreatedBodyFiledAs};
@@ -139,6 +145,15 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             "Documents can't be changed until you merge the pull request that moves them.",
         ));
     }
+    if documents_on_disk(&team, &deps.log).map_err(|e| internal(&e))? {
+        return save_on_disk(
+            deps,
+            &team,
+            &path,
+            text,
+            params["base"].as_str().unwrap_or_default(),
+        );
+    }
     let branch = integration_branch(&team, &deps.git).map_err(|e| internal(&e))?;
     let held = deps
         .git
@@ -195,6 +210,68 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     .map_err(|e| internal(&e))?;
     append(deps, EventBody::FolderDocEdited(body))?;
     Ok(json!({ "change": landed.change, "branch": landed.branch }))
+}
+
+/// `files.save` with the documents kept on this computer (ADR 0074): the file is written at once,
+/// whole or not at all, after `base` is checked against the file's own bytes. A human document's
+/// twin is brought up to date by a task filed at once. The caller holds the integration lock.
+fn save_on_disk(
+    deps: &ToolDeps,
+    team: &Team,
+    path: &str,
+    text: &str,
+    base: &str,
+) -> Result<Value, Failure> {
+    let source = DocumentSource::Disk(deps.files.root().to_path_buf());
+    let held = source
+        .entries(&deps.git, path)
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .find(|entry| entry.path == path && is_file(entry));
+    if held.is_none_or(|entry| entry.blob != base) {
+        return Err(refusal(
+            "file_changed",
+            "/base",
+            "This document changed since you opened it. Open it again to see what changed.",
+        ));
+    }
+    if source
+        .text(&deps.git, path)
+        .map_err(|e| internal(&e))?
+        .as_deref()
+        == Some(text)
+    {
+        return Ok(json!({ "change": null, "branch": null }));
+    }
+    write_document(deps.files.root(), path, text).map_err(|error| {
+        refusal(
+            "is_a_link",
+            "/path",
+            &format!("This file is a link, which Catervas does not write through ({error})."),
+        )
+    })?;
+    let body = serde_json::from_value(json!({
+        "paths": [path], "removed": [], "by": "owner",
+        "written_by": null, "task_id": null, "set_aside": [],
+    }))
+    .map_err(|e| internal(&e))?;
+    append(deps, EventBody::LocalDocumentsWritten(body))?;
+    if is_human_document(path)
+        && let Err(reason) = crate::tools::folders::file_rederive_for(deps, team, path)
+    {
+        crate::channel::post_system(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            None,
+            &format!(
+                "{} was saved, but the task that brings the team's version of it up to date could not be filed: {reason}",
+                document_name(path, &|_: &str| None)
+            ),
+        )
+        .map_err(|e| internal(&e))?;
+    }
+    Ok(json!({ "change": null, "branch": null }))
 }
 
 /// `files.ask_change { path, words }`: a small, whole task for the role that owns the document,
@@ -676,6 +753,12 @@ struct Pending {
 /// The tasks accepted and still waiting to merge, in board order; a branch git cannot read is left
 /// out.
 fn pending(deps: &ToolDeps) -> Result<Vec<Pending>, Failure> {
+    // With the documents kept on this computer nothing waits to merge: a task's documents land
+    // when it is accepted.
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    if documents_on_disk(&team, &deps.log).map_err(|e| internal(&e))? {
+        return Ok(Vec::new());
+    }
     Ok(deps
         .projections
         .board()
@@ -761,15 +844,13 @@ fn folders(team: &Team, entries: &[TreeEntry], pending: &[Pending]) -> Vec<Folde
         .collect()
 }
 
-/// The team and the integration branch's `docs/catervas` entries.
-fn listing(deps: &ToolDeps) -> Result<(Team, String, Vec<TreeEntry>), Failure> {
+/// The team, where its documents are read from, and the `docs/catervas` entries there.
+fn listing(deps: &ToolDeps) -> Result<(Team, DocumentSource, Vec<TreeEntry>), Failure> {
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
-    let branch = integration_branch(&team, &deps.git).map_err(|e| internal(&e))?;
-    let entries = deps
-        .git
-        .tree_entries(&branch, ROOT)
-        .map_err(|e| internal(&e))?;
-    Ok((team, branch, entries))
+    let mode = documents_mode_of(&team, &deps.log).map_err(|e| internal(&e))?;
+    let source = team_documents(&team, &deps.git, mode).map_err(|e| internal(&e))?;
+    let entries = source.entries(&deps.git, ROOT).map_err(|e| internal(&e))?;
+    Ok((team, source, entries))
 }
 
 /// `files.tree`: the folders, the documents in them with their names, and the integration policy.
@@ -912,31 +993,75 @@ fn writer_of(docs: &FolderDocs, change: &FolderChange) -> Option<String> {
     })
 }
 
-/// `path` as `rev` holds it: its text, its blob and its last change. `waiting` is the owner's own
-/// change that `rev` is the branch of, whose commit is the last change, made by them.
+/// `path` as `source` holds it: its text, its blob and its last change. `waiting` is the owner's
+/// own change that the branch is the branch of, whose commit is the last change, made by them. On
+/// disk the last change is the newest write the log records, and none when it records none.
 fn version(
     deps: &ToolDeps,
     docs: &FolderDocs,
-    rev: &str,
+    source: &DocumentSource,
     path: &str,
     waiting: bool,
 ) -> Result<Value, Failure> {
-    let entry = deps
-        .git
-        .tree_entries(rev, path)
+    let entry = source
+        .entries(&deps.git, path)
         .map_err(|e| internal(&e))?
         .into_iter()
         .find(|entry| entry.path == path && is_file(entry))
-        .ok_or_else(|| internal(&format!("{rev} has no file {path}")))?;
-    let text = deps.git.file_at(rev, path).map_err(|e| internal(&e))?;
-    let commit = deps
-        .git
-        .last_commit(rev, path, !waiting)
-        .map_err(|e| internal(&e))?;
-    let last = commit
-        .map(|commit| last_change(deps, docs, &commit, waiting))
-        .transpose()?;
+        .ok_or_else(|| internal(&format!("there is no file {path}")))?;
+    let text = source
+        .text(&deps.git, path)
+        .map_err(|e| internal(&e))?
+        .ok_or_else(|| internal(&format!("there is no file {path}")))?;
+    let last = match source {
+        DocumentSource::Branch(rev) => deps
+            .git
+            .last_commit(rev, path, !waiting)
+            .map_err(|e| internal(&e))?
+            .map(|commit| last_change(deps, docs, &commit, waiting))
+            .transpose()?,
+        DocumentSource::Disk(_) => local_last_change(deps, path)?,
+    };
     Ok(json!({ "path": path, "text": text, "blob": entry.blob, "last_change": last }))
+}
+
+/// Who wrote `path` last through Catervas, from the log of local writes: the owner, an agent, or a
+/// task and its assignee; `None` for a document nobody has written since the switch. An edit made
+/// in an editor is not seen (ADR 0074).
+fn local_last_change(deps: &ToolDeps, path: &str) -> Result<Option<Value>, Failure> {
+    let writes = local_writes(&deps.log).map_err(|e| internal(&e))?;
+    let Some(write) = writes.get(path) else {
+        return Ok(None);
+    };
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let (agent_id, task_id) = match write.by {
+        LocalWriter::Owner => (None, None),
+        LocalWriter::Agent => (write.written_by.clone(), None),
+        LocalWriter::Task => {
+            let assignee = write
+                .task_id
+                .as_deref()
+                .and_then(|id| id.parse::<catervas_core::contract::TaskId>().ok())
+                .and_then(|id| deps.projections.task(&id).ok().flatten())
+                .and_then(|row| row.assignee_id);
+            (assignee, write.task_id.clone())
+        }
+    };
+    let by_you = write.by == LocalWriter::Owner;
+    let author = if by_you {
+        "You".to_string()
+    } else {
+        agent_id
+            .as_deref()
+            .map_or_else(|| "Catervas".to_string(), |id| name_of(&team, id))
+    };
+    Ok(Some(json!({
+        "at": write.at.to_rfc3339(),
+        "task_id": task_id,
+        "agent_id": agent_id,
+        "author": author,
+        "by_you": by_you,
+    })))
 }
 
 /// The owner's own change to `path` that is still waiting, and the branch that holds it.
@@ -958,7 +1083,8 @@ fn waiting_change(deps: &ToolDeps, docs: &FolderDocs, path: &str) -> Option<(u64
 fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
     let missing = || Failure::new(NOT_FOUND, format!("there is no document {asked}"));
     let path = normalise(asked).ok_or_else(missing)?;
-    let (team, branch, entries) = listing(deps)?;
+    let (team, source, entries) = listing(deps)?;
+    let mode = documents_mode_of(&team, &deps.log).map_err(|e| internal(&e))?;
     let pending = pending(deps)?;
     let document = folders(&team, &entries, &pending)
         .into_iter()
@@ -971,7 +1097,8 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
         .iter()
         .find(|waiting| document.task.as_deref() == Some(waiting.task.as_str()))
     {
-        let on_branch = |path: &str| version(deps, &docs, &waiting.branch, path, false);
+        let branch = DocumentSource::Branch(waiting.branch.clone());
+        let on_branch = |path: &str| version(deps, &docs, &branch, path, false);
         return Ok(json!({
             "document": on_branch(&path)?,
             "twin": document.twin.as_deref().map(on_branch).transpose()?,
@@ -982,20 +1109,28 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
             "waiting": null,
         }));
     }
-    let waiting = waiting_change(deps, &docs, &path);
+    let waiting = if mode.reads_disk() {
+        None
+    } else {
+        waiting_change(deps, &docs, &path)
+    };
     let shown = match &waiting {
-        Some((_, held)) => version(deps, &docs, held, &path, true)?,
-        None => version(deps, &docs, &branch, &path, false)?,
+        Some((_, held)) => version(
+            deps,
+            &docs,
+            &DocumentSource::Branch(held.clone()),
+            &path,
+            true,
+        )?,
+        None => version(deps, &docs, &source, &path, false)?,
     };
     let twin = document
         .twin
         .as_deref()
-        .map(|twin| version(deps, &docs, &branch, twin, false))
+        .map(|twin| version(deps, &docs, &source, twin, false))
         .transpose()?;
     let stale = match &document.twin {
-        Some(twin) => stale_twins(&deps.git, &branch)
-            .map_err(|e| internal(&e))?
-            .contains(twin),
+        Some(twin) => stale_twins_now(&deps.git, &deps.log, &team, mode).contains(twin),
         None => false,
     };
     let rederiving = match &document.twin {
@@ -1010,7 +1145,8 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
             .any(|row| !matches!(row.status, TaskStatus::Accepted | TaskStatus::Cancelled)),
         None => false,
     };
-    let editable = check_owner_edit(&path, 0).is_ok();
+    // While the documents move, none can be changed (ADR 0074).
+    let editable = mode.writes_open() && check_owner_edit(&path, 0).is_ok();
     Ok(json!({
         "document": shown,
         "twin": twin,
@@ -1022,8 +1158,6 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
     }))
 }
 
-/// The policy an HTML document is answered under: no script, no network, its own origin, and
-/// framed by this app alone.
 const POLICY: &str = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; \
                       font-src data:; frame-ancestors 'self'";
 
@@ -1109,6 +1243,21 @@ fn raw_text(deps: &ToolDeps, path: &str, task: Option<&str>) -> Option<String> {
             != Some(catervas_core::folders::DocumentFormat::Html)
     {
         return None;
+    }
+    // With the documents kept on this computer the file is read from the folder, or from the task's
+    // copy of it.
+    if let Some(team) = deps.files.read_team().ok()
+        && documents_on_disk(&team, &deps.log).ok()?
+    {
+        let base = match task {
+            Some(task) => deps.files.root().join(".catervas/local/worktrees").join(
+                task.parse::<catervas_core::contract::TaskId>()
+                    .ok()?
+                    .as_str(),
+            ),
+            None => deps.files.root().to_path_buf(),
+        };
+        return plain_file(&base, &path);
     }
     let in_branch = |rev: &str, path: &str| {
         deps.git
@@ -3019,5 +3168,131 @@ mod tests {
                 .len(),
             2
         );
+    }
+
+    /// A project whose team keeps its documents on this computer, with the Product Manager's spec
+    /// and its agent version on disk, ignored.
+    fn local_project(name: &str) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            with_the_designer(wire);
+            wire["policy"]["integration"] = json!("pull_request");
+            wire["policy"]["documents_local"] = json!(true);
+        });
+        catervas_store::local_documents::exclude_documents(&harness.project.deps.git)
+            .expect("ignored");
+        write(
+            &harness,
+            "docs/catervas/product/spec.html",
+            "spec for people\n",
+        );
+        write(
+            &harness,
+            "docs/catervas/product/spec.agent.html",
+            "spec for agents\n",
+        );
+        harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_files_page_reads_and_writes_the_folder_on_disk() {
+        let harness = local_project("files-local");
+        let spec = "docs/catervas/product/spec.html";
+        let twin = "docs/catervas/product/spec.agent.html";
+        let root = harness.project.repo.path.clone();
+        let listed = tree(&harness.daemon);
+        assert_eq!(
+            listed["folders"][0]["documents"][0]["path"], spec,
+            "{listed}"
+        );
+        assert_eq!(listed["folders"][0]["documents"][0]["twin"], twin);
+        let before = read(&harness.daemon, spec);
+        assert_eq!(before["stale"], false);
+        assert_eq!(before["document"]["last_change"], Value::Null);
+
+        // A save writes the file at once: no branch, no pull request, and the twin falls behind.
+        let old = git_output(&harness, &["hash-object", spec]);
+        assert_eq!(before["document"]["blob"], old);
+        let saved = save(&harness, spec, "the owner's spec\n", &old);
+        conforms(&saved["result"], "filesSaveResult", &saved);
+        assert_eq!(saved["result"], json!({ "change": null, "branch": null }));
+        assert_eq!(
+            std::fs::read_to_string(root.join(spec)).expect("written"),
+            "the owner's spec\n"
+        );
+        assert_eq!(git_output(&harness, &["branch", "--list", "docs/*"]), "");
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::FolderDocEdited])
+                .is_empty()
+        );
+        let written = harness.project.events(&[EventKind::LocalDocumentsWritten]);
+        assert_eq!(written.len(), 1);
+        let after = read(&harness.daemon, spec);
+        assert_eq!(after["document"]["last_change"]["by_you"], true, "{after}");
+        assert_eq!(after["stale"], true);
+        assert_eq!(after["rederiving"], true);
+        assert_eq!(after["waiting"], Value::Null);
+        assert_eq!(after["twin"]["text"], "spec for agents\n");
+        assert_eq!(
+            super::rederive_tasks(&harness.project.deps.log)
+                .expect("reads")
+                .len(),
+            1
+        );
+        // The old blob is a document that changed.
+        let stale = save(&harness, spec, "another\n", &old);
+        assert_eq!(
+            refusal(&stale),
+            ("file_changed".to_string(), "/base".to_string()),
+            "{stale}"
+        );
+        // The same text makes nothing.
+        let same = save(
+            &harness,
+            spec,
+            "the owner's spec\n",
+            &git_output(&harness, &["hash-object", spec]),
+        );
+        assert_eq!(same["result"], json!({ "change": null, "branch": null }));
+        assert_eq!(
+            harness
+                .project
+                .events(&[EventKind::LocalDocumentsWritten])
+                .len(),
+            1
+        );
+
+        // An agent's document at a retro is written on disk too.
+        let mut context = harness.project.context("ada", None);
+        context.purpose = crate::session::SessionPurpose::Ceremony;
+        context.thread = Some(catervas_protocol::event::Thread::Retro);
+        let cadence = "docs/catervas/architecture/cadence.html";
+        let answer = crate::tools::fixtures::run(
+            &context,
+            "catervas_write_folder_doc",
+            json!({ "path": cadence, "text": "the cadence\n" }),
+        )
+        .expect("written");
+        assert_eq!(answer["change"], Value::Null, "{answer}");
+        assert_eq!(
+            std::fs::read_to_string(root.join(cadence)).expect("on disk"),
+            "the cadence\n"
+        );
+        assert_eq!(git_output(&harness, &["branch", "--list", "docs/*"]), "");
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::FolderDocWritten])
+                .is_empty()
+        );
+        let written = harness.project.events(&[EventKind::LocalDocumentsWritten]);
+        assert_eq!(
+            catervas_protocol::event::event_to_value(&written[1])["body"]["written_by"],
+            "ada"
+        );
+        let listed = read(&harness.daemon, cadence);
+        assert_eq!(listed["document"]["last_change"]["agent_id"], "ada");
     }
 }

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use catervas_core::folders::{SwitchState, agent_twin};
+use catervas_core::folders::{SwitchState, agent_twin, twin_is_stale_by_log};
 use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, LocalDocumentsWrittenBodyBy};
 use chrono::{DateTime, Utc};
 
@@ -395,6 +395,30 @@ pub fn local_writes(log: &EventLog) -> Result<BTreeMap<String, LocalWrite>, Stor
         }
     }
     Ok(writes)
+}
+
+/// The agent versions that are behind the document for people beside them, by the log of local
+/// writes: the document was written after the twin did (`twin_is_stale_by_log`). A pair needs both
+/// files on disk.
+///
+/// # Errors
+///
+/// What the log or the folder refuses.
+pub fn local_stale_twins(
+    log: &EventLog,
+    root: &std::path::Path,
+) -> Result<Vec<String>, StoreError> {
+    let writes = local_writes(log)?;
+    let on_disk = crate::local_documents::document_paths(root)?;
+    let seq = |path: &str| writes.get(path).map(|write| write.seq);
+    Ok(on_disk
+        .iter()
+        .filter(|path| catervas_core::folders::is_human_document(path))
+        .filter_map(|path| {
+            let twin = agent_twin(path).filter(|twin| on_disk.contains(twin))?;
+            twin_is_stale_by_log(seq(path), seq(&twin)).then_some(twin)
+        })
+        .collect())
 }
 
 #[cfg(test)]

@@ -128,6 +128,43 @@ pub fn has_documents(root: &Path) -> Result<bool, StoreError> {
     Ok(!files_under(&root.join(DOCUMENTS), &[])?.is_empty())
 }
 
+/// Every regular file of the root's documents folder, as repository paths, in order; none when
+/// the folder, or `docs`, is a link or is not there.
+///
+/// # Errors
+///
+/// `Io` when the folder cannot be read.
+pub fn document_paths(root: &Path) -> Result<Vec<String>, StoreError> {
+    if has_link(root, DOCUMENTS)? {
+        return Ok(Vec::new());
+    }
+    Ok(files_under(&root.join(DOCUMENTS), &[])?
+        .into_keys()
+        .map(|relative| format!("{DOCUMENTS}/{relative}"))
+        .collect())
+}
+
+/// Removes the document `path` (from the project's root, under `docs/catervas`); one that is not
+/// there is removed already.
+///
+/// # Errors
+///
+/// `Io` when the path is outside the folder, a segment of it is a link, or the file cannot be
+/// removed.
+pub fn remove_document(root: &Path, path: &str) -> Result<(), StoreError> {
+    if under_documents(path).is_none() || has_link(root, path)? {
+        return Err(StoreError::Io {
+            detail: format!("{path} is not a document that can be removed"),
+        });
+    }
+    match fs::remove_file(root.join(path)) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => {
+            Err(failed(&error, &root.join(path)))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Gives the task's worktree a copy of the root's documents: the worktree's folder is emptied
 /// (every file git still tracks there is first marked `--skip-worktree`, so that the copy is no
 /// change to it) and filled with every regular file of the root's folder, links not followed. With

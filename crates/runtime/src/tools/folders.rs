@@ -241,6 +241,22 @@ pub(crate) fn file_rederive(
     else {
         return Ok(None);
     };
+    file_rederive_for(deps, team, human)
+}
+
+/// Files the task that brings the twin of the human document `human` up to date, the owner having
+/// changed it (`docs/SPEC.md` 5.17), under the rule that keeps one open for each twin: nothing is
+/// filed for a document with no twin, in a folder no role owns, or when a task for the twin has
+/// not reached its worktree yet.
+///
+/// # Errors
+///
+/// `Refused` when no role reviews the owner of the folder, and what filing the request refuses.
+pub(crate) fn file_rederive_for(
+    deps: &ToolDeps,
+    team: &Team,
+    human: &str,
+) -> Result<Option<TaskId>, RequestError> {
     let Some(twin) = agent_twin(human) else {
         return Ok(None);
     };
@@ -323,12 +339,18 @@ pub(crate) fn proposals_list(deps: &ToolDeps, team: &Team) -> Result<Value, Stor
         }
     }
     let mut listed = Vec::new();
+    let mode = catervas_store::document_source::documents_mode_of(team, &deps.log)?;
+    let source = catervas_store::document_source::team_documents(team, &deps.git, mode)
+        .map_err(|error| io(&error))?;
     for card in &cards {
-        let into = integration_branch(team, &deps.git).map_err(|error| io(&error))?;
         let documents: Vec<Value> = card
             .iter()
             .map(|each| {
-                let before = deps.git.file_at(&into, &each.path).unwrap_or_default();
+                let before = source
+                    .text(&deps.git, &each.path)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
                 let lines: Vec<Value> = changed_lines(&before, &each.text)
                     .into_iter()
                     .map(|line| {
@@ -473,6 +495,9 @@ pub(super) fn write_folder_doc(
         ));
     }
     let path = &checked.path;
+    if catervas_store::document_source::documents_on_disk(&call.team, &deps.log).map_err(failed)? {
+        return write_on_disk(call, &checked);
+    }
     let name = call.agent.display_name.to_string();
     let mut files = vec![(path.clone(), checked.text.to_string())];
     let mut paths = vec![path.as_str()];
@@ -516,6 +541,51 @@ pub(super) fn write_folder_doc(
     }))
 }
 
+/// Writes the checked document, and its agent version, in the owner's folder at once (ADR 0074):
+/// each file whole or not at all, the other format's file removed, and one `local_documents.written`
+/// on the session's envelope. Text the folder already says is `folder_doc_unchanged`. The caller
+/// holds the integration lock.
+fn write_on_disk(call: &Call<'_>, checked: &Checked<'_>) -> Result<Value, ToolError> {
+    use catervas_store::document_source::DocumentSource;
+    use catervas_store::local_documents::{remove_document, write_document};
+
+    let deps = call.deps();
+    let root = deps.files.root();
+    let source = DocumentSource::Disk(root.to_path_buf());
+    let mut files = vec![(checked.path.clone(), checked.text.to_string())];
+    if let Some((twin, agent_text)) = &checked.twin {
+        files.push((twin.clone(), (*agent_text).to_string()));
+    }
+    let mut unchanged = checked.removed.is_empty();
+    for (path, text) in &files {
+        unchanged &= source.text(&deps.git, path).map_err(failed)?.as_deref() == Some(text);
+    }
+    if unchanged {
+        return Err(refused(
+            "folder_doc_unchanged",
+            format!("{} already says this on this computer", checked.path),
+        ));
+    }
+    for (path, text) in &files {
+        write_document(root, path, text)
+            .map_err(|error| refused("folder_doc_link", error.to_string()))?;
+    }
+    for path in &checked.removed {
+        remove_document(root, path).map_err(failed)?;
+    }
+    let body = serde_json::from_value(json!({
+        "paths": files.iter().map(|(path, _)| path).collect::<Vec<_>>(),
+        "removed": checked.removed, "by": "agent", "written_by": call.agent_id(),
+        "task_id": null, "set_aside": [],
+    }))
+    .map_err(failed)?;
+    call.append(None, EventBody::LocalDocumentsWritten(body))?;
+    Ok(json!({
+        "path": checked.path, "change": null, "branch": null,
+        "next": "It is saved in your folder on this computer; nothing is committed.",
+    }))
+}
+
 /// Holds the call to the rules of its session, its path and its fields, in that order.
 fn check_input<'a>(
     call: &Call<'_>,
@@ -532,13 +602,16 @@ fn check_input<'a>(
     };
     let (target, twin) = checked_path(call, folder, &input.path)?;
     let path = target.path;
-    let into = integration_branch(&call.team, &call.deps().git).map_err(failed)?;
     let git = &call.deps().git;
+    let mode = catervas_store::document_source::documents_mode_of(&call.team, &call.deps().log)
+        .map_err(failed)?;
+    let source =
+        catervas_store::document_source::team_documents(&call.team, git, mode).map_err(failed)?;
     // A git error reads as "absent" inside the check, so the first one is kept and fails the call
     // after it: an unreadable branch must not let a document change format.
     let unreadable = std::cell::RefCell::new(None);
     let format_check = check_document_format(&path, call.team.document_format(), &|held: &str| {
-        git.has_file(&into, held).unwrap_or_else(|error| {
+        source.has_file(git, held).unwrap_or_else(|error| {
             unreadable.borrow_mut().get_or_insert(error.to_string());
             false
         })

@@ -180,7 +180,7 @@ Files: `daemon/documents.rs` (`listing`, `version`, `raw_text`, `pending` (none 
 - `the_files_page_reads_and_writes_the_folder_on_disk` — asserts, in `local` mode with `product/spec.html` and `spec.agent.html` on disk, that `files.tree` lists the pair; `files.save` of `spec.html` with its blob as `base` writes the disk, makes no branch, and `files.read` then answers `last_change.by_you`, `stale: true`, `rederiving: true` with a re-derive task filed; a second save with the old `base` is `file_changed`; and `catervas_write_folder_doc` at a review writes `delivery/cadence.html` on disk and answers `change: null`.
 - `every_session_is_told_the_documents_stay_on_this_computer` — asserts that an implement session's Team rules in `local` mode hold `local_documents_line()` after the documents line, and in `committed` mode do not.
 
-- [ ] `feat(runtime): the Files page and the folder tool read and write the documents on disk`
+- [x] `feat(runtime): the Files page and the folder tool read and write the documents on disk`
 
 ### Task 7: the switch in the web app
 

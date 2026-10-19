@@ -54,7 +54,23 @@ impl DocumentSource {
                 if behind_a_link(root, under) {
                     return Ok(Vec::new());
                 }
-                let found = files_under(&root.join(under), &[])
+                let target = root.join(under);
+                let kind = std::fs::symlink_metadata(&target).ok();
+                if kind.as_ref().is_some_and(std::fs::Metadata::is_file) {
+                    let blob = git.hash_files(&[target])?;
+                    return Ok(blob
+                        .into_iter()
+                        .map(|blob| TreeEntry {
+                            mode: "100644".to_string(),
+                            blob,
+                            path: under.to_string(),
+                        })
+                        .collect());
+                }
+                if !kind.is_some_and(|kind| kind.is_dir()) {
+                    return Ok(Vec::new());
+                }
+                let found = files_under(&target, &[])
                     .map_err(|error| refused("read the documents", error))?;
                 let blobs = git.hash_files(&found.values().cloned().collect::<Vec<_>>())?;
                 Ok(found
@@ -192,4 +208,17 @@ pub fn is_branchless(
     contract: &catervas_core::contract::TaskContract,
 ) -> Result<bool, StoreError> {
     Ok(catervas_core::folders::is_documents_only(contract) && documents_on_disk(team, log)?)
+}
+
+/// The agent versions behind the document for people beside them, as `mode` reads them: by the
+/// commits on the integration branch, or by the log of local writes. A branch that cannot be read
+/// has none.
+#[must_use]
+pub fn stale_twins_now(git: &Git, log: &EventLog, team: &Team, mode: DocumentsMode) -> Vec<String> {
+    if mode.reads_disk() {
+        return folder_docs::local_stale_twins(log, git.root()).unwrap_or_default();
+    }
+    integration_branch(team, git)
+        .and_then(|branch| crate::git::stale_twins(git, &branch))
+        .unwrap_or_default()
 }
