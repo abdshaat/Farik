@@ -40,6 +40,7 @@ crates/runtime/tests/fixtures/attach/spec.pdf     creates: one page, the text "P
 crates/runtime/tests/fixtures/attach/scan.pdf     creates: one page, no text
 crates/runtime/src/daemon/documents.rs            modifies: document.attach; files.read's `attached`; tests
 crates/runtime/src/daemon/web.rs                  modifies: the method allow-list
+crates/runtime/src/daemon/board.rs                modifies: chat.messages and channel.messages answer attachments (Task 6)
 docs/schemas/rpc.schema.json                      modifies: document.attach, request.file attachments, files.read answer
 docs/schemas/command.schema.json                  modifies: attachments on two bodies
 docs/schemas/event.schema.json                    modifies: document.attached; attachments on three events
@@ -147,6 +148,8 @@ Files: modified `prompt.rs`, `session.rs`, `rules.rs`, `chat.rs` (interview).
 ### Task 6: the attach button in the request box, the chats and the channel
 
 Files: created `Attach.tsx`, `.module.css`, `.test.tsx`; modified `Today.tsx`, `OneToOne.tsx`, `Channel.tsx`, `FileDocument.tsx`, `files.ts`, `en.ts`.
+
+Amended in execution (2026-10-19): `chat.messages` and `channel.messages` (`crates/runtime/src/daemon/board.rs`, their results in `rpc.schema.json`) answer each message's `attachments` (omitted when none), each `{ path, name }` with `name` from its `document.attached`, so a sent message can show its chips; Task 4 recorded the paths but no query returned them.
 
 - `attaches_a_document_and_sends_it_with_the_message` (Attach.test.tsx) — with a fake client, asserts that picking `spec.pdf` in Today's box and choosing "The architecture" calls `document.attach` with `kind: "architecture"` and the file's base64, shows a chip "spec.pdf", and "Send" calls `request.file` with `attachments: [path]`; that the chat's and the channel's boxes send `attachments` in their commands; that a refusal `no_text` shows `attach_no_text`'s words; that a sixth file shows `attach_too_many` without a call; and that a sent chat message shows its chip linking to `/files/<path>`.
 
