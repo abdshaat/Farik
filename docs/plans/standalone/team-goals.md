@@ -7,7 +7,7 @@ Spec: `docs/SPEC.md` 3, 4.2, 5.5, 5.18 (new), 6.1, 8.2, 8.5, F17, F18 (new) (rev
 Depends on: `origin/main` at `ca21251b`
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-19, against the three readiness rules (ADR 0065); see the end
 
-Signatures, not bodies; test names and what each asserts, not test code (ADR 0008).
+Signatures, not bodies; test names and what each asserts, not test code (ADR 0008). Longer than the usual 300 lines because the goal is one change across the protocol, core, store, runtime, roles and the web, each task small; split it only by landing tasks 1 to 8 before task 9.
 
 ## Goal
 
@@ -277,7 +277,7 @@ Files: `tools/goals.rs`, `tools.rs`. Both are tier `Read`. The `TOOLS` entries g
 
 ### Task 6: `goal.get`
 
-Files: `rpc.schema.json` (`goalGetQuery`, `goalGetResult`, as the wire above, `additionalProperties: false`), `gates.rs`, `goals.rs` (`goal_get`). The test is `#[ignore = "needs the git program: cargo xtask check --integration"]`, as the other `gates.rs` tests are.
+Files: `rpc.schema.json` (`goal.get` in the query-name enum, `goalGetQuery`, `goalGetResult`, as the wire above, `additionalProperties: false`), `gates.rs`, `goals.rs` (`goal_get`). The test is `#[ignore = "needs the git program: cargo xtask check --integration"]`, as the other `gates.rs` tests are.
 
 - `goal_get_answers_the_standing_goal_and_the_last_ended`:
   - with no goal it answers `{ goal: null, last_ended: null }`;
@@ -294,7 +294,7 @@ Files: `orchestrator/goal.rs`, `orchestrator.rs`, `rules.rs` (`goal_rules` calle
 
 Planning:
 - the session is `SessionAsk { agent: planner, contract: None, purpose: Goal, cwd: root, read_only: true, tools: Some(GOAL_PLAN_TOOLS), .. }`, with `goal_plan_message`;
-- after `run_session`, whatever the end, the rule appends `goal.planned { goal, filed }`. `filed` is the `task.created` with that goal after the session's `session.started` seq;
+- after `run_session`, unless the session ended `EndReason::Aborted`, the rule appends `goal.planned { goal, filed }`. `filed` is the `task.created` with that goal after the session's `session.started` seq;
 - it answers `TickReport::Goal { what: ran(planner, "goal planning", &end) }`.
 
 Measuring:
@@ -317,9 +317,11 @@ A spent day sets `waiting.day_spent`, and a sleeping agent sets `waiting.slept`,
   - `goal.planned { goal: "goal-1", filed: [] }` is recorded;
   - the next tick starts no session (nothing planned and nothing new);
   - after `goal_report { value: 2 }` a tick starts the second;
-  - with one `escalated` task on the board (`harness.file("CTV-1", "escalated", ..)`, which no rule acts on), no `Goal` session starts;
-  - with that task cancelled and after `goal_pause`, no `Goal` session starts.
-- `measures_the_goal_once_a_day` (`dev-a` holding `stripe`, goal-1 with `server: "stripe"`, one `escalated` task on the board, so the board is not quiet and no other rule acts):
+  - with an `accepted` task waiting for its hand merge (`harness.accepted("CTV-2")`, the project having no `origin`, 5.14) and nothing else, a `Goal` session still starts (the merge does not hold a round);
+  - with one young `blocked` task (`harness.blocked("CTV-1", "dev-a", "dev-b")`, which rule 4 passes over), no `Goal` session starts;
+  - with that task cancelled and after `goal_pause`, no `Goal` session starts;
+  - a goal session whose recorded transcript ends aborted leaves no `goal.planned`, and the next tick starts one again.
+- `measures_the_goal_once_a_day` (`dev-a` holding `stripe`, goal-1 with `server: "stripe"`, one young `blocked` task, `harness.blocked("CTV-1", "dev-b", "pm")`, so the board is not quiet and no other rule acts):
   - the tick starts one `Goal` session of `dev-a`, offered `catervas_record_goal_progress` alone;
   - a second tick the same day starts no `Goal` session of `dev-a`;
   - an orchestrator from `harness.orchestrator_at` one day later starts one again.
@@ -357,7 +359,7 @@ Files: `GoalCard.tsx`, `GoalCard.module.css`, `GoalCard.test.tsx`, `Today.tsx` (
 - 3: the concept of a goal;
 - 4.2: the goal card;
 - 5.5: the goal adds no budget, and its loop's two bounds are not budgets;
-- 5.18 "Goals" (new): the whole of the design's mechanism;
+- 5.18 "Goals" (new): the whole of the design's mechanism, and 5.16's note that a goal request is triaged at filing, with no draft window to overrule it;
 - 6.1: the planner and the skill, eight kit skills;
 - 8.2: the goal rules come last in a tick;
 - 8.5: six kinds, 128 in all (122 on `origin/main` at `ca21251b`; main's count plus six if it has moved), `task.created.goal`, the purpose `goal`;

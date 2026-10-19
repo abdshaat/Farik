@@ -115,12 +115,12 @@ The session's first message carries:
 - the work accepted and waiting for the owner's merge;
 - the method (below).
 
-The session runs read-only on the read tier, with the agent's connectors. It is offered `catervas_file_goal_work`, `catervas_record_goal_progress`, the reading tools, `catervas_post_message` and `catervas_write_memory`. When it ends, however it ends, Catervas records `goal.planned { goal, filed }`, where `filed` is each `task.created` with that `goal` since the session started.
+The session runs read-only on the read tier, with the agent's connectors. It is offered `catervas_file_goal_work`, `catervas_record_goal_progress`, the reading tools, `catervas_post_message` and `catervas_write_memory`. When it ends, Catervas records `goal.planned { goal, filed }`, where `filed` is each `task.created` with that `goal` since the session started. A session that ended `aborted` (a stop, or another session's cost spending the day, ADR 0064) records nothing, so the next tick with room plans again; one that ended at a limit counts as a round.
 
 **The measuring rule.** Once per UTC day, the agent that reads the goal gets one session, purpose `goal`, offered `catervas_record_goal_progress` alone. That agent is the first active agent, in team order, with the goal's `server` connected. The rule needs: a goal that stands, is not paused, and has a `server`; no `goal.measured` from a connector today; no `goal` session of that agent started today; a day not spent; and the agent free. When the reader is also the planner, its planning session's message asks it to read first, so one session does both that day. The measure does not wait for a quiet board.
 
 **Filing work: `catervas_file_goal_work { title, request, size }`.** Offered only in a `goal` session, at most five times per session.
-- In a team: Catervas files a draft request from the title and request (the brief's wire), with `goal` on `task.created`. In the same filing it records `request.triaged { size, reason: "planned towards <goal>", triaged_by: catervas }`, so no triage session runs. The Product Manager then writes its contract as for any request: a large one becomes an epic and is broken down as usual.
+- In a team: Catervas files a draft request from the title and request (the brief's wire), with `goal` on `task.created`. In the same filing it records `request.triaged { size, reason: "planned towards <goal>", triaged_by: catervas }`, so no triage session runs, the Scrum Master's included, and, as for a raise (5.16), the owner has no draft window to overrule the size. The Product Manager then writes its contract as for any request: a large one becomes an epic and is broken down as usual.
 - In solo: the request is filed as a task given to the agent (ADR 0063's shape: the agent's role, the usual reviewer role, the request as its intent), small. A large size is refused: `goal_large_in_solo`.
 - Refusals: `goal_session_only`, `goal_none` (no goal stands, or it is paused), `goal_work_limit`, the request's own (title 3 to 120 and request 20 to 2,000 characters).
 
@@ -161,6 +161,7 @@ Rejected:
 - **Ending or reaching the goal.** Open tasks filed for it carry on; nothing is cancelled. The owner cancels any they no longer want, on the board.
 - **The target is met and the owner does not confirm.** No round runs. Measuring goes on daily, and the card keeps asking. Raising the target with Edit starts rounds again.
 - **A task filed for the goal is escalated or blocked.** The board is not quiet, so no round runs until the owner answers. The card says "Waiting on you (n)".
+- **Deliveries.** A quiet board is ADR 0062's "the team has no work left", so a round's work usually ends in a delivery: its changelog task, review, refreshes and retro run first, being earlier rules, and the next round follows them. That is the main cost of a round besides its work.
 - **Unmerged work.** Accepted work waiting for the owner's merge does not hold the next round. The planner is told about it, and names unmerged work as a dependency when a step builds on it (5.14 starts such a task from its dependency's branch).
 - **Solo.** The one agent plans, reads its own connected services, and files given tasks, small. Epics and deliveries do not run (ADR 0071).
 - **An older log** holds no `goal.*` event: no goal, and the quiet card.

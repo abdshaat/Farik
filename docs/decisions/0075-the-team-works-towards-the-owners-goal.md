@@ -48,7 +48,7 @@ So the question is how to keep a team working towards an aim without a money lim
    - a goal not met (no reading at or above the target);
    - a goal not stalled.
 
-   The session files the next one to five steps with `catervas_file_goal_work`, reads the goal's service when the planner holds it, and changes nothing in the project. When it ends, Catervas records `goal.planned` with the tasks the round filed. Rejected:
+   The session files the next one to five steps with `catervas_file_goal_work`, reads the goal's service when the planner holds it, and changes nothing in the project. When it ends, Catervas records `goal.planned` with the tasks the round filed; a session that ended `aborted` (a stop, or the day spent by another session, ADR 0064) records none, so the day's limit never reads as a round that found nothing. Rejected:
    - planning on a timer, which spends on nothing;
    - planning beside open work, which piles work up.
 6. **Filing.** In a team, a goal request is a draft that Catervas triages at once with the planner's size; the Product Manager refines it as any request, and a large one becomes an epic. In solo it is a small task given to the agent; a large size is refused. Rejected: `catervas_create_task`, which runs a triage session per request and files nothing a solo agent can move (ADR 0071: a draft that is not given waits in solo).
@@ -75,6 +75,8 @@ So the question is how to keep a team working towards an aim without a money lim
   - the owner sees how far along the goal is on Today, counted from the service that knows.
 - Negative:
   - each round costs a planning session, and a goal with a service costs one short measuring session a day;
+  - a round's work usually ends in a delivery (the board goes quiet, ADR 0062), so its changelog, review, refreshes and retro run between rounds;
+  - a goal request is triaged by its planner's size at filing, so the owner cannot overrule its size in the draft, as with a raise (5.16);
   - a goal whose work keeps failing waits five rounds before it asks the owner;
   - a goal that is never measured cannot show progress, and stalls for check-ins every five rounds.
 - Neutral:
