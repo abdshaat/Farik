@@ -107,7 +107,7 @@ Files: modified `folders.rs`.
 
 - `attached_documents_are_pairs_under_their_kinds_folder` — asserts `attached_slug("Product Spec v2 (final).PDF")` is `product-spec-v2-final`, of `"???.docx"` is `document`, of a 100-character name 60 characters with no trailing `-`; `free_attached_path(Product, "spec.md", |p| p.ends_with("attached/spec.md"))` is `docs/catervas/product/attached/spec-2.md`; `is_human_document` and `is_attached_path` are true for `docs/catervas/architecture/attached/api.md` and false for `…/attached/api.agent.md`, `…/attached/sub/api.md` and `docs/catervas/engineering/attached/api.md`; `agent_twin` of the first is `…/attached/api.agent.md`; `check_owner_edit` of it is `Ok`.
 
-- [ ] `feat(core): attached documents are pairs in the product and architecture folders`
+- [x] `feat(core): attached documents are pairs in the product and architecture folders`
 
 ### Task 2: turning a file into Markdown
 
