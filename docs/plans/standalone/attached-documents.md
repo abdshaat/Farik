@@ -1,6 +1,6 @@
 # Standalone: the owner attaches documents
 
-Status: ready
+Status: done
 Branch: `feat/attach-documents` (its own pull request to `main`)
 Design: `docs/design/attached-documents.md`; ADR 0073
 Spec: `docs/SPEC.md` 4.2, 4.3, 4.5, 5.9, 5.17, 8.5, F7 (revision 0.128)
@@ -167,7 +167,7 @@ Files: modified `SetupProject.tsx`, `SetupFinish.tsx`, `setup.test.tsx`.
 
 Records 0.128: 4.2 (the request box's attach), 4.3 (the chat's), 4.5 (the attached line on Files), 5.9 (the channel's), 5.17 (attached pairs, `document.attach`, its refusals, the conversion, the prompt section), 8.5 (`document.attached`, the `attachments` fields), F7.
 
-- [ ] `docs(spec): record documents the owner attaches (0.128)`
+- [x] `docs(spec): record documents the owner attaches (0.128)`
 
 ## Verification
 
