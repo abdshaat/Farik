@@ -327,7 +327,7 @@ Files: modified `docs/SPEC.md`.
   - the `gh pr view` fields of 0.122's paragraph gain the new ones.
 - 8.5: an "Added in 0.128" line names the three kinds, their bodies, and what each is about.
 
-- [ ] `docs(spec): record that Catervas merges when the owner allows it (0.128)`
+- [x] `docs(spec): record that Catervas merges when the owner allows it (0.128)`
 
 ## Verification
 
