@@ -335,7 +335,7 @@ Files: `skills/working-towards-the-goal/SKILL.md` (a `name`; a `description` sta
 
 - `product_manager_kit_carries_its_skills` (extended): the names are the six of today with `working-towards-the-goal` inserted before `catervafying-the-repository`. That skill's description starts "Use when a goal session" and contains `catervas_file_goal_work`.
 
-- [ ] `feat(roles): the Product Manager plans towards the owner's goal`
+- [x] `feat(roles): the Product Manager plans towards the owner's goal`
 
 ### Task 9: the goal card on Today
 
