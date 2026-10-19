@@ -54,7 +54,7 @@ Tests, watched to fail before the skills exist:
 
 - `marketing_kit_carries_running_search_ads` (extended) — asserts the kit's skill names in order are the sixteen of today with `running-the-research-foundation`, `understanding-the-product`, `researching-the-audience`, `studying-competitor-outreach`, `finding-where-to-start`, `optimising-for-search`, `making-posters` inserted after `running-search-ads` and before `catervafying-the-repository`; each of the seven's description starts with its "Use when" line from the design and names the skill or path beside it (`running-the-research-foundation` names `docs/catervas/marketing/research/`; `researching-the-audience` names `web_search_exa`; `optimising-for-search` names `writing-for-search`; `making-posters` names `docs/catervas/marketing/assets/posters/`; `studying-competitor-outreach` names `research/competitors`; `finding-where-to-start` names `research/positioning`; `understanding-the-product` names `research/product`); each is under 6 KB and has a "Drawn from" section; and the kit's connectors include `exa` with `web_search_exa` and `web_fetch_exa` both `network`.
 
-- [ ] `feat(roles): the Marketing Specialist researches its product, people and rivals first`
+- [x] `feat(roles): the Marketing Specialist researches its product, people and rivals first`
 
 ### Task 2: the prompt and the role
 

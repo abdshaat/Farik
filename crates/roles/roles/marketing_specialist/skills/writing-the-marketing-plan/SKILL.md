@@ -13,9 +13,16 @@ its agent version, for agents.
 
 ## 1. Research first
 
-Read `docs/catervas/marketing/brand/brand-kit`, `docs/catervas/marketing/brand/persona` and the notes under
-`docs/catervas/marketing/research/`. If the research is missing or old, do `researching-the-market` first.
-A plan must not rest on what you have not read.
+Read `docs/catervas/marketing/brand/brand-kit`, `docs/catervas/marketing/brand/persona` and the
+documents under `docs/catervas/marketing/research/`. The plan rests on the five of the foundation
+(`running-the-research-foundation`): the product, the audience, the competitors, how they reach
+people and `research/positioning`. If one is missing or older than the plan's 92 days, run that stage
+first; for a market question outside them, use `researching-the-market`. A plan must not rest on
+what you have not read.
+
+The plan opens with **the first 30 days**, taken from the three tests in `research/positioning`:
+the moves, the day each starts, the number that measures it and the point at which you stop. Name
+the research document each move comes from.
 
 ## 2. Goals and how each is measured
 
@@ -25,7 +32,9 @@ it, such as "100 new newsletter sign-ups by the plan's last day". Give the plan 
 ## 3. Channels
 
 Choose the channels the research supports, and for each say why and what it will carry. A channel
-you cannot reach or cannot afford stays out of the plan.
+you cannot reach or cannot afford stays out of the plan. Tag each move by the part of the
+customer's way it serves: finding the business, trying it, staying, paying more, or telling
+others. A plan whose moves all serve one part leaves the rest empty; say so.
 
 ## 4. The budget
 
@@ -66,3 +75,8 @@ what it costs and what they get.
 If the owner sends a plan back, their reason arrives in your next session as their own words, not
 as untrusted text. Read it, answer it in the next version of the plan, and say in your completion
 note what you changed because of it. Do not argue with it.
+
+## Drawn from
+
+Corey Haines, marketingskills (MIT): `marketing-plan` (the first 30 days, each move tagged by the part
+of the customer's way it serves). Rewritten for Catervas.

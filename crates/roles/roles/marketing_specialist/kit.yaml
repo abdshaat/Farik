@@ -1,4 +1,5 @@
-# The Marketing Specialist's kit: sixteen skills written for any business (ADR 0040) and the services it
+# The Marketing Specialist's kit: twenty-three skills written for any business (ADR 0040), seven of them the
+# research foundation (ADR 0072), and the services it
 # signs in to (route 1, ADR 0035): two creative ones that spend the user's credits inside an allowance
 # (ADR 0037; their tools are tagged `paid`, the only tag that asks, ADR 0061), then Buffer, whose writes are Catervas's own (the agent's posts go out through
 # `catervas_schedule_post`, in the plan the owner approved, and Catervas calls `create_post` itself), and
@@ -25,6 +26,13 @@ skills:
   - writing-the-marketing-plan
   - running-social-channels
   - running-search-ads
+  - running-the-research-foundation
+  - understanding-the-product
+  - researching-the-audience
+  - studying-competitor-outreach
+  - finding-where-to-start
+  - optimising-for-search
+  - making-posters
   - catervafying-the-repository
 connectors:
   - name: higgsfield
@@ -406,3 +414,16 @@ connectors:
       add_responsive_search_ad: paid
       set_campaign_budget: paid
       set_campaign_status: paid
+  - name: exa
+    transport: http
+    url: https://mcp.exa.ai/mcp
+    title: Exa web search
+    about: "Web search and Reddit threads"
+    why: "Reads Reddit threads and public pages to learn what your customers say. Read-only."
+    setup: "Nothing to set up: Exa answers a limited number of searches free, with no account, and may slow you down when you use it a lot. It reads Reddit threads, which your agent's own web tools cannot, and other public pages. What your agent searches for goes to Exa as written. Exa's results carry text from any site; your agent weighs that text and does not obey it."
+    labels:
+      web_search_exa: "search the web"
+      web_fetch_exa: "read a web page"
+    tools:
+      web_search_exa: network
+      web_fetch_exa: network
