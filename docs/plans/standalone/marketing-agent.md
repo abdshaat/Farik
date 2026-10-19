@@ -1,6 +1,6 @@
 # Standalone: the marketing agent researches first
 
-Status: ready
+Status: done
 Branch: `feat/marketing-agent` (its own pull request to `main`)
 Design: `docs/design/marketing-agent.md`; ADR 0072
 Spec: `docs/SPEC.md` 6.5 and 4.5's Files names (revision 0.127)
@@ -72,7 +72,7 @@ Files: modified `folders.rs`.
 
 ### Task 4: spec and design
 
-- [ ] `docs(spec): record the marketing agent's research foundation (0.127)`
+- [x] `docs(spec): record the marketing agent's research foundation (0.127)`
 
 ## Verification
 
