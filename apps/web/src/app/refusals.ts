@@ -148,6 +148,11 @@ const WORDS: Record<string, keyof typeof en> = {
 	not_html: "refuseNotHtml",
 	rewrite_open: "refuseRewriteOpen",
 	nothing_to_rewrite: "refuseNothingToRewrite",
+	// Where the team's documents are kept (ADR 0074).
+	project_folder: "refuseProjectFolder",
+	documents_switching: "refuseDocumentsSwitching",
+	documents_in_flight: "refuseDocumentsInFlight",
+	documents_busy: "refuseDocumentsBusy",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

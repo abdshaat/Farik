@@ -10,6 +10,7 @@ export function Switch({
 	description,
 	info,
 	icon,
+	disabled,
 }: {
 	id: string;
 	label: string;
@@ -20,6 +21,8 @@ export function Switch({
 	info?: ReactNode;
 	/** Sits inside the label, before its words. */
 	icon?: ReactNode;
+	/** The switch stays as it is: something else has to finish first. */
+	disabled?: boolean;
 }) {
 	return (
 		<div className={styles.row}>
@@ -27,6 +30,7 @@ export function Switch({
 				type="button"
 				id={id}
 				role="switch"
+				disabled={disabled}
 				aria-checked={checked}
 				aria-labelledby={`${id}-label`}
 				aria-describedby={description ? `${id}-description` : undefined}

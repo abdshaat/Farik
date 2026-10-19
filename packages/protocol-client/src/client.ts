@@ -45,6 +45,7 @@ export type MethodName =
 	| "repo.locate"
 	| "files.ask_change"
 	| "files.rewrite"
+	| "documents.set_local"
 	| "team.save"
 	| "agent.replace"
 	| "team.start"

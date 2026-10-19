@@ -24,6 +24,23 @@ describe("Switch", () => {
 		await expectNoAxeViolations(container);
 	});
 
+	it("stays as it is while disabled", async () => {
+		const onChange = vi.fn();
+		render(
+			<Switch
+				id="s"
+				label="Notify me"
+				checked={true}
+				onChange={onChange}
+				disabled
+			/>,
+		);
+		const control = screen.getByRole("switch", { name: "Notify me" });
+		expect((control as HTMLButtonElement).disabled).toBe(true);
+		await userEvent.click(control);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
 	it("shows an info button beside its label when given info", () => {
 		render(
 			<Switch

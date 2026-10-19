@@ -189,7 +189,7 @@ Files: `TeamRules.tsx` (`Documents` gains the switch, its ⓘ bullets, the two `
 - `keeps_documents_on_this_computer` (in `team.test.tsx`) — asserts that turning the switch on opens "Keep documents on this computer?", that "Keep them here" sends `documents.set_local {local: true}`, and that with `documentsMode: "taking_out"` the switch is disabled with "Taking your documents out of the repository. Merge the pull request to finish.".
 - `saves_on_this_computer` (in `Files.test.tsx`) — asserts that with `documentsMode: "local"` the save hint is "Saving changes the document on this computer." and after saving "Saved."; with `"putting_back"` there is no "Edit" and the moving line shows.
 
-- [ ] `feat(web): keep the team's documents on this computer`
+- [x] `feat(web): keep the team's documents on this computer`
 
 ### Task 8: the spec
 
