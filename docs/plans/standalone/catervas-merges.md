@@ -274,7 +274,7 @@ Tests, both `#[tokio::test] #[ignore = "needs the git program: cargo xtask check
   3. a grant and a failed check. The tick escalates with "A check failed on GitHub: lint. Catervas did not merge <url>; fix it or merge it yourself." and the task stays `accepted`;
   4. a grant and `mergeStateStatus: BLOCKED` with checks passed. The tick escalates with the BLOCKED sentence.
 
-- [ ] `feat(runtime): merge a pull request once its checks pass, when the owner allows it`
+- [x] `feat(runtime): merge a pull request once its checks pass, when the owner allows it`
 
 ### Task 6: the switch and the warning
 

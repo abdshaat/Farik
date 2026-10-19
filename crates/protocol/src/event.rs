@@ -382,8 +382,9 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::ContractLocked(body) => Some(("locked_by", &mut body.locked_by)),
         EventBody::ContractUnlocked(body) => Some(("unlocked_by", &mut body.unlocked_by)),
         EventBody::TeamUpdated(body) => Some(("updated_by", &mut body.updated_by)),
-        EventBody::MergePermissionGranted(body) => Some(("by", &mut body.by)),
-        EventBody::MergePermissionWithdrawn(body) => Some(("by", &mut body.by)),
+        EventBody::MergePermissionGranted(body) | EventBody::MergePermissionWithdrawn(body) => {
+            Some(("by", &mut body.by))
+        }
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::TaskTransitioned(body) => Some(("requested_by", &mut body.requested_by)),
         EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),

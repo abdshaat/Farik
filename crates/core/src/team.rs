@@ -333,7 +333,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             });
         }
     }
-    // Catervas never merges (ADR 0061): `auto_merge` and `manual` still load, and read as a pull
+    // Catervas merges only as ADR 0073 allows, by its own key (ADR 0061): `auto_merge` and `manual` still load, and read as a pull
     // request.
     team.policy.integration = Integration::PullRequest;
     if errors.is_empty() {

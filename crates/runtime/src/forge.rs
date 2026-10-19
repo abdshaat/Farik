@@ -197,9 +197,12 @@ struct RollupItem {
 /// What `gh api repos/{owner}/{repo}` says of the merge methods; a missing field counts as allowed.
 #[derive(Deserialize)]
 struct Repository {
-    allow_merge_commit: Option<bool>,
-    allow_squash_merge: Option<bool>,
-    allow_rebase_merge: Option<bool>,
+    #[serde(rename = "allow_merge_commit")]
+    merge_commit: Option<bool>,
+    #[serde(rename = "allow_squash_merge")]
+    squash_merge: Option<bool>,
+    #[serde(rename = "allow_rebase_merge")]
+    rebase_merge: Option<bool>,
 }
 
 /// How one rollup entry stands: passed, still pending, or failed under this name.
@@ -383,9 +386,9 @@ impl Forge {
         let read: Repository =
             serde_json::from_str(&answer).map_err(|_| unreadable("gh api", &answer))?;
         Ok([
-            (MergeMethod::Merge, read.allow_merge_commit),
-            (MergeMethod::Squash, read.allow_squash_merge),
-            (MergeMethod::Rebase, read.allow_rebase_merge),
+            (MergeMethod::Merge, read.merge_commit),
+            (MergeMethod::Squash, read.squash_merge),
+            (MergeMethod::Rebase, read.rebase_merge),
         ]
         .into_iter()
         .filter(|(_, allowed)| allowed.unwrap_or(true))

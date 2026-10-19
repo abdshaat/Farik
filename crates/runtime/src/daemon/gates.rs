@@ -3233,8 +3233,11 @@ pub(super) mod tests {
                 "line": "Its pull request waits for you to merge it"
             })]
         );
+    }
 
-        // While Catervas may merge (the file says so and the owner confirmed here), it says so.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_catervas_merges_a_folder_change_while_merging_is_allowed() {
         let harness = Harness::new("gates-folder-change-merging", |wire| {
             wire["agents"][0]["display_name"] = json!("Mira");
             wire["agents"].as_array_mut().expect("agents").push(json!({
@@ -3263,7 +3266,12 @@ pub(super) mod tests {
             &json!({ "by": "human", "into": "main" }),
         );
         assert_eq!(
-            integration_rows(&harness)[0]["line"],
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult"
+            )["waiting"][0]["line"],
             "Catervas merges its pull request when GitHub's checks pass"
         );
     }

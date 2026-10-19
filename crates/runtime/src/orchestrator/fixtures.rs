@@ -1652,7 +1652,9 @@ impl FakeGh {
              printf '\\n' >> \"$dir/calls\"\n\
              pwd -P >> \"$dir/cwds\"\n\
              cat > \"$dir/$sub.stdin\"\n\
-             if [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
+             n=$(cat \"$dir/$sub.n\" 2>/dev/null || echo 0); n=$((n+1)); echo \"$n\" > \"$dir/$sub.n\"\n\
+             if [ -f \"$dir/$sub.out.$n\" ]; then cat \"$dir/$sub.out.$n\"; \
+             elif [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
              if [ -f \"$dir/$sub.err\" ]; then cat \"$dir/$sub.err\" >&2; fi\n\
              code=0\n\
              if [ -f \"$dir/$sub.code\" ]; then code=$(cat \"$dir/$sub.code\"); fi\n\
@@ -1684,6 +1686,14 @@ impl FakeGh {
         std::fs::write(self.dir.join(format!("{sub}.out")), stdout).expect("written");
         std::fs::write(self.dir.join(format!("{sub}.err")), stderr).expect("written");
         std::fs::write(self.dir.join(format!("{sub}.code")), code.to_string()).expect("written");
+        self
+    }
+
+    /// Makes the `turn`th call of `sub` (from 1) print `stdout`, whatever `answers` says, so that
+    /// a pull request read twice can be open and then merged.
+    pub(crate) fn answers_on_call(&self, sub: &str, turn: u32, stdout: &str) -> &Self {
+        let sub = sub.replace('/', "_");
+        std::fs::write(self.dir.join(format!("{sub}.out.{turn}")), stdout).expect("written");
         self
     }
 
