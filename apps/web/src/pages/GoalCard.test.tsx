@@ -182,6 +182,9 @@ describe("the goal card", () => {
 
 	it("shows_progress_and_asks_for_the_owners_word", async () => {
 		const { s } = await drawn({ goal: A_GOAL, lastEnded: null });
+		expect(
+			screen.getByRole("region", { name: "Your team's goal" }),
+		).toBeTruthy();
 		expect(screen.getByText("Reach 10 paying customers")).toBeTruthy();
 		expect(screen.getByText("4 of 10 paying customers")).toBeTruthy();
 		expect(

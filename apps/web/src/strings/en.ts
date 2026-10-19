@@ -2560,6 +2560,7 @@ export const en = {
 	toldCatervafication: "Catervas filed it to document the project.",
 	toldConnectionRequested: "Asked you to connect a service.",
 	goalCardTitle: "Give your team a goal",
+	goalCardLabel: "Your team's goal",
 	goalCardLead:
 		"They keep working on it, day after day, within your daily budget.",
 	goalSet: "Set a goal",

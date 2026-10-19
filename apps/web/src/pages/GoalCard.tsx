@@ -123,7 +123,10 @@ export function GoalCard({
 	const nameOf = (id: string | null) =>
 		team.agents.find((agent) => agent.id === id)?.displayName ?? id ?? "";
 	return (
-		<section className={styles.card} aria-label={t("goalCardTitle")}>
+		<section
+			className={styles.card}
+			aria-label={goal === null ? t("goalCardTitle") : t("goalCardLabel")}
+		>
 			{goal === null ? (
 				<>
 					<div className={styles.quiet}>
