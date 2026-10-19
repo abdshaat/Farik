@@ -170,7 +170,7 @@ Tests:
   - `false` with the grant in the log and the key absent.
 - `reads_an_event_of_every_kind_and_gives_the_body_its_own_kind_back` (extended, `event.rs`): `EVERY_KIND` and `an_event_wire` gain the three kinds, and the test asserts each reads back as its own kind with no `task_id`.
 
-- [ ] `feat(store): merge only with this computer's permission`
+- [x] `feat(store): merge only with this computer's permission`
 
 ### Task 3: `merging.set`, and `team.save` keeps the key
 

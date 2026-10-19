@@ -3233,6 +3233,39 @@ pub(super) mod tests {
                 "line": "Its pull request waits for you to merge it"
             })]
         );
+
+        // While Catervas may merge (the file says so and the owner confirmed here), it says so.
+        let harness = Harness::new("gates-folder-change-merging", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
+            }));
+            wire["policy"]["merge_when_checks_pass"] = json!(true);
+        });
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 1, "sha": "def"
+            }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 1, "url": "https://github.com/o/r/pull/7", "number": 7 }),
+        );
+        harness.project.record(
+            "",
+            "merge_permission.granted",
+            &json!({ "by": "human", "into": "main" }),
+        );
+        assert_eq!(
+            integration_rows(&harness)[0]["line"],
+            "Catervas merges its pull request when GitHub's checks pass"
+        );
     }
 
     #[test]
