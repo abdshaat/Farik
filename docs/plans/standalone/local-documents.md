@@ -150,7 +150,7 @@ Files: created `local_documents.rs`, `document_source.rs`; modified `git.rs`, `b
 - `a_task_copy_lands_what_changed_and_sets_aside_what_moved` — asserts, on a fixture root with `product/spec.html`, `product/roadmap.html` and a link `product/evil.html`, that `copy_in` copies the two files and not the link; that after the worktree changes both and the root's `roadmap.html` is changed meanwhile, `land` writes `spec.html`, leaves the root's `roadmap.html`, copies the task's to `set-aside/<task>/product/roadmap.html` and answers that; and that a second `land` writes nothing.
 - `documents_taken_out_and_put_back_stay_on_disk` — asserts, on a git fixture whose `main` tracks `docs/catervas/s.md`: after `exclude_documents` and `commit_untracking`, a `merge --ff-only` of that branch in the root removes the file and `restore_taken_out` brings it back with `git status --porcelain` empty; after `commit_folder_from` and its fast-forward the file is tracked with the same bytes; `include_documents` leaves no Catervas line in `info/exclude`.
 
-- [ ] `feat(store): read, copy and land the team's documents on disk`
+- [x] `feat(store): read, copy and land the team's documents on disk`
 
 ### Task 4: the switch
 

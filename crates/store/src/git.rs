@@ -1143,6 +1143,185 @@ impl Git {
         }
     }
 
+    /// The bytes of the blob `blob`, exactly as git holds them.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `blob` names nothing.
+    pub fn blob_bytes(&self, blob: &str) -> Result<Vec<u8>, GitError> {
+        self.require_repository()?;
+        run_git_bytes(&self.root, &["cat-file", "blob", blob], None)
+    }
+
+    /// The object id git gives each file, as `git hash-object --no-filters` does: the id of its
+    /// bytes, whatever the repository's attributes would make of them. In the order given.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when a path has a line break in it or git cannot read a file.
+    pub fn hash_files(&self, paths: &[PathBuf]) -> Result<Vec<String>, GitError> {
+        self.require_repository()?;
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut input = Vec::new();
+        for path in paths {
+            let text = path_argument(path)?;
+            if text.contains('\n') {
+                return Err(GitError::CommandFailed {
+                    command: "hash-object".to_string(),
+                    stderr: format!("{text} has a line break in its name"),
+                });
+            }
+            input.extend_from_slice(text.as_bytes());
+            input.push(b'\n');
+        }
+        let answered = run_git_bytes(
+            &self.root,
+            &["hash-object", "--no-filters", "--stdin-paths"],
+            Some(&input),
+        )?;
+        Ok(String::from_utf8_lossy(&answered)
+            .lines()
+            .map(str::to_string)
+            .collect())
+    }
+
+    /// Marks every file `worktree` tracks under `under` `--skip-worktree`, so that git takes what
+    /// the worktree holds there for what the index holds: a copy of the documents put over a
+    /// tracked folder is no change to it.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `worktree` is not a working tree of this repository or git refuses.
+    pub fn skip_worktree(&self, worktree: &Path, under: &str) -> Result<(), GitError> {
+        self.require_worktree_of_this_repository(worktree)?;
+        let listed = run_git_untrimmed(
+            worktree,
+            &["--literal-pathspecs", "ls-files", "-z", "--", under],
+        )?;
+        if listed.is_empty() {
+            return Ok(());
+        }
+        run_git_bytes(
+            worktree,
+            &["update-index", "--skip-worktree", "-z", "--stdin"],
+            Some(listed.as_bytes()),
+        )?;
+        Ok(())
+    }
+
+    /// Makes the branch `branch` at `from` with one commit that removes `folder` from the tree,
+    /// in a worktree of its own at `scratch`, which is removed again; the checkout the owner
+    /// works in is never touched. `None`, and no branch, when `from` tracks nothing under `folder`.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `scratch` is taken, `branch` exists, `from` names nothing or git
+    /// refuses a step; the branch is deleted again then.
+    pub fn commit_untracking(
+        &self,
+        scratch: &Path,
+        branch: &str,
+        from: &str,
+        folder: &str,
+        message: &str,
+    ) -> Result<Option<String>, GitError> {
+        self.require_repository()?;
+        if self.tree_entries(from, folder)?.is_empty() {
+            return Ok(None);
+        }
+        self.create_worktree(scratch, branch, from)?;
+        let made = (|| {
+            run_git(
+                scratch,
+                &["--literal-pathspecs", "rm", "-r", "-q", "--", folder],
+            )?;
+            run_git(scratch, &as_someone(scratch, &["commit", "-m", message]))?;
+            run_git(scratch, &["rev-parse", "HEAD"])
+        })();
+        self.finish_scratch(scratch, branch, made)
+    }
+
+    /// Makes the branch `branch` at `from` with one commit that makes `folder` hold exactly the
+    /// regular files of the directory `source`, links left out, forced past any ignore rule, in a
+    /// worktree of its own at `scratch`, which is removed again. `None`, and no branch, when that
+    /// changes nothing.
+    ///
+    /// # Errors
+    ///
+    /// As `commit_untracking`.
+    pub fn commit_folder_from(
+        &self,
+        scratch: &Path,
+        branch: &str,
+        from: &str,
+        folder: &str,
+        source: &Path,
+        message: &str,
+    ) -> Result<Option<String>, GitError> {
+        self.require_repository()?;
+        self.create_worktree(scratch, branch, from)?;
+        let made = (|| {
+            let target = scratch.join(folder);
+            match std::fs::remove_dir_all(&target) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(io_failure("remove", &target, &error));
+                }
+                _ => {}
+            }
+            for (relative, file) in crate::baseline::files_under(source, &[]).map_err(|error| {
+                GitError::CommandFailed {
+                    command: "read the documents".to_string(),
+                    stderr: error.to_string(),
+                }
+            })? {
+                let to = target.join(&relative);
+                if let Some(directory) = to.parent() {
+                    std::fs::create_dir_all(directory)
+                        .map_err(|error| io_failure("make", directory, &error))?;
+                }
+                std::fs::copy(&file, &to).map_err(|error| io_failure("copy", &file, &error))?;
+            }
+            run_git(
+                scratch,
+                &["--literal-pathspecs", "add", "-f", "-A", "--", folder],
+            )?;
+            let staged = run_git(scratch, &["diff", "--cached", "--name-only"])?;
+            if staged.is_empty() {
+                return Ok(None);
+            }
+            run_git(scratch, &as_someone(scratch, &["commit", "-m", message]))?;
+            run_git(scratch, &["rev-parse", "HEAD"]).map(Some)
+        })();
+        match made {
+            Ok(Some(sha)) => self.finish_scratch(scratch, branch, Ok(sha)),
+            Ok(None) => {
+                let _ = self.remove_worktree(scratch);
+                let _ = self.delete_branch(branch);
+                Ok(None)
+            }
+            Err(failure) => self.finish_scratch(scratch, branch, Err(failure)),
+        }
+    }
+
+    /// Removes the scratch worktree whatever came of the work in it, and the branch when it failed.
+    fn finish_scratch(
+        &self,
+        scratch: &Path,
+        branch: &str,
+        made: Result<String, GitError>,
+    ) -> Result<Option<String>, GitError> {
+        let removed = self.remove_worktree(scratch);
+        match made {
+            Ok(sha) => removed.map(|()| Some(sha)),
+            Err(failure) => {
+                let _ = self.delete_branch(branch);
+                Err(failure)
+            }
+        }
+    }
+
     /// The git store a worktree of this repository uses, as an absolute path: what the checks'
     /// container mounts read-only so that the worktree's `.git` file resolves (ADR 0069).
     ///
@@ -1316,6 +1495,61 @@ fn run_git_with(directory: &Path, arguments: &[&str], batch_ssh: bool) -> Result
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// What a failed file operation says, in git's error type.
+fn io_failure(what: &str, path: &Path, error: &std::io::Error) -> GitError {
+    GitError::CommandFailed {
+        command: format!("{what} {}", path.display()),
+        stderr: error.to_string(),
+    }
+}
+
+/// Runs git in `directory`, giving it `input` on standard input when there is some, and hands back
+/// its standard output as bytes.
+fn run_git_bytes(
+    directory: &Path,
+    arguments: &[&str],
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>, GitError> {
+    use std::io::Write as _;
+    use std::process::Stdio;
+
+    if !directory.is_dir() {
+        return Err(GitError::CommandFailed {
+            command: arguments.join(" "),
+            stderr: format!("there is no directory at {}", directory.display()),
+        });
+    }
+    let mut child = Command::new("git")
+        .args(arguments)
+        .current_dir(directory)
+        .envs(git_environment(false))
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| GitError::NotInstalled {
+            detail: error.to_string(),
+        })?;
+    if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+        // A write that fails is git having stopped reading; its exit status says why.
+        let _ = stdin.write_all(bytes);
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| io_failure("wait for git", directory, &error))?;
+    if !output.status.success() {
+        return Err(GitError::CommandFailed {
+            command: arguments.join(" "),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    Ok(output.stdout)
 }
 
 /// What every git Catervas runs is given in its environment. No git Catervas runs has a person at a

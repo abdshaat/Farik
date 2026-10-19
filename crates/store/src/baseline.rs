@@ -222,7 +222,7 @@ fn differ(left: &Path, right: &Path) -> Result<bool, StoreError> {
 
 /// Every regular file under `root`, by its path from `root` joined by `/`; none when `root` is not
 /// there. `.history` is left out at the top when `without_history` says so; links are not followed.
-fn files_under(
+pub(crate) fn files_under(
     root: &Path,
     left_out: &[&str],
 ) -> Result<std::collections::BTreeMap<String, PathBuf>, StoreError> {
