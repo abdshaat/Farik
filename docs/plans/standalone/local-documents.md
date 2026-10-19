@@ -131,7 +131,7 @@ Files: modified `folders.rs`, `readiness.rs`, `gates.rs`, `transition.rs`, `forg
 
 - `a_task_whose_documents_stay_local_needs_no_commit_and_integrates_nothing` — asserts that a Product Manager task with `allowed_paths: ["docs/catervas/product/spec.*"]` is `is_documents_only` (and one adding `src/**` is not); that `check_criteria_recorded` passes with `commits: 0`, a clean worktree and `documents: Some{only: true, changed: ["docs/catervas/product/spec.html"]}`, and refuses with `changed` empty naming "changed no document"; that the `verifying → accepted` effects contain `NothingToIntegrate` when `documents_stay_local` is true and not when false; and that `documents_mode` gives each of the four modes from the inputs above.
 
-- [ ] `feat(core): a task whose documents stay on this computer integrates nothing`
+- [x] `feat(core): a task whose documents stay on this computer integrates nothing`
 
 ### Task 2: the policy, the two events and their folding
 

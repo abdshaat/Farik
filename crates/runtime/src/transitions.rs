@@ -774,6 +774,7 @@ impl Transitions {
             extra_iterations: extra_tries(&history),
             design_plan_returns: crate::tools::design::returns(&history),
             solo: team.is_solo(),
+            documents_stay_local: false,
             design_reviewer: match (review.state, review.recorded_by) {
                 (ReviewState::Failed, Some((designer, _))) => Some(designer),
                 _ => None,
@@ -953,6 +954,7 @@ impl Transitions {
             worktree_clean: git.is_clean(&worktree)?,
             // A task with a worktree does not work in a private folder.
             folder: None,
+            documents: None,
         };
         Ok((work, git.changed_paths(base, &branch)?))
     }
@@ -1094,6 +1096,7 @@ impl Transitions {
                 missing,
                 changed,
             }),
+            documents: None,
         };
         Ok((work, paths))
     }
