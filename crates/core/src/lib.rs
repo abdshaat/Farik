@@ -17,6 +17,8 @@ pub mod folders;
 pub mod forge_text;
 /// Types generated from `docs/schemas/`.
 pub mod generated;
+/// The owner's goal and its status (ADR 0075).
+pub mod goal;
 /// The governor: every rule of `docs/SPEC.md` section 5 as pure functions.
 pub mod governor;
 /// The marketing plan the owner approves: its checks and which approved plan is active.

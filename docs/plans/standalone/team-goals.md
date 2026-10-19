@@ -203,7 +203,7 @@ Files: `crates/core/src/goal.rs`, `lib.rs`. Rules, all in `fold_goals`:
   - a `Planned { filed: 0 }` gives `Stalled(NothingPlanned)`, and a later `Measured` of the same value makes it `Active` again;
   - `board_quiet` is false with one `Escalated` among `Accepted` rows, and true with `Accepted` and `Cancelled` alone.
 
-- [ ] `feat(core): fold a goal's life, readings and rounds into its status`
+- [x] `feat(core): fold a goal's life, readings and rounds into its status`
 
 ### Task 3: filing goal work
 
