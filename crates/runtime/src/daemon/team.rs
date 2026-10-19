@@ -101,6 +101,11 @@ pub(super) fn query(
             let team = deps.files.read_team().map_err(|e| internal(&e))?;
             let mut answer = effective(deps, &team)?;
             answer["connectors"] = json!(connector_states(state, deps, &team));
+            answer["documents_mode"] = json!(
+                catervas_store::document_source::documents_mode_of(&team, &deps.log)
+                    .map_err(|e| internal(&e))?
+                    .wire()
+            );
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
             answer["team"] =
                 serde_json::to_value(team.without_old_keys()).map_err(|e| internal(&e))?;
@@ -1748,6 +1753,11 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
     with_role_defaults(&before, &mut wire).map_err(Refused::Failed)?;
     let mut after = validate_team(&wire).map_err(Refused::Errors)?;
     keep_pins(&before, &mut after);
+    // Only `documents.set_local` moves the documents (ADR 0074); setup's start asks for it too,
+    // and runs the same command after the team is written.
+    if !setup {
+        after.policy.documents_local = before.policy.documents_local;
+    }
     let mut errors = Vec::new();
     for (index, agent) in after.agents.iter().enumerate() {
         if before
@@ -1855,7 +1865,7 @@ fn online(state: &DaemonState, deps: &ToolDeps) -> bool {
 }
 
 /// Whether the project folder lists member repositories (ADR 0057).
-fn members_present(deps: &ToolDeps) -> Result<bool, Failure> {
+pub(super) fn members_present(deps: &ToolDeps) -> Result<bool, Failure> {
     Ok(deps
         .files
         .read_repos()
@@ -2161,16 +2171,29 @@ pub(super) async fn call(
                 let _writing = holder.team_writes();
                 let marker = held.files.root().join(SETUP_PENDING);
                 let setup = marker.exists();
-                let (_, team) = checked(&held, &params["team"], setup)?;
+                let (_, mut team) = checked(&held, &params["team"], setup)?;
                 let library = library(&params["criteria"])?;
+                // Setup's choice to keep the documents local is made by the same command as in
+                // Settings, once the team is written; its refusals come first, at the field.
+                let keep_local = setup && team.policy.documents_local == Some(true);
+                if setup {
+                    team.policy.documents_local = None;
+                }
+                if keep_local {
+                    super::documents::check_before_start(&held)?;
+                }
                 write_team(&held, &holder, &team)?;
                 write_criteria(&held, &library)?;
                 match std::fs::remove_file(&marker) {
                     Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                        Err(internal(&error))
+                        return Err(internal(&error));
                     }
-                    _ => Ok(setup),
+                    _ => {}
                 }
+                if keep_local {
+                    super::documents::set_local(&held, true)?;
+                }
+                Ok(setup)
             })
             .await?;
             drop(ads);

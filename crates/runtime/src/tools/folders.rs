@@ -118,6 +118,35 @@ fn next_by(has_origin: bool, branch: &str, into: &str) -> String {
     }
 }
 
+/// The number of the next folder change: the first above the log's highest for which git has no
+/// branch `docs/folder-<n>`, here or on `origin`. The number stays the internal name; it is still
+/// past every older `docs/folder-<n>` branch.
+pub(crate) fn next_change(deps: &ToolDeps, docs: &catervas_store::folder_docs::FolderDocs) -> u64 {
+    let mut change = docs
+        .changes
+        .iter()
+        .map(|held| held.change)
+        .max()
+        .unwrap_or(0)
+        + 1;
+    loop {
+        let numbered = format!("docs/folder-{change}");
+        if deps.git.tree(&numbered).is_err()
+            && deps.git.tree(&format!("origin/{numbered}")).is_err()
+        {
+            return change;
+        }
+        change += 1;
+    }
+}
+
+/// The branch a folder change named for `title` is made on: `docs/<slug>`, past any branch git or
+/// a task's contract already holds (ADR 0066).
+pub(crate) fn docs_branch(deps: &ToolDeps, title: &str) -> Result<String, StoreError> {
+    let taken = taken_branches(&deps.files, &deps.log, &deps.git, None)?;
+    Ok(free_branch(ChangeType::Docs, &branch_slug(title), &taken))
+}
+
 /// Makes `files` (`(path, text)`) a folder change: the first number above the log's highest for
 /// which git has no branch `docs/folder-<n>`, here or on `origin`, and a branch named for the
 /// documents (`docs/<slug>`, ADR 0066) from the integration branch with one commit by `author`, or
@@ -156,23 +185,7 @@ pub(crate) fn land(
             });
         }
     }
-    let mut change = docs
-        .changes
-        .iter()
-        .map(|held| held.change)
-        .max()
-        .unwrap_or(0)
-        + 1;
-    // The number stays the internal name; it is still past every older `docs/folder-<n>` branch.
-    loop {
-        let numbered = format!("docs/folder-{change}");
-        if deps.git.tree(&numbered).is_err()
-            && deps.git.tree(&format!("origin/{numbered}")).is_err()
-        {
-            break;
-        }
-        change += 1;
-    }
+    let change = next_change(deps, &docs);
     // The branch is named for the documents (ADR 0066) and recorded in the event that makes the
     // change.
     let named: Vec<&str> = files
@@ -368,7 +381,21 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
             .iter()
             .filter(|each| change.proposals.contains(&each.proposal))
             .collect();
-        let (agent, title, line) = if let Some(first) = proposals.first() {
+        let (agent, title, line) = if let Some(local) = change.storage {
+            (
+                None,
+                if local {
+                    "Keep documents on this computer".to_string()
+                } else {
+                    "Put documents back in your repository".to_string()
+                },
+                if opened.contains(&change.change) {
+                    "Its pull request waits for you to merge it".to_string()
+                } else {
+                    "You chose it; it waits for you to merge it".to_string()
+                },
+            )
+        } else if let Some(first) = proposals.first() {
             let mut paths: Vec<&str> = Vec::new();
             for each in &proposals {
                 if !paths.contains(&each.path.as_str()) {
@@ -376,7 +403,7 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
                 }
             }
             (
-                first.agent_id.clone(),
+                Some(first.agent_id.clone()),
                 format!(
                     "{} from review {}",
                     plain_names(&paths),
@@ -392,7 +419,7 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
             let name = name_of(team, writer);
             let paths: Vec<&str> = change.paths.iter().map(String::as_str).collect();
             (
-                writer.clone(),
+                Some(writer.clone()),
                 format!("{} by {name}", plain_names(&paths)),
                 if opened.contains(&change.change) {
                     "Its pull request waits for you to merge it".to_string()
@@ -435,6 +462,16 @@ pub(super) fn write_folder_doc(
     let checked = check_input(call, input)?;
     let deps = call.deps();
     let _lock = integration_lock(deps.files.root()).map_err(failed)?;
+    // While the documents move out of the repository or back (ADR 0074) nothing is written.
+    if !catervas_store::document_source::documents_mode_of(&call.team, &deps.log)
+        .map_err(failed)?
+        .writes_open()
+    {
+        return Err(refused(
+            "folder_doc_switching",
+            "documents can't be changed until the owner merges the pull request that moves them",
+        ));
+    }
     let path = &checked.path;
     let name = call.agent.display_name.to_string();
     let mut files = vec![(path.clone(), checked.text.to_string())];

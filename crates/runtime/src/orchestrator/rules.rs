@@ -1709,6 +1709,16 @@ fn assigned(
         return Ok(None);
     }
     let contract = deps.tools.files.read_contract(&row.task_id)?;
+    // While the documents move out of the repository or back (ADR 0074), a task that changes them
+    // waits: nothing may write a document until the pull request that moves them is merged.
+    if contract
+        .allowed_paths
+        .iter()
+        .any(|path| catervas_core::governor::paths::reaches_the_folder(path, "docs/catervas"))
+        && !catervas_store::document_source::documents_mode_of(team, &deps.tools.log)?.writes_open()
+    {
+        return Ok(None);
+    }
     let place = if let Some(folder) = task_private_folder(&contract) {
         copy_baseline(&folder_in(deps.tools.files.root(), folder)?, &row.task_id)?;
         format!("in its private folder {folder}")

@@ -159,7 +159,7 @@ Files: `daemon/documents.rs` (set_local, in `METHODS`), `daemon/team.rs`, `orche
 
 - `keeping_documents_local_moves_them_by_one_change_each_way` — asserts, with the daemon harness on a repository with no `origin` whose `main` tracks `docs/catervas/product/spec.md`: `documents.set_local{local:true}` answers `taking_out` and a change; `files.save` is refused `documents_switching`; merging the change's branch by hand and one tick record `folder_change.integrated`, `spec.md` is on disk, ignored and untracked, and `team.get` says `local`; `documents.set_local{local:false}` then answers `putting_back`, and after its merge and a tick the file is tracked and the mode `committed`; and that with an assigned task whose `allowed_paths` is `docs/catervas/product/**` it is refused `documents_in_flight` naming the task's title.
 
-- [ ] `feat(runtime): move the team's documents out of the repository and back`
+- [x] `feat(runtime): move the team's documents out of the repository and back`
 
 ### Task 5: tasks work on a copy that lands at acceptance
 

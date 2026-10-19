@@ -9,7 +9,10 @@ use std::sync::Arc;
 use catervas_core::branch::{change_type, task_branch};
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::is_plan_task;
-use catervas_core::forge_text::{folder_change_title, pull_request_title, without_task_ids};
+use catervas_core::forge_text::{
+    folder_change_title, pull_request_title, storage_change_body, storage_change_title,
+    without_task_ids,
+};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, task_private_folder};
@@ -172,6 +175,9 @@ impl Subject {
             }
             Self::FolderChange(change) => {
                 let held = folder_change(tools, *change)?;
+                if let Some(local) = held.storage {
+                    return Ok(storage_change_title(local).to_string());
+                }
                 let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
                 Ok(folder_change_title(&paths, &plain_names(&paths)))
             }
@@ -650,6 +656,31 @@ fn through_the_forge(
         } => stopped_merging(tools, team, subject, target, &branch, &url).map(Some),
         PullRequestState::Open { .. } => Ok(Some(IntegrationOutcome::AwaitingForge)),
         PullRequestState::Merged { sha } => {
+            // A switch of where the documents are kept finishes against the checkout the merge
+            // reached, so the local branch is brought up to it before the integration is recorded.
+            if matches!(subject, Subject::FolderChange(change)
+                if folder_change(tools, *change)?.storage.is_some())
+            {
+                if let Err(error) = target.git.fetch_fast_forward("origin", into) {
+                    let detail = format!(
+                        "the pull request {url} was merged as {sha}, but the local {into} could not be \
+                         brought up to it: {}",
+                        git_words(&error)
+                    );
+                    return escalate(tools, subject, detail).map(Some);
+                }
+                record_integrated(
+                    tools,
+                    subject,
+                    &sha,
+                    into,
+                    TaskIntegratedBodyIntegratedBy::Human,
+                )?;
+                return Ok(Some(IntegrationOutcome::Merged {
+                    sha,
+                    scan: ScanRefresh::Unchanged,
+                }));
+            }
             record_integrated(
                 tools,
                 subject,
@@ -672,7 +703,9 @@ fn through_the_forge(
         }
         PullRequestState::Closed if asker == Asker::Tick => {
             let detail = format!("the pull request {url} was closed without merging");
-            escalate(tools, subject, detail).map(Some)
+            let escalated = escalate(tools, subject, detail)?;
+            revert_the_switch(tools, subject)?;
+            Ok(Some(escalated))
         }
         PullRequestState::Closed => {
             closed_for_the_human(tools, subject, &url, target, &branch).map(Some)
@@ -848,7 +881,9 @@ fn closed_for_the_human(
                 "the pull request {url} was closed without merging, and {branch} is not in \
                  {into}: reopen it on the forge or merge the branch, then run catervas integrate"
             );
-            escalate(tools, subject, detail)
+            let escalated = escalate(tools, subject, detail)?;
+            revert_the_switch(tools, subject)?;
+            Ok(escalated)
         }
         Err(error) => {
             let detail = format!(
@@ -976,6 +1011,9 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
         Subject::Task(task_id) => task_id,
         Subject::FolderChange(change) => {
             let held = folder_change(tools, *change)?;
+            if let Some(local) = held.storage {
+                return Ok(storage_change_body(local));
+            }
             let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
             let documents: Vec<String> = plain_names(&paths)
                 .split(" and ")
@@ -1074,6 +1112,17 @@ fn record_integrated(
                 "change": change, "sha": sha, "into": into, "integrated_by": by,
             }))
             .map_err(|error| refused(format!("folder_change_unrecordable: {error}")))?;
+            // A change that moves the documents (ADR 0074) finishes the move before it is
+            // recorded, so that a restore that failed is tried again, and files no re-derive.
+            if let Some(local) = folder_change(tools, *change)?.storage {
+                finish_the_switch(tools, *change, local)?;
+                append_stamped(
+                    tools,
+                    tools.ids.clone(),
+                    EventBody::FolderChangeIntegrated(body),
+                )?;
+                return Ok(());
+            }
             append_stamped(
                 tools,
                 tools.ids.clone(),
@@ -1082,6 +1131,80 @@ fn record_integrated(
             file_the_rederive(tools, *change)
         }
     }
+}
+
+/// What a switch of where the documents are kept leaves to do once its change is in the integration
+/// branch (ADR 0074): taken out, git has deleted the files it removed from the checkout, so they
+/// are written back from the change's parent commit; put back, the exclude lines go.
+fn finish_the_switch(tools: &ToolDeps, change: u64, local: bool) -> Result<(), OrchestratorError> {
+    if !local {
+        return catervas_store::local_documents::include_documents(&tools.git)
+            .map_err(OrchestratorError::from);
+    }
+    let sha = tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::DocumentStorageChanged],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.body {
+            EventBody::DocumentStorageChanged(body)
+                if body.change.is_some_and(|held| held.get() == change) =>
+            {
+                body.sha
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            refused(format!(
+                "folder_change_unrecordable: folder change {change} has no commit to restore from"
+            ))
+        })?;
+    catervas_store::local_documents::restore_taken_out(&tools.git, &sha)?;
+    Ok(())
+}
+
+/// A switch whose pull request was closed without merging puts the owner's choice back (ADR 0074):
+/// the policy as it was, the exclude lines removed when they were added for a take-out, and the
+/// channel told. Nothing else that goes wrong with a switch comes here.
+fn revert_the_switch(tools: &ToolDeps, subject: &Subject) -> Result<(), OrchestratorError> {
+    let Subject::FolderChange(change) = subject else {
+        return Ok(());
+    };
+    let Some(local) = folder_change(tools, *change)?.storage else {
+        return Ok(());
+    };
+    let mut team = tools.files.read_team()?;
+    team.policy.documents_local = (!local).then_some(true);
+    tools.files.write_team(&team)?;
+    append_stamped(
+        tools,
+        tools.ids.clone(),
+        EventBody::TeamUpdated(catervas_protocol::event::TeamUpdatedBody {
+            team_name: team.name.to_string(),
+            agent_ids: team
+                .agents
+                .iter()
+                .map(|agent| agent.id.to_string())
+                .collect(),
+            updated_by: "catervas".to_string(),
+            template: None,
+            plan_in_sprints: None,
+        }),
+    )?;
+    if local {
+        catervas_store::local_documents::include_documents(&tools.git)?;
+    }
+    post_system(
+        &tools.log,
+        tools.clock.as_ref(),
+        &tools.ids,
+        None,
+        "Your documents stay as they were: the pull request that moved them was closed.",
+    )?;
+    Ok(())
 }
 
 /// Files the task that brings an owner's change to a document up to date in its twin. A filing

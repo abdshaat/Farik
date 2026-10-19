@@ -538,6 +538,9 @@
           "$ref": "#/$defs/filesRewriteRequest"
         },
         {
+          "$ref": "#/$defs/documentsSetLocalRequest"
+        },
+        {
           "$ref": "#/$defs/teamSaveRequest"
         },
         {
@@ -1029,6 +1032,9 @@
           "type": "boolean",
           "description": "Whether the project is online: its repository has an origin, and for a project folder every member's repository has one. Finished work then opens a pull request; otherwise it waits on this computer for a merge by hand (spec 5.6, 5.14)."
         },
+        "documents_mode": {
+          "$ref": "#/$defs/documentsMode"
+        },
         "members_present": {
           "type": "boolean",
           "description": "Whether the project folder's repos.yaml lists member repositories (ADR 0057, ADR 0069): each keeps its own integration branch there, so Settings shows no branch field for the team."
@@ -1187,6 +1193,7 @@
         "hidden_suggestions",
         "preview_env_present",
         "members_present",
+        "documents_mode",
         "online",
         "requested_connections"
       ]
@@ -2593,7 +2600,7 @@
     },
     "filesSaveRequest": {
       "title": "Files Save Request",
-      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_a_document, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). Saved text the file already holds answers null for both and records nothing.",
+      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_a_document, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), documents_switching (/path: the documents are moving, ADR 0074), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). With the documents kept on this computer a save writes the file at once, checks base against the file's own bytes, and answers null for both. Saved text the file already holds answers null for both and records nothing.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -2622,6 +2629,41 @@
         "change": { "type": ["integer", "null"], "minimum": 1 },
         "branch": { "type": ["string", "null"] }
       }
+    },
+    "documentsSetLocalRequest": {
+      "title": "Documents Set Local Request",
+      "description": "The owner chooses where the team's documents are kept (docs/SPEC.md 5.17, ADR 0074): local true keeps docs/catervas/ on this computer, out of the repository, and false puts it back. Turning it on makes one folder change that takes the documents out of the integration branch and keeps the files on disk, ignored through the repository's info/exclude; turning it off makes one that adds what is on disk. Both are pull requests the owner merges, and until then no document can be changed. The same value as now answers the current mode and changes nothing. Refused with -32005 and data.errors, each with path /local, message and code, in this order: project_folder (a project folder's documents never leave the computer), documents_switching (a switch is already moving), documents_in_flight (a task that changes documents has a worktree or awaits integration; the message names the tasks), change_waiting (a folder change is neither integrated nor escalated), documents_busy (turning on: the checkout has an uncommitted change under docs/catervas) and is_a_link (docs or docs/catervas is a symbolic link).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "documents.set_local" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["local"],
+          "properties": {
+            "local": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "documentsSetLocalResult": {
+      "description": "The mode the documents are in after the call and the folder change that moves them, null when nothing moves.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "change"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/documentsMode" },
+        "change": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "documentsMode": {
+      "description": "Where the team's documents are kept (ADR 0074): committed, in the repository; taking_out, kept on this computer with the pull request that takes them out not merged yet; local, kept on this computer; putting_back, the pull request that puts them back not merged yet.",
+      "type": "string",
+      "enum": ["committed", "taking_out", "local", "putting_back"]
     },
     "filesAskChangeRequest": {
       "title": "Files Ask Change Request",

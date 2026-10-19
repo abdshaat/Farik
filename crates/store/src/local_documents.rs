@@ -116,6 +116,18 @@ fn under_documents(path: &str) -> Option<&str> {
     .then_some(relative)
 }
 
+/// Whether the root's documents folder holds a regular file.
+///
+/// # Errors
+///
+/// `Io` when the folder cannot be read.
+pub fn has_documents(root: &Path) -> Result<bool, StoreError> {
+    if has_link(root, DOCUMENTS)? {
+        return Ok(false);
+    }
+    Ok(!files_under(&root.join(DOCUMENTS), &[])?.is_empty())
+}
+
 /// Gives the task's worktree a copy of the root's documents: the worktree's folder is emptied
 /// (every file git still tracks there is first marked `--skip-worktree`, so that the copy is no
 /// change to it) and filled with every regular file of the root's folder, links not followed. With
