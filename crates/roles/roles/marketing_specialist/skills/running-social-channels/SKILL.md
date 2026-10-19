@@ -82,3 +82,17 @@ completion note and carry on with the contract.
 
 Catervas refuses a post with `buffer_not_connected`. Say so in your completion note, and write each
 post as a document under `docs/catervas/marketing/` with its channel and time, so the user can publish it.
+
+## 11. Replies and Reddit comments are drafted, not sent
+
+Buffer has no tool for replies, and Catervas never signs in as anyone, so a reply to a comment or a
+message, and any comment in a community such as Reddit, is a draft for the owner to send. Write
+each as a document under `docs/catervas/marketing/` with the link of what it answers, the draft
+in the brand persona's voice, and the day. On Reddit read the community's rules first
+(`research/audience` lists them), be useful before you mention the business, and say plainly in the
+comment that it is the business's own. Never draft a reply that pretends to be a customer, and
+never ask for votes.
+
+## Drawn from
+
+Corey Haines, marketingskills (MIT): `social` and `community-marketing`. Rewritten for Catervas.

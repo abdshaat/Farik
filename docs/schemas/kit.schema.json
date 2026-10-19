@@ -27,7 +27,7 @@
     },
     "skills": {
       "type": "array",
-      "maxItems": 20,
+      "maxItems": 30,
       "uniqueItems": true,
       "items": {
         "type": "string",

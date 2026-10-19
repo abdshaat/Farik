@@ -242,6 +242,13 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "writing-the-marketing-plan",
             "running-social-channels",
             "running-search-ads",
+            "running-the-research-foundation",
+            "understanding-the-product",
+            "researching-the-audience",
+            "studying-competitor-outreach",
+            "finding-where-to-start",
+            "optimising-for-search",
+            "making-posters",
             "catervafying-the-repository",
         ),
         Role::FinanceSpecialist => embedded!("finance_specialist":
@@ -1078,7 +1085,7 @@ mod tests {
                     Role::UiUxDesigner | Role::SoftwareDeveloper => 1,
                     Role::FinanceSpecialist => 3,
                     Role::ProductManager | Role::Architect => 4,
-                    Role::MarketingSpecialist => 5,
+                    Role::MarketingSpecialist => 6,
                     Role::ProcurementSpecialist => 7,
                     _ => 0,
                 },
@@ -2276,7 +2283,7 @@ mod tests {
                 _ => {}
             }
         }
-        // The kits stay within the schema's twenty skills.
+        // The kits stay within the schema's thirty skills (twenty until ADR 0072).
         for role in [
             Role::ProductManager,
             Role::ScrumMaster,
@@ -2286,7 +2293,7 @@ mod tests {
             Role::MarketingSpecialist,
         ] {
             let kit = load_kit(role).expect("a shipped kit");
-            assert!(kit.skills.len() <= 20, "{role}");
+            assert!(kit.skills.len() <= 30, "{role}");
         }
         for (role, count) in [
             (Role::ProductManager, 6),
@@ -2294,7 +2301,7 @@ mod tests {
             (Role::Architect, 7),
             (Role::SoftwareDeveloper, 8),
             (Role::UiUxDesigner, 1),
-            (Role::MarketingSpecialist, 16),
+            (Role::MarketingSpecialist, 23),
         ] {
             assert_eq!(load_kit(role).expect("a kit").skills.len(), count, "{role}");
         }
@@ -2471,6 +2478,7 @@ mod tests {
     /// the one of step 08d, running the social channels, which names the tool that posts; then
     /// the one of step 08f, running search ads, which names Google Ads' own tools.
     #[test]
+    #[allow(clippy::too_many_lines)] // reason: one test per functionality (ADR 0060); the kit's table of skills
     fn marketing_kit_carries_running_search_ads() {
         let kit = load_kit(Role::MarketingSpecialist).expect("the Marketing Specialist's kit");
         let names: Vec<&str> = kit.skills.iter().map(|skill| skill.name.as_str()).collect();
@@ -2492,6 +2500,13 @@ mod tests {
                 "writing-the-marketing-plan",
                 "running-social-channels",
                 "running-search-ads",
+                "running-the-research-foundation",
+                "understanding-the-product",
+                "researching-the-audience",
+                "studying-competitor-outreach",
+                "finding-where-to-start",
+                "optimising-for-search",
+                "making-posters",
                 "catervafying-the-repository",
             ]
         );
@@ -2535,6 +2550,41 @@ mod tests {
                 "Use when the active marketing plan has Google Ads campaigns",
                 "`create_search_campaign`",
             ),
+            (
+                "running-the-research-foundation",
+                "Use when you have no research foundation, a marketing plan is due, or the owner asks where to start",
+                "docs/catervas/marketing/research/",
+            ),
+            (
+                "understanding-the-product",
+                "Use when running the first stage of the foundation, the product",
+                "research/product",
+            ),
+            (
+                "researching-the-audience",
+                "Use when running the second stage of the foundation, the people the product is for",
+                "web_search_exa",
+            ),
+            (
+                "studying-competitor-outreach",
+                "Use when running the fourth stage of the foundation, how the competitors reach people",
+                "research/competitors",
+            ),
+            (
+                "finding-where-to-start",
+                "Use when running the last stage of the foundation, where to start",
+                "research/positioning",
+            ),
+            (
+                "optimising-for-search",
+                "Use when the task asks for search words, a check of the business's site, or answers that AI assistants can quote",
+                "writing-for-search",
+            ),
+            (
+                "making-posters",
+                "Use when the task asks for a poster, a social card or a video storyboard",
+                "docs/catervas/marketing/assets/posters/",
+            ),
         ] {
             let skill = kit
                 .skills
@@ -2547,6 +2597,29 @@ mod tests {
             assert!(text.contains("\n## 1. "), "{name} has numbered sections");
             assert!(text.contains(beside), "{name} does not name {beside}");
         }
+        // The seven of the research foundation (ADR 0072) each credit what they draw on.
+        for name in [
+            "running-the-research-foundation",
+            "understanding-the-product",
+            "researching-the-audience",
+            "studying-competitor-outreach",
+            "finding-where-to-start",
+            "optimising-for-search",
+            "making-posters",
+        ] {
+            let (_, text) = kit_skill(Role::MarketingSpecialist, name);
+            assert!(
+                text.contains("\n## Drawn from\n"),
+                "{name} has no Drawn from"
+            );
+        }
+        // Exa reads Reddit's threads and public pages; both of its tools are network.
+        let (exa, _) = service(Role::MarketingSpecialist, "exa");
+        assert_eq!(
+            names_tagged(&exa, ConnectorTag::Network),
+            ["web_fetch_exa", "web_search_exa"]
+        );
+        assert_eq!(exa.tools.len(), 2);
         // Catervas's own stop at the plan's budget is step 08g's, and the skill says what it is and
         // what it is not: it never counts as the limit, and a raise is asked of the agent in
         // words the daemon files (the request's last sentence is the skill's).
@@ -3870,14 +3943,22 @@ mod tests {
         let names: Vec<&str> = kit.connectors.iter().map(KitConnector::name).collect();
         assert_eq!(
             names,
-            ["higgsfield", "recraft", "buffer", "kit", "google-ads"]
+            [
+                "higgsfield",
+                "recraft",
+                "buffer",
+                "kit",
+                "google-ads",
+                "exa"
+            ]
         );
         // The four services of the web are signed in to by route 1; Google Ads is Catervas's own
-        // connector, held by `google_ads_runs_only_inside_the_plan`.
+        // connector, held by `google_ads_runs_only_inside_the_plan`; Exa is keyless, held by
+        // `marketing_kit_carries_running_search_ads`.
         for connector in kit
             .connectors
             .iter()
-            .filter(|connector| connector.name() != "google-ads")
+            .filter(|connector| !["google-ads", "exa"].contains(&connector.name()))
         {
             let KitConnector::Server { entry, .. } = connector else {
                 panic!("{} is a server", connector.name());

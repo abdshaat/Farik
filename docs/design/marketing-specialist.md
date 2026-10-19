@@ -1,6 +1,6 @@
 # The Marketing Specialist: brand, plan, social presence and budget
 
-Status: approved by the founder on 2026-10-05, in conversation (ADR 0042). It is the design input to phase 7 steps 08b to 08g.
+Status: approved by the founder on 2026-10-05, in conversation (ADR 0042). It is the design input to phase 7 steps 08b to 08g. Amended on 2026-10-18 by ADR 0072 and `docs/design/marketing-agent.md`: the role runs a research foundation before it plans.
 
 ## Why
 

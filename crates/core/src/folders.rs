@@ -429,7 +429,7 @@ pub fn folder_doc_message(
 
 /// The documents with a fixed name, by stem, in the order the Files page lists them. A step that
 /// adds a document adds its name here.
-pub const DOCUMENT_STEMS: [(&str, &str); 15] = [
+pub const DOCUMENT_STEMS: [(&str, &str); 20] = [
     ("docs/catervas/product/spec", "Product description"),
     ("docs/catervas/product/roadmap", "Roadmap"),
     ("docs/catervas/architecture/overview", "Overview"),
@@ -445,6 +445,23 @@ pub const DOCUMENT_STEMS: [(&str, &str); 15] = [
     ("docs/catervas/marketing/brand/brand-kit", "Brand kit"),
     ("docs/catervas/marketing/brand/persona", "Brand persona"),
     ("docs/catervas/marketing/kickoff", "Marketing kickoff"),
+    ("docs/catervas/marketing/research/product", "The product"),
+    (
+        "docs/catervas/marketing/research/audience",
+        "The people it is for",
+    ),
+    (
+        "docs/catervas/marketing/research/competitors",
+        "Competitors",
+    ),
+    (
+        "docs/catervas/marketing/research/outreach",
+        "How competitors reach people",
+    ),
+    (
+        "docs/catervas/marketing/research/positioning",
+        "Where to start",
+    ),
 ];
 
 /// A file stem or folder name as words: `-` and `_` as spaces, the first letter upper case.
@@ -1057,7 +1074,7 @@ mod tests {
         assert_eq!(name("delivery/cadence.md"), "Delivery rhythm");
         assert_eq!(name("design/ui-inventory.md"), "UI inventory");
         // The hunts' reports and the marketing kickoff sit in their folder's order (ADR 0063).
-        assert_eq!(super::DOCUMENT_STEMS.len(), 15);
+        assert_eq!(super::DOCUMENT_STEMS.len(), 20);
         let place = |path: &str| document_order(&format!("docs/catervas/{path}")).0;
         assert_eq!(
             place("engineering/bug-hunt.md"),
@@ -1072,6 +1089,30 @@ mod tests {
             place("marketing/brand/persona.md") + 1
         );
         assert_eq!(name("marketing/kickoff.md"), "Marketing kickoff");
+        // The marketing research foundation's five documents follow the kickoff, in the design's
+        // order (ADR 0072).
+        assert_eq!(
+            name("marketing/research/audience.html"),
+            "The people it is for"
+        );
+        assert_eq!(name("marketing/research/product.md"), "The product");
+        let kickoff = place("marketing/kickoff.md");
+        for (offset, stem) in [
+            "product",
+            "audience",
+            "competitors",
+            "outreach",
+            "positioning",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert_eq!(
+                place(&format!("marketing/research/{stem}.md")),
+                kickoff + 1 + offset,
+                "{stem}"
+            );
+        }
         assert_eq!(name("delivery/ceremony-notes.md"), "Ceremony notes");
         assert_eq!(name("engineering/how_we_test.md"), "How we test");
         assert_eq!(plain_name("product"), "Product");
