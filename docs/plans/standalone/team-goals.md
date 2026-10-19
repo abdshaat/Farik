@@ -366,7 +366,7 @@ Files: `GoalCard.tsx`, `GoalCard.module.css`, `GoalCard.test.tsx`, `Today.tsx` (
 - F17: `goal` in the split by purpose;
 - F18: Goals.
 
-- [ ] `docs(spec): record the team's goal (0.130)`
+- [x] `docs(spec): record the team's goal (0.130)`
 
 ## Verification
 
