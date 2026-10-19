@@ -451,6 +451,10 @@
           ],
           "description": "What happens to a task's branch after it is accepted (spec 5.14)."
         },
+        "merge_when_checks_pass": {
+          "type": "boolean",
+          "description": "Whether Catervas merges its pull requests once GitHub's checks pass (ADR 0073). Read only with this computer's merge_permission.granted; changed only by merging.set. Absent means false."
+        },
         "solo": {
           "type": "boolean",
           "description": "One agent alone (ADR 0071): the team is exactly one agent that is not retired, of any role but the Scrum Master and the UI/UX Designer, with no Product Manager, no reviewer and no planning. Absent means false."

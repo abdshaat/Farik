@@ -45,6 +45,16 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
             .to_string(),
         );
     }
+    if old.merge_when_checks_pass() != new.merge_when_checks_pass() {
+        said.push(
+            if new.merge_when_checks_pass() {
+                "Catervas merges finished work once GitHub's checks pass."
+            } else {
+                "Finished work opens a pull request for you to merge."
+            }
+            .to_string(),
+        );
+    }
     if old.policy.integration_branch != new.policy.integration_branch {
         said.push(match &new.policy.integration_branch {
             Some(branch) => format!("Finished work goes into {}.", branch.as_str()),

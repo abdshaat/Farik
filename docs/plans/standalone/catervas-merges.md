@@ -145,7 +145,7 @@ Test, watched to fail before the key exists:
   - `integration: "auto_merge"` with no key answers `false`;
   - `carried_team` of a team with `true` answers `false`.
 
-- [ ] `feat(core): add the merge when checks pass policy`
+- [x] `feat(core): add the merge when checks pass policy`
 
 ### Task 2: the permission events, the effective answer and Today's lines
 
