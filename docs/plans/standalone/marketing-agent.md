@@ -60,7 +60,7 @@ Tests, watched to fail before the skills exist:
 
 Files: modified `system.md`, `role.yaml`. No new test (prose; Task 1's kit test loads the role).
 
-- [ ] `feat(roles): the Marketing Specialist's prompt runs the foundation and answers its chat from it`
+- [x] `feat(roles): the Marketing Specialist's prompt runs the foundation and answers its chat from it`
 
 ### Task 3: the Files page names the five documents
 
