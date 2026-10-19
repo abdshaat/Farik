@@ -1,7 +1,13 @@
 import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { useConnection } from "../../app/connection.tsx";
 import { useQuery } from "../../app/store.ts";
+import {
+	base64Of,
+	pendingSetupFiles,
+	refusalWords,
+} from "../../components/Attach.tsx";
 import { ShowAdvanced } from "../../components/ShowAdvanced.tsx";
 import { t } from "../../strings/t.ts";
 import { AdvancedSettings } from "./SetupAdvanced.tsx";
@@ -13,7 +19,32 @@ import { Wizard } from "./Wizard.tsx";
 export function SetupFinish() {
 	const navigate = useNavigate();
 	const { draft } = useSetup();
-	const { start, busy, refused } = useStart();
+	const { client } = useConnection();
+	const { start, busy: starting, refused } = useStart();
+	const [sending, setSending] = useState(false);
+	const [notAttached, setNotAttached] = useState<string>();
+	const busy = starting || sending;
+	// The documents picked on the project screen go first, one by one; a refused one is said, and the team starts anyway.
+	const begin = async () => {
+		if (!client) return;
+		setSending(true);
+		setNotAttached(undefined);
+		while (pendingSetupFiles.length > 0) {
+			const next = pendingSetupFiles.shift();
+			if (!next) break;
+			try {
+				await client.call("document.attach", {
+					name: next.file.name,
+					kind: next.kind,
+					dataBase64: await base64Of(next.file),
+				});
+			} catch (e) {
+				setNotAttached(refusalWords(e));
+			}
+		}
+		setSending(false);
+		await start();
+	};
 	const [advanced, setAdvanced] = useState(false);
 	// Whether finished work can open a pull request depends on the project having an origin.
 	const { data: team } = useQuery<{ online?: boolean }>("team.get", {});
@@ -46,6 +77,11 @@ export function SetupFinish() {
 					<AdvancedSettings />
 				</div>
 			)}
+			{notAttached && (
+				<p role="alert" className={styles.alert}>
+					{notAttached}
+				</p>
+			)}
 			{refused && (
 				<p role="alert" className={styles.alert}>
 					{refused}
@@ -53,7 +89,7 @@ export function SetupFinish() {
 			)}
 			<div className={styles.foot}>
 				<Button onClick={() => navigate("/setup/spending")}>{t("back")}</Button>
-				<Button kind="primary" busy={busy} onClick={start}>
+				<Button kind="primary" busy={busy} onClick={begin}>
 					{t("startTeam")}
 				</Button>
 			</div>

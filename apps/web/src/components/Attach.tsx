@@ -26,7 +26,7 @@ export const pendingSetupFiles: { file: File; kind: AttachKind }[] = [];
 const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 /** A file's bytes as base64, with no `data:` prefix. */
-function base64Of(file: File): Promise<string> {
+export function base64Of(file: File): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onerror = () => reject(reader.error);
@@ -37,7 +37,7 @@ function base64Of(file: File): Promise<string> {
 }
 
 /** A refusal in the code's words (`attach_<code>`), else the failure's own plain sentence. */
-function refusalWords(error: unknown): string {
+export function refusalWords(error: unknown): string {
 	const key = `attach_${codeOf(error)}`;
 	return key in en
 		? t(key as keyof typeof en)

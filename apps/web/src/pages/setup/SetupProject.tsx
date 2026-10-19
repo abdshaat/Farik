@@ -4,6 +4,12 @@ import { useLocation, useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { daemonSaid } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
+import {
+	AttachButton,
+	AttachedChips,
+	type AttachKind,
+	pendingSetupFiles,
+} from "../../components/Attach.tsx";
 import { t } from "../../strings/t.ts";
 import { FolderBrowser, join } from "./FolderBrowser.tsx";
 import styles from "./setup.module.css";
@@ -33,6 +39,21 @@ export function SetupProject() {
 	const [mode, setMode] = useState<Mode>("existing");
 	const [description, setDescription] = useState("");
 	const [name, setName] = useState("");
+	// The documents picked here are kept until the team exists; the finish screen sends them.
+	const [, redraw] = useState(0);
+	const picked = pendingSetupFiles.map(({ file }) => ({
+		path: file.name,
+		name: file.name,
+	}));
+	const attach = (file: File, kind: AttachKind) => {
+		pendingSetupFiles.push({ file, kind });
+		redraw((n) => n + 1);
+	};
+	const unattach = (key: string) => {
+		const at = pendingSetupFiles.findIndex(({ file }) => file.name === key);
+		if (at >= 0) pendingSetupFiles.splice(at, 1);
+		redraw((n) => n + 1);
+	};
 	const [parent, setParent] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [refused, setRefused] = useState<string>();
@@ -198,6 +219,10 @@ export function SetupProject() {
 						value={description}
 						onChange={setDescription}
 					/>
+					<span>
+						<AttachButton onPick={attach} />
+					</span>
+					<AttachedChips items={picked} onRemove={unattach} />
 					<TextField
 						id="name"
 						label={t("newName")}

@@ -161,7 +161,7 @@ Files: modified `SetupProject.tsx`, `SetupFinish.tsx`, `setup.test.tsx`.
 
 - `attaches_the_setups_documents_once_the_team_exists` (extended `setup.test.tsx`) — asserts the project screen's attach puts chips under the description without any call, and that the finish screen's start sends one `document.attach` per file, then its existing start call, and empties `pendingSetupFiles`.
 
-- [ ] `feat(web): attach documents when starting a project`
+- [x] `feat(web): attach documents when starting a project`
 
 ### Task 8: spec
 
