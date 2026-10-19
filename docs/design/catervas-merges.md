@@ -55,7 +55,7 @@ The second rule exists because `team.yaml` is committed and travels with the rep
 - `team.save` and `team.start` never change it: `checked()` copies the value already saved over whatever the incoming team says (`None` at setup).
 - One RPC alone changes it: `merging.set { on, confirmed }`.
   - Turning on is refused `merge_warning_unconfirmed` unless `confirmed` is `true`, and refused `merging_offline` when the project is not online.
-  - A turn-on writes the key, records `team.updated`, then `merge_permission.granted { by: "human", into }`.
+  - A turn-on writes the key, records `team.updated`, then `merge_permission.granted { by: "human", into }`, `into` being the resolved integration branch.
   - A turn-off removes the key and records `team.updated`, then `merge_permission.withdrawn { by: "human" }`.
   - A call that changes nothing records nothing.
 - `team.get` answers `merging_allowed`, the effective answer (both rules). The switch shows that answer, so a clone whose file says `true` shows the switch off until its owner confirms.
@@ -86,7 +86,7 @@ A check passes when it is a check run that completed `SUCCESS`, `NEUTRAL` or `SK
 2. It runs `gh pr merge <url> --merge|--squash|--rebase --match-head-commit <headRefOid>`.
    - It never passes `--admin` or `--auto`, and it does not delete the branch, which the repository's own setting may do.
    - `--match-head-commit` means a push made after the checks were read is never merged unchecked.
-3. On success it records `pull_request.merged { url, method }` (about the task, or about no task for a folder change), then reads the pull request again. When it is merged, Catervas records `task.integrated { sha, into, integrated_by: "governor" }` (or `folder_change.integrated` with `governor`) and fast-forwards the local integration branch from `origin`, as the existing `Merged` path does. When it is not merged yet (a merge queue), the next tick finds it `Merged`.
+3. On success it records `pull_request.merged { url, method }` (about no task; its `url` names the pull request), then reads the pull request again. When it is merged, Catervas records `task.integrated { sha, into, integrated_by: "governor" }` (or `folder_change.integrated` with `governor`) and fast-forwards the local integration branch from `origin`, as the existing `Merged` path does. When it is not merged yet (a merge queue), the next tick finds it `Merged`.
 4. When gh refuses the merge, that is an integration escalation in gh's words.
 
 On the forge `Merged` path, `integrated_by` is `governor` when the log holds a `pull_request.merged` with that `url`, and `human` otherwise. GitHub itself shows the owner as the one who merged, since `gh` acts with the owner's sign-in.

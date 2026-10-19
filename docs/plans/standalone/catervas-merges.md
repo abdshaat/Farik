@@ -24,9 +24,9 @@ Out of scope:
 
 - `team.schema.json` `$defs/policy`: `merge_when_checks_pass?: boolean`, with the description "Whether Catervas merges its pull requests once GitHub's checks pass (ADR 0073). Read only with this computer's merge_permission.granted; changed only by merging.set. Absent means false." `team-template.schema.json` is unchanged.
 - `event.schema.json`: three kinds, each added to `$defs.eventKind`, with a body `$def` and a `$ref` in the body `oneOf`.
-  - `merge_permission.granted` with `mergePermissionGrantedBody { by: string, into: string }`. It is about no task. `into` is the integration branch's name, or `""` when it is the default branch.
+  - `merge_permission.granted` with `mergePermissionGrantedBody { by: string, into: string }`. It is about no task. `into` is the resolved integration branch, `catervas_store::git::integration_branch(team, git)`, as every other `into` in the log is.
   - `merge_permission.withdrawn` with `mergePermissionWithdrawnBody { by: string }`. It is about no task.
-  - `pull_request.merged` with `pullRequestMergedBody { url: string (minLength 1), method: "merge" | "squash" | "rebase" }`. It is about the task, or about no task for a folder change.
+  - `pull_request.merged` with `pullRequestMergedBody { url: string (minLength 1), method: "merge" | "squash" | "rebase" }`. It is about no task, even for a task's pull request (so `is_about_one_contract` stays false for it); the `url` ties it to its pull request.
   - The descriptions of `taskIntegratedBody` and the folder change's integrated body gain: "governor also when Catervas merged the pull request itself (ADR 0073)".
 - `rpc.schema.json`:
   - Add `mergingSetRequest` beside `filesRewriteRequest`: method `"merging.set"`, params `{ on: boolean, confirmed?: boolean }` with `required: ["on"]` and `additionalProperties: false`. It answers `{ merging_allowed: boolean }`.
@@ -38,14 +38,7 @@ Out of scope:
 
 ## Decisions
 
-- Everything in ADR 0073 and the design. In brief:
-  - The key is new; `auto_merge` is not revived.
-  - Merging needs the key and this computer's `merge_permission.granted`.
-  - Only `merging.set` changes the key.
-  - Catervas merges when all checks pass and the state is `CLEAN`, `HAS_HOOKS` or `UNSTABLE`.
-  - Methods are tried in the order merge commit, squash, rebase.
-  - The merge passes `--match-head-commit`, never `--admin` or `--auto`, and deletes no branch.
-  - Stops escalate. `integrated_by` is `governor`.
+- Everything in ADR 0073 and the design (the key, the gate, the stops, the method order, `integrated_by`), linked, not restated.
 - The effective answer is computed in `catervas-store`, which reads the log; core does no I/O (hard rule 5).
   - `catervas-core` answers what the file says (`Team::merge_when_checks_pass`).
   - `catervas_store::merging::merging_allowed` combines it with the log.
@@ -77,7 +70,6 @@ docs/schemas/rpc.schema.json                        modifies: merging.set, teamG
 crates/runtime/src/daemon/team.rs                   modifies: merging.set, checked() keeps the key, team.get answer; tests (Task 3)
 crates/runtime/src/forge.rs                         modifies: open state's checks, merge_methods, merge_pull_request; tests (Task 4)
 crates/runtime/src/orchestrator/integrate.rs        modifies: `..` in Open patterns (Task 4, compile only); merge when checks pass, integrated_by; tests (Task 5)
-crates/runtime/src/orchestrator/fixtures.rs         modifies: FakeGh answers for `merge` and `repos/{owner}/{repo}` if needed (Task 5)
 apps/web/src/pages/TeamRules.tsx                    modifies: Finish gains the switch and the dialog (Task 6)
 apps/web/src/strings/en.ts                          modifies: the switch, info and warning words (Task 6)
 apps/web/src/pages/settings/settings.test.tsx       tests: the warning (Task 6)
@@ -92,7 +84,7 @@ Consumes, all on main:
 - `checked`, `write_team`, `online`, `append` (`daemon/team.rs`);
 - `Forge`, `Forge::run`, `PullRequestState`, `Mergeable` (`forge.rs`);
 - `through_the_forge`, `stopped_merging`, `escalate`, `record_integrated`, `Subject`, `IntegrationTarget`, `Asker` (`integrate.rs`);
-- `Harness`, `FakeGh::answers`, `FakeGh::calls` (`fixtures.rs`);
+- `Harness`, `FakeGh::answers`, `FakeGh::calls` (`fixtures.rs`, unchanged); `integration_branch` (`crates/store/src/git.rs`);
 - `Switch`, `InfoTip`, `Dialog`, `Bullets` (`packages/ui`, `apps/web`).
 
 Produces:
@@ -178,7 +170,7 @@ Tests:
   - `true` after `merge_permission.granted`;
   - `false` after a later `merge_permission.withdrawn`;
   - `false` with the grant in the log and the key absent.
-- Extends the existing protocol round-trip test that walks every kind, if it lists them; otherwise there is no new test, and the compiler holds the wiring.
+- `reads_an_event_of_every_kind_and_gives_the_body_its_own_kind_back` (extended, `event.rs`): `EVERY_KIND` and `an_event_wire` gain the three kinds, and the test asserts each reads back as its own kind with no `task_id`.
 
 - [ ] `feat(store): merge only with this computer's permission`
 
@@ -251,7 +243,7 @@ Test:
 ### Task 5: Catervas merges on its tick
 
 Files:
-- modified: `crates/runtime/src/orchestrator/integrate.rs`, and `fixtures.rs` only if `FakeGh` needs a helper.
+- modified: `crates/runtime/src/orchestrator/integrate.rs`. `fixtures.rs` is unchanged: `FakeGh::answers` already keys on any second argument (`merge`, `repos/{owner}/{repo}`).
 
 Consumes: Task 2's `merging_allowed` and `PullRequestMerged`, and Task 4's forge.
 
@@ -260,7 +252,7 @@ In `through_the_forge`, the `Open` arm:
 - Otherwise its behaviour is today's.
 
 The escalation details are the design's sentences, word for word. On a successful merge, `merge_when_checks_pass`:
-1. appends `pull_request.merged { url, method }` (about the task, or about no task with `task_id: None` for a folder change);
+1. appends `pull_request.merged { url, method }`, about no task;
 2. reads the state again;
 3. on `Merged { sha }`, goes through the same code as the `Merged` arm.
 
@@ -291,13 +283,13 @@ Files:
 - modified:
   - `apps/web/src/pages/TeamRules.tsx`. `Finish` takes the `Part`, as `IntegrationBranch` does, plus `mergingAllowed` from `team.get`;
   - `apps/web/src/strings/en.ts`;
-  - `apps/web/src/pages/settings/Work.tsx` if `Finish`'s props change at its call;
+  - `apps/web/src/pages/settings/Work.tsx`: its `<Finish>` call passes the part and `mergingAllowed`;
 - tested in: `apps/web/src/pages/settings/settings.test.tsx`.
 
 The page:
 - Below the lead line there is a `Switch` with `id="catervas-merges"`, label `t("mergingSwitch")` and `info={<Bullets text={t("mergingSwitchNote")} />}`, checked from `mergingAllowed`.
 - When not `online`, the switch is disabled and `t("mergingOffline")` shows under it.
-- Switching it on opens a `Dialog` with title `t("mergingWarnTitle")`, the bullets `t("mergingWarn")` (with `{branch}`) plus `t("mergingWarnSolo")` (with `{name}`) when `policy.solo`, an `InfoTip` with `t("mergingWarnNote")`, and two buttons, `t("mergingTurnOn")` and `t("cancel")` (or the existing cancel string).
+- Switching it on opens a `Dialog` with title `t("mergingWarnTitle")`, the bullets `t("mergingWarn")` (with `{branch}`) plus `t("mergingWarnSolo")` (with `{name}`) when `policy.solo`, an `InfoTip` with `t("mergingWarnNote")`, and two buttons, `t("mergingTurnOn")` and `t("mergingCancel")` ("Cancel", a key of its own as `agentCancel` and `filesCancel` are).
 - **Turn on** sends `merging.set { on: true, confirmed: true }`. **Cancel** closes the dialog and sends nothing. Switching off sends `merging.set { on: false }` with no dialog.
 - After each call the page refetches `team.get`.
 
@@ -311,6 +303,7 @@ The strings are the design's words exactly:
 - `mergingWarnNote`
 - `mergingTurnOn`
 - `mergingMainBranch`: "your main branch"
+- `mergingCancel`: "Cancel"
 
 Test:
 - `asks_before_letting_catervas_merge`. Settings → How work runs, online and merging off. It asserts:
@@ -351,6 +344,6 @@ The output goes in the pull request. The founder's own test is in the web app, o
 
 ## Readiness (the planner, 2026-10-19)
 
-- **Every decision made.** The key, the gate, the RPC, the stop rules and their words, the method order, the grace period, `integrated_by`, the scope (members, folder changes, solo, offline, plan tasks, private folders) and the web control are fixed in ADR 0073, the design or above. The one wording left to the executor is the cancel string's key: an existing one, else `cancel`.
+- **Every decision made.** The key, the gate, the RPC, the stop rules and their words, the method order, the grace period, `integrated_by`, the scope (members, folder changes, solo, offline, plan tasks, private folders) and the web control are fixed in ADR 0073, the design or above. No conditional is left to the executor.
 - **No ambiguity.** Every path is exact. Signatures and `gh` arguments are exact. Each test names what it asserts. The single command has its expected output.
-- **No forward dependency.** Task 1 depends on main. Task 2 depends on Task 1. Task 3 depends on Tasks 1 and 2. Task 4 depends on main. Task 5 depends on Tasks 2 and 4. Task 6 depends on Task 3's wire. Task 7 depends on nothing in the code. No task touches a file another task changes for another reason, with one exception: Task 4 adds `..` to the `Open { mergeable }` patterns in `integrate.rs` so that it compiles, and Task 5 owns the file's behaviour. `fixtures.rs` belongs to Task 5 alone.
+- **No forward dependency.** Task 1 depends on main. Task 2 depends on Task 1. Task 3 depends on Tasks 1 and 2. Task 4 depends on main. Task 5 depends on Tasks 2 and 4. Task 6 depends on Task 3's wire. Task 7 depends on nothing in the code. No task touches a file another task changes for another reason, with one exception: Task 4 adds `..` to the `Open { mergeable }` patterns in `integrate.rs` so that it compiles, and Task 5 owns the file's behaviour. `fixtures.rs` is untouched.
