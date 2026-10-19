@@ -116,7 +116,7 @@ Files: created `attach.rs`, the two fixtures; modified `Cargo.toml`s, `lib.rs`.
 - `turns_markdown_text_pdf_and_word_into_markdown` — asserts `notes.md` bytes come back unchanged with `text/markdown`; `notes.txt` unchanged with `text/plain`; `spec.pdf` holds "Product spec" and "It plans trips." with `application/pdf`; a `.docx` built in the test with `zip` (a `Title` paragraph "Trips", a `Heading2` "Goals", a bulleted "Plan a trip", a 2×2 table `a|b`, `c|d`) is exactly `# Trips\n\n## Goals\n\n- Plan a trip\n\na | b\nc | d\n` with the Word media type.
 - `refuses_what_it_cannot_read` — asserts `scan.pdf` is `NoText`; `photo.png` (PNG bytes) is `UnsupportedType`; `notes.md` holding invalid UTF-8 is `UnsupportedType`; a zip without `word/document.xml` named `.docx` is `UnsupportedType`; `%PDF-` followed by garbage is `Unreadable`; 10 MiB + 1 bytes is `TooLarge`; each `code()` is the design's snake_case word.
 
-- [ ] `feat(runtime): turn an attached PDF, Word or text file into Markdown`
+- [x] `feat(runtime): turn an attached PDF, Word or text file into Markdown`
 
 ### Task 3: `document.attach`
 

@@ -36,6 +36,9 @@ keyring = "=4.2.0"
 keyring-core = "=1.0.0"
 # Already locked through rmcp; direct for Catervas's own PKCE sign-in: the verifier, its S256 challenge and `state`.
 oauth2 = { version = "=5.0.0", default-features = false }
+# Attached documents (ADR 0073): a PDF's text, and a Word file as a zip of XML. Used by catervas-runtime alone; zip and quick-xml are already locked.
+pdf-extract = "=0.12.1"
+quick-xml = "=0.41.0"
 regress = "=0.12.0"
 # Already locked through rmcp; direct for the https-only OAuth client and the token form POSTs.
 reqwest = { version = "=0.13.5", default-features = false, features = ["form"] }
@@ -62,6 +65,7 @@ tower = { version = "=0.5.3", default-features = false, features = ["util"] }
 typify = "=0.8.0"
 # Already locked through reqwest and rmcp; direct for matching a server's address to a registered app.
 url = "=2.5.8"
+zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
