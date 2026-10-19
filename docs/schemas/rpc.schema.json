@@ -57,6 +57,7 @@
         "template.preview",
         "product_plan.state",
         "catervafication.get",
+        "goal.get",
         "skills.list",
         "skill.get",
         "allowances.list",
@@ -275,6 +276,9 @@
             },
             {
               "$ref": "#/$defs/catervaficationGetQuery"
+            },
+            {
+              "$ref": "#/$defs/goalGetQuery"
             },
             {
               "$ref": "#/$defs/costsSummaryQuery"
@@ -2363,6 +2367,20 @@
         }
       }
     },
+    "goalGetQuery": {
+      "title": "Goal Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "goal.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "catervaficationGetQuery": {
       "title": "Catervafication Get Query",
       "type": "object",
@@ -3694,6 +3712,74 @@
         "total_usd",
         "limit_usd"
       ]
+    },
+    "goalGetResult": {
+      "description": "The goal that stands and the last one ended (docs/SPEC.md 5.18, ADR 0075). goal is null when none stands. status is active, paused, met (the count has reached the target and the owner decides) or stalled, with stall saying why (nothing_planned: the last round filed nothing; no_progress: rounds of work and the number has not moved) and null otherwise. reader is the agent that reads the goal's service and planner the agent that plans, each null when there is none. readings run newest first, at most 10. open counts the board's tasks that are neither accepted nor cancelled, done the accepted tasks filed towards this goal, waiting_on_owner the open ones that wait on the owner. planning is true while the planner's goal session runs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "last_ended"],
+      "properties": {
+        "goal": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "goal", "words", "target", "unit", "server", "reader", "planner", "status",
+                "stall", "readings", "open", "done", "waiting_on_owner", "planning"
+              ],
+              "properties": {
+                "goal": { "type": "string", "pattern": "^goal-[1-9][0-9]*$" },
+                "words": { "type": "string" },
+                "target": { "type": ["number", "null"] },
+                "unit": { "type": ["string", "null"] },
+                "server": { "type": ["string", "null"] },
+                "reader": { "type": ["string", "null"] },
+                "planner": { "type": ["string", "null"] },
+                "status": { "type": "string", "enum": ["active", "paused", "met", "stalled"] },
+                "stall": { "enum": ["nothing_planned", "no_progress", null] },
+                "readings": {
+                  "type": "array",
+                  "maxItems": 10,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["value", "source", "server", "agent", "at"],
+                    "properties": {
+                      "value": { "type": "number" },
+                      "source": { "type": "string", "enum": ["connector", "owner"] },
+                      "server": { "type": ["string", "null"] },
+                      "agent": { "type": ["string", "null"] },
+                      "at": { "type": "string", "format": "date-time" }
+                    }
+                  }
+                },
+                "open": { "type": "integer", "minimum": 0 },
+                "done": { "type": "integer", "minimum": 0 },
+                "waiting_on_owner": { "type": "integer", "minimum": 0 },
+                "planning": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "last_ended": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["goal", "words", "outcome", "at"],
+              "properties": {
+                "goal": { "type": "string", "pattern": "^goal-[1-9][0-9]*$" },
+                "words": { "type": "string" },
+                "outcome": { "type": "string", "enum": ["reached", "dropped"] },
+                "at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        }
+      }
     },
     "catervaficationGetResult": {
       "description": "Whether the team offers to document an existing repository now, and with which roles (docs/SPEC.md 4.1, 5.16, ADR 0051). offered is true while the log holds neither catervafication.started nor project.started and a Start would not be refused for want of a Product Manager and someone to check its notes. roles are the roles that would get a task, in the order they are filed.",

@@ -284,7 +284,7 @@ Files: `rpc.schema.json` (`goal.get` in the query-name enum, `goalGetQuery`, `go
   - after `goal_set` (target 10, `stripe`), a reading of 4 by `dev-a` and one open draft, it answers `status: "active"`, `reader: "dev-a"`, `planner: "pm"`, `readings[0].value` 4, `open` 1, `planning` false;
   - after `goal_end { reached }` it answers `goal: null` and `last_ended.outcome: "reached"`.
 
-- [ ] `feat(runtime): answer the standing goal and its progress`
+- [x] `feat(runtime): answer the standing goal and its progress`
 
 ### Task 7: the loop
 

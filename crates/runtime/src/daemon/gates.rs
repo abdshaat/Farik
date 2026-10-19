@@ -326,6 +326,7 @@ pub(super) fn query(
         })),
         "product_plan.state" => product_plan_state(deps, &team()?),
         "catervafication.get" => catervafication_get(deps, &team()?),
+        "goal.get" => crate::goals::goal_get(deps, &team()?).map_err(|e| internal(&e)),
         "questions.list" => questions(deps, params["task_id"].as_str()),
         _ => {
             let task_id = task_of(deps, params)?;
@@ -4738,6 +4739,77 @@ pub(super) mod tests {
                 .set_command_handler(command_handler(orchestrator))
         );
         harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn goal_get_answers_the_standing_goal_and_the_last_ended() {
+        let get =
+            |harness: &Harness| query(&harness.daemon, "goal.get", &json!({}), "goalGetResult");
+        let command = |harness: &Harness, command: &str, body: &Value| {
+            let reply = rpc(
+                &harness.daemon,
+                "command",
+                &json!({ "command": { "command": command, "body": body } }),
+            );
+            assert!(reply["error"].is_null(), "{reply}");
+        };
+        let harness = driven_by(Harness::new("gates-goal", |wire| {
+            wire["budgets"]["daily_usd"] = json!(10);
+            wire["agents"][1]["mcp_servers"] = json!([{
+                "name": "stripe", "source": "custom", "transport": "stdio",
+                "command": "stripe-mcp", "args": ["stdio"], "credential_keys": ["API_KEY"],
+                "tools": { "read": "network" }
+            }]);
+        }));
+        assert_eq!(get(&harness), json!({ "goal": null, "last_ended": null }));
+
+        command(
+            &harness,
+            "goal_set",
+            &json!({
+                "words": "Reach 10 paying customers", "target": 10.0,
+                "unit": "paying customers", "server": "stripe"
+            }),
+        );
+        harness.project.record_by(
+            Some("dev-a"),
+            harness.project.deps.clock.now(),
+            "",
+            "goal.measured",
+            &json!({ "goal": "goal-1", "value": 4.0, "source": "connector", "server": "stripe" }),
+        );
+        harness.project.filed("CTV-1", "draft", "task", None);
+        let answer = get(&harness);
+        let goal = &answer["goal"];
+        assert_eq!(goal["goal"], "goal-1");
+        assert_eq!(goal["status"], "active");
+        assert_eq!(goal["stall"], Value::Null);
+        assert_eq!(
+            (goal["reader"].as_str(), goal["planner"].as_str()),
+            (Some("dev-a"), Some("pm"))
+        );
+        assert_eq!(goal["readings"][0]["value"], 4.0);
+        assert_eq!(
+            (
+                goal["open"].as_u64(),
+                goal["done"].as_u64(),
+                goal["waiting_on_owner"].as_u64()
+            ),
+            (Some(1), Some(0), Some(0))
+        );
+        assert_eq!(goal["planning"], false);
+        assert_eq!(answer["last_ended"], Value::Null);
+
+        command(
+            &harness,
+            "goal_end",
+            &json!({ "goal": "goal-1", "outcome": "reached" }),
+        );
+        let answer = get(&harness);
+        assert_eq!(answer["goal"], Value::Null);
+        assert_eq!(answer["last_ended"]["outcome"], "reached");
+        assert_eq!(answer["last_ended"]["words"], "Reach 10 paying customers");
     }
 
     #[test]

@@ -4,14 +4,19 @@
 
 use std::sync::Mutex;
 
-use catervas_core::contract::Role;
-use catervas_core::goal::{Goal, GoalBook, GoalOutcome, GoalRecord, ReadingSource, fold_goals};
+use catervas_core::contract::{Role, TaskStatus};
+use catervas_core::goal::{
+    Goal, GoalBook, GoalOutcome, GoalRecord, GoalStatus, ReadingSource, StallReason, fold_goals,
+};
+use catervas_core::governor::task_status::is_terminal;
 use catervas_core::team::{Agent, Team};
 use catervas_protocol::event::{
     EventBody, EventKind, GoalEndedBody, GoalEndedBodyOutcome, GoalIdBody, GoalMeasuredBody,
-    GoalMeasuredBodySource, GoalSetBody, new_event,
+    GoalMeasuredBodySource, GoalSetBody, SessionStartedBodyPurpose, new_event,
 };
+use catervas_store::requests::goal_of;
 use catervas_store::{EventLog, EventQuery, StoreError};
+use serde_json::{Value, json};
 
 use crate::orchestrator::{CommandError, CommandReport};
 use crate::tools::ToolDeps;
@@ -90,10 +95,6 @@ pub fn goal_book(log: &EventLog) -> Result<GoalBook, StoreError> {
 
 /// Who plans the team's next steps towards the goal: the active Product Manager, or, for one agent
 /// alone, that agent.
-#[expect(
-    dead_code,
-    reason = "the goal card and the loop use it (tasks 6 and 7)"
-)]
 pub(crate) fn planner(team: &Team) -> Option<&Agent> {
     if team.is_solo() {
         return team.active_agents().next();
@@ -335,4 +336,135 @@ pub(crate) fn report_goal(
         said: format!("Noted {value} for the goal {goal}."),
         events: vec![seq],
     })
+}
+
+/// How many readings `goal.get` answers.
+const READINGS_SHOWN: usize = 10;
+
+fn status_word(status: GoalStatus) -> (&'static str, Option<&'static str>) {
+    match status {
+        GoalStatus::Active => ("active", None),
+        GoalStatus::Paused => ("paused", None),
+        GoalStatus::Met => ("met", None),
+        GoalStatus::Stalled(StallReason::NothingPlanned) => ("stalled", Some("nothing_planned")),
+        GoalStatus::Stalled(StallReason::NoProgress) => ("stalled", Some("no_progress")),
+    }
+}
+
+/// Whether `agent`'s newest goal session has not ended.
+fn planning(log: &EventLog, agent: &str) -> Result<bool, StoreError> {
+    let started = log.read(&EventQuery {
+        kinds: vec![EventKind::SessionStarted],
+        agent_id: Some(agent.to_string()),
+        newest_first: true,
+        ..EventQuery::default()
+    })?;
+    let Some(newest) = started.iter().find(|event| {
+        matches!(&event.body, EventBody::SessionStarted(body)
+            if body.purpose == SessionStartedBodyPurpose::Goal)
+    }) else {
+        return Ok(false);
+    };
+    let Some(session) = newest.envelope.ids.session_id.as_deref() else {
+        return Ok(false);
+    };
+    let ended = log.read(&EventQuery {
+        kinds: vec![EventKind::SessionEnded],
+        agent_id: Some(agent.to_string()),
+        after_seq: Some(newest.envelope.seq),
+        ..EventQuery::default()
+    })?;
+    Ok(!ended
+        .iter()
+        .any(|event| event.envelope.ids.session_id.as_deref() == Some(session)))
+}
+
+/// The answer to `goal.get`: the goal that stands with its progress, and the last one ended.
+///
+/// # Errors
+///
+/// The log or the board could not be read.
+pub(crate) fn goal_get(tools: &ToolDeps, team: &Team) -> Result<Value, StoreError> {
+    let book = goal_book(&tools.log)?;
+    let last_ended = book.last_ended.as_ref().map(|ended| {
+        json!({
+            "goal": ended.id,
+            "words": ended.words,
+            "outcome": match ended.outcome {
+                GoalOutcome::Reached => "reached",
+                GoalOutcome::Dropped => "dropped",
+            },
+            "at": ended.at,
+        })
+    });
+    let Some(goal) = book.standing else {
+        return Ok(json!({ "goal": null, "last_ended": last_ended }));
+    };
+    let board = tools.projections.board()?;
+    let open: Vec<_> = board
+        .iter()
+        .filter(|row| !is_terminal(row.status))
+        .collect();
+    let mut done = 0;
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Accepted)
+    {
+        if goal_of(&tools.log, &row.task_id)?.as_deref() == Some(goal.id.as_str()) {
+            done += 1;
+        }
+    }
+    let waiting = open
+        .iter()
+        .filter(|row| {
+            matches!(row.status, TaskStatus::Escalated | TaskStatus::Blocked)
+                || row.waiting_on_human
+                || row.awaiting_approval
+        })
+        .count();
+    let planner = planner(team);
+    let running = match planner {
+        Some(agent) => planning(&tools.log, agent.id.as_str())?,
+        None => false,
+    };
+    let (status, stall) = status_word(goal.status());
+    let readings: Vec<_> = goal
+        .readings
+        .iter()
+        .rev()
+        .take(READINGS_SHOWN)
+        .map(|reading| {
+            json!({
+                "value": reading.value,
+                "source": match reading.source {
+                    ReadingSource::Connector => "connector",
+                    ReadingSource::Owner => "owner",
+                },
+                "server": reading.server,
+                "agent": reading.agent,
+                "at": reading.at,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "goal": {
+            "goal": goal.id,
+            "words": goal.words,
+            "target": goal.target,
+            "unit": goal.unit,
+            "server": goal.server,
+            "reader": goal.server.as_deref()
+                .and_then(|server| reader(team, server))
+                .map(|agent| agent.id.as_str()),
+            "planner": planner.map(|agent| agent.id.as_str()),
+            "status": status,
+            "stall": stall,
+            "readings": readings,
+            "open": open.len(),
+            "done": done,
+            "waiting_on_owner": waiting,
+            "planning": running,
+        },
+        "last_ended": last_ended,
+    }))
 }
