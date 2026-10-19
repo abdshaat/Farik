@@ -140,7 +140,7 @@ Files: the three schemas, `event.rs`, `lib.rs`, `fixtures.rs`, `projections.rs`,
 
 - `folds_the_switch_into_a_folder_change_and_the_local_writes_by_path` — asserts that a log of `document_storage.changed{local:true, change:4, branch:"docs/keep-documents-on-this-computer"}` gives a change 4 with `storage: Some(true)` and `switch_state` `{local:true, waiting:true}`, then `{waiting:false}` after `folder_change.integrated{change:4}`; and that two `local_documents.written` naming `docs/catervas/product/spec.html` (by owner, then by task `CTV-3`) give `local_writes` the second, `by: Task`, `task_id: "CTV-3"`.
 
-- [ ] `feat(protocol): record the documents' move and every local write`
+- [x] `feat(protocol): record the documents' move and every local write`
 
 ### Task 3: the store reads, copies and lands documents on disk
 

@@ -178,7 +178,9 @@
         "connection.requested",
         "worktree.tidied",
         "pull_request.conflicted",
-        "pull_request.refreshed"
+        "pull_request.refreshed",
+        "document_storage.changed",
+        "local_documents.written"
       ]
     },
     "eventBodyWire": {
@@ -296,7 +298,9 @@
         { "$ref": "#/$defs/connectionRequestedBody" },
         { "$ref": "#/$defs/worktreeTidiedBody" },
         { "$ref": "#/$defs/pullRequestConflictedBody" },
-        { "$ref": "#/$defs/pullRequestRefreshedBody" }
+        { "$ref": "#/$defs/pullRequestRefreshedBody" },
+        { "$ref": "#/$defs/documentStorageChangedBody" },
+        { "$ref": "#/$defs/localDocumentsWrittenBody" }
       ]
     },
     "contractSummary": {
@@ -2034,6 +2038,34 @@
       "properties": {
         "url": { "type": "string" },
         "sha": { "type": "string" }
+      }
+    },
+    "documentStorageChangedBody": {
+      "title": "Document Storage Changed Body",
+      "description": "The owner chose where the team's documents are kept (ADR 0074, docs/SPEC.md 5.17): local is true to keep them on this computer, out of the repository, and false to put them back. change, branch and sha name the folder change that moves them (docs/SPEC.md 5.14), all null when there was nothing to move. It is the owner's: the envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local", "change", "branch", "sha"],
+      "properties": {
+        "local": { "type": "boolean" },
+        "change": { "type": ["integer", "null"], "minimum": 1, "maximum": 18446744073709551615 },
+        "branch": { "type": ["string", "null"] },
+        "sha": { "type": ["string", "null"] }
+      }
+    },
+    "localDocumentsWrittenBody": {
+      "title": "Local Documents Written Body",
+      "description": "Documents kept on this computer were written (ADR 0074, docs/SPEC.md 5.17): paths are the files written and removed the files deleted, repository paths under docs/catervas. by is owner for a save on the Files page, agent for catervas_write_folder_doc (written_by names the agent and the envelope names it and its session) and task for a task's documents landing when it was accepted (task_id names it). set_aside lists the documents of a task whose version was not put in because the file changed meanwhile. It is about no contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "removed", "by", "written_by", "task_id", "set_aside"],
+      "properties": {
+        "paths": { "type": "array", "items": { "type": "string" } },
+        "removed": { "type": "array", "items": { "type": "string" } },
+        "by": { "type": "string", "enum": ["owner", "agent", "task"] },
+        "written_by": { "type": ["string", "null"] },
+        "task_id": { "type": ["string", "null"] },
+        "set_aside": { "type": "array", "items": { "type": "string" } }
       }
     },
     "connectorTag": {

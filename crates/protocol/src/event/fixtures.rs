@@ -341,6 +341,20 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "into": "main",
             "paths": ["src/lib.rs"]
         }),
+        EventKind::DocumentStorageChanged => json!({
+            "local": true,
+            "change": 4,
+            "branch": "docs/keep-documents-on-this-computer",
+            "sha": "0123456789abcdef0123456789abcdef01234567"
+        }),
+        EventKind::LocalDocumentsWritten => json!({
+            "paths": ["docs/catervas/product/spec.html"],
+            "removed": [],
+            "by": "task",
+            "written_by": null,
+            "task_id": "CTV-3",
+            "set_aside": []
+        }),
         EventKind::PullRequestRefreshed => json!({
             "url": "https://github.com/o/r/pull/7",
             "sha": "0123456789abcdef0123456789abcdef01234567"
