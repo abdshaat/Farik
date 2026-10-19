@@ -353,6 +353,19 @@ export const en = {
 	finishLead: "Finished work opens a pull request on GitHub for you to merge.",
 	finishLeadLocal:
 		"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
+	mergingSwitch: "Let Catervas merge finished work",
+	mergingSwitchNote:
+		"Catervas merges a pull request only after all of GitHub's checks pass.\nIt uses a merge method your repository allows, and never skips a rule of the branch.\nIt asks only on this computer. Anyone else who clones the project turns it on for themselves.",
+	mergingOffline: "Needs your project on GitHub.",
+	mergingWarnTitle: "Let Catervas merge?",
+	mergingWarn:
+		"Catervas will merge finished work into {branch} by itself.\nIt merges only when GitHub's checks pass. If your repository has no automatic checks, Catervas merges once its own checks pass.\nYou won't see the work before it lands.",
+	mergingWarnSolo: "{name} works alone, so no other agent reviews its code.",
+	mergingWarnNote:
+		"A failing check, a needed review or a conflict stops the merge and tells you on Today.\nCatervas never uses an administrator's override.\nTurn it off here at any time.",
+	mergingTurnOn: "Turn on",
+	mergingMainBranch: "your main branch",
+	mergingCancel: "Cancel",
 	finishSafe:
 		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",

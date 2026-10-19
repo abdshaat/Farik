@@ -313,7 +313,7 @@ Test:
 
 Check the page at 1280 and 390 px wide against screenshots.
 
-- [ ] `feat(web): ask before letting Catervas merge finished work`
+- [x] `feat(web): ask before letting Catervas merge finished work`
 
 ### Task 7: the spec
 

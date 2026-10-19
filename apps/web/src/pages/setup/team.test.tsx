@@ -706,7 +706,7 @@ describe("team setup", () => {
 	});
 
 	it("setup_and_rules_offer_no_integration_choice", async () => {
-		// Catervas never merges (ADR 0061): finished work always opens a pull request.
+		// Finished work always opens a pull request (ADR 0061); merging it is the switch's (ADR 0073).
 		const first = await renderApp("/setup/finish");
 		const s = first.socket as FakeSocket;
 		await answerQuery(s, "team.propose", proposed());
@@ -732,7 +732,15 @@ describe("team setup", () => {
 		});
 		expect(within(finish).getByText(en.finishLead)).toBeTruthy();
 		expect(within(finish).queryByRole("radio")).toBeNull();
-		expect(within(finish).queryByRole("button")).toBeNull();
+		expect(
+			within(finish).queryByRole("button", { name: en.putBack }),
+		).toBeNull();
+		// The one control is the switch that lets Catervas merge (ADR 0073), off until confirmed.
+		expect(
+			within(finish)
+				.getByRole("switch", { name: en.mergingSwitch })
+				.getAttribute("aria-checked"),
+		).toBe("false");
 	});
 
 	it("edits_the_checks", async () => {
