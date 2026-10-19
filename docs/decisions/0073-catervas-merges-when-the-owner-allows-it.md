@@ -32,7 +32,7 @@ Four facts constrain the design:
    - It passes `--match-head-commit` with the commit it read, never `--admin`, never `--auto`, and it deletes no branch.
    - It records `pull_request.merged { url, method }`, then `task.integrated` (or `folder_change.integrated`) with `integrated_by: governor`, and fast-forwards the local integration branch.
    - The human's `catervas integrate` still never merges.
-4. **What stops a merge stops it visibly.** A failed check, no checks after 10 minutes, a branch rule GitHub enforces (`BLOCKED`), a repository with no allowed method, or gh refusing the merge is an integration escalation with its words. Ticks then leave that work to the human, as after any integration escalation. A conflict, or a branch behind its base, goes through 0.122's refresh as today.
+4. **What stops a merge stops it visibly.** A failed check, a branch rule GitHub enforces (`BLOCKED`), a repository with no allowed method, or gh refusing the merge is an integration escalation with its words. Ticks then leave that work to the human, as after any integration escalation. A conflict, or a branch behind its base, goes through 0.122's refresh as today.
 5. **Scope.** The rule covers every pull request Catervas opens: accepted tasks, folder changes, and tasks in member repositories, each through its own repository's `gh`. One agent alone may use it; its warning says that no other agent reviews the code. A project with no `origin` cannot turn it on.
 
 Rejected:
@@ -41,7 +41,7 @@ Rejected:
 - The file alone as the permission: clones would merge unwarned.
 - The log alone: no visible team setting.
 - Sending a task back to its assignee on a failed check: a flaky check could loop the team; possible later.
-- Merging with no checks: nothing passed.
+- Never merging with no checks, and escalating after 10 minutes: when the repository has no checks configured for the pull request, Catervas merges once its own verification passed (the task is accepted). A failing or pending check still blocks.
 - Squash first: tasks start from unmerged branches, and a merge commit keeps their commits from appearing twice.
 
 ## Consequences
@@ -49,5 +49,5 @@ Rejected:
 - An owner who turns it on merges nothing by hand while checks pass. Work reaches the production branch without the owner seeing it first. The warning says so, and it is the price the founder chose to offer.
 - The safety of an automatic merge now rests on the repository's checks and the code review by the Architect, else a Developer. With one agent alone, it rests on the checks only.
 - GitHub shows the owner as the one who merged, since `gh` acts with the owner's sign-in. Catervas's log says it was Catervas (`pull_request.merged`, `integrated_by: governor`).
-- A repository with no checks never merges automatically. The owner learns it from one escalation per pull request, after 10 minutes.
+- A repository with no checks merges as soon as the task is accepted and its pull request is clean. The warning says so: "If your repository has no automatic checks, Catervas merges once its own checks pass."
 - Three event kinds are added: `merge_permission.granted`, `merge_permission.withdrawn`, and `pull_request.merged`.

@@ -26,7 +26,7 @@ So Catervas still opens the pull request, waits for GitHub's checks to pass, the
 - Title: **Let Catervas merge?**
 - Bullets:
   - "Catervas will merge finished work into {branch} by itself."
-  - "It merges only when GitHub's checks pass. With no checks, it never merges."
+  - "It merges only when GitHub's checks pass. If your repository has no automatic checks, Catervas merges once its own checks pass."
   - "You won't see the work before it lands."
   - One agent alone (`policy.solo`) adds: "{name} works alone, so no other agent reviews its code."
 - Info button (ⓘ) in the dialog, bullets:
@@ -72,8 +72,7 @@ When merging is allowed and the tick is Catervas's own (not the human's `caterva
 | `mergeable: CONFLICTING` or `mergeStateStatus: DIRTY` | As today (0.122): a task's branch is brought up to date or sent back conflicted; a folder change escalates. |
 | A check failed | An integration escalation: "A check failed on GitHub: {names}. Catervas did not merge {url}; fix it or merge it yourself." Ticks then leave the task to the human (5.14). |
 | Checks pending | Waits for the next tick. |
-| No checks, under 10 minutes since the pull request was opened or last refreshed | Waits; GitHub may not have registered them yet. |
-| No checks, after 10 minutes | An integration escalation: "No checks ran on GitHub for {url}, so Catervas did not merge it. Merge it yourself, or add checks to the repository." |
+| No checks at all | Catervas merges as below. The task is accepted, so Catervas's own verification passed (changed 2026-10-19 on the founder's behalf). There is no wait: a repository with no checks has nothing to register. |
 | Checks passed, `BEHIND` | The 0.122 refresh: Catervas merges the integration branch into the task's branch and pushes, and the checks run again. A folder change escalates. |
 | Checks passed, `BLOCKED` | An integration escalation: "GitHub will not merge {url} yet: it needs a review or another of the branch's rules. Merge it yourself once it can." |
 | Checks passed, `CLEAN`, `HAS_HOOKS` or `UNSTABLE` | Catervas merges: see below. |
@@ -110,6 +109,6 @@ On the forge `Merged` path, `integrated_by` is `governor` when the log holds a `
 - **The file alone as the permission:** the file travels with the repository, so a clone would merge without its owner ever seeing the warning.
 - **The log alone, with no key:** the founder asked for an option the owner can see in the team's settings, and the file is where the team's other policies live.
 - **Sending a task back to its assignee when a check fails** (a new governor row like 0.122's conflict): a flaky or unrelated check could loop the team. It can be added later. For now a failure stops the merge and tells the owner.
-- **Merging when the repository has no checks:** the founder's words are "when checks pass". With no checks, nothing passed.
+- **Never merging when the repository has no checks (and escalating after 10 minutes):** the founder, through the planner, 2026-10-19: with no checks configured, Catervas merges once its own verification passed. A failing or pending check still blocks.
 - **Squash first:** tasks start from accepted, unmerged branches (5.14). A merge commit keeps those commits in history, so later pull requests do not carry them twice.
 - **An inline "are you sure" line (Account.tsx's pattern):** the founder asked for a warning. A dialog stops the owner before anything is saved.

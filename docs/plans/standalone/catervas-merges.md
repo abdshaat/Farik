@@ -12,7 +12,7 @@ Readiness confirmed by: the planner (Opus 5.5), 2026-10-19, against the three re
 The founder's brief of 2026-10-19 (design, "The brief"). When this is done:
 - Settings → How work runs has a switch, "Let Catervas merge finished work". Turning it on shows a warning the owner confirms.
 - Once it is on, Catervas merges each pull request it opened once all of GitHub's checks pass, records the integration as its own, and brings the local integration branch up.
-- A failing check, no checks, a branch rule, or a refused merge stops the merge and escalates to the owner.
+- A failing check, a branch rule, or a refused merge stops the merge and escalates to the owner. A pull request with no checks at all merges once Catervas's own verification passed (the task is accepted).
 
 Out of scope:
 - sending a task back on a failed check;
@@ -46,9 +46,8 @@ Out of scope:
   - Rejected: refusing a `team.save` that changes the key. The web app sends the whole team, so an old tab would be refused for a field it never touched.
 - The repository's methods are read with `gh api repos/{owner}/{repo}`, whose second argument does not collide with `FakeGh`'s `view` answer. Rejected: `gh repo view`, which would share the `view` key with `gh pr view` in `FakeGh`.
 - The checks are read in the existing `gh pr view` call by adding fields, not in a second call. One read keeps the state and the checks consistent.
-- "No checks" waits `NO_CHECKS_GRACE = 10 minutes` from the last `pull_request.opened` or `pull_request.refreshed` for that `url` (its `recorded_at`, against the injected clock).
-  - For a folder change the clock starts at `folder_change.opened`.
-  - Rejected: escalating at once, which would catch checks GitHub had not registered yet; waiting for ever, which the owner would never notice.
+- `Checks::None` (no checks configured) merges like `Passed`, with no wait and no escalation: the task is accepted, so Catervas's own verification passed (changed 2026-10-19 on the founder's behalf; `NO_CHECKS_GRACE` is dropped).
+  - Rejected: escalating after 10 minutes, which the founder replaced.
 - `BEHIND` reuses `stopped_merging` unchanged: a task refreshes, a folder change escalates.
 - `Asker::Human` never merges, and the merge runs on ticks alone.
 - The setup strings `mayPushNote*` ("Nothing reaches your main branch without you.") stay as they are, since setup never turns merging on.
@@ -112,7 +111,6 @@ impl Forge {
 }
 
 // catervas-runtime, crates/runtime/src/orchestrator/integrate.rs
-const NO_CHECKS_GRACE: chrono::TimeDelta; // 10 minutes
 fn merge_when_checks_pass(
     tools: &ToolDeps, team: &Team, subject: &Subject, target: &IntegrationTarget,
     branch: &str, url: &str, open: &OpenPullRequest,
@@ -267,6 +265,7 @@ Tests, both `#[tokio::test] #[ignore = "needs the git program: cargo xtask check
 
   It asserts:
   - `gh` was called with `pr merge <url> --merge --match-head-commit <head>`;
+  - a second run on a fresh harness whose `view` answers an empty `statusCheckRollup` also calls `gh pr merge` (no checks configured);
   - the log holds `pull_request.merged { method: "merge" }`, then `task.integrated { integrated_by: "governor", sha: <the merge commit> }`;
   - the local integration branch's head is that commit.
 - `never_merges_without_permission_or_passing_checks`. This is the security guarantee. Four ticks, each on a fresh harness, and none calls `gh pr merge`:
@@ -324,7 +323,7 @@ Files: modified `docs/SPEC.md`.
 - 5.12: the "three policies" paragraph says `integration` still reads `pull_request`. A new paragraph adds `merge_when_checks_pass`: the key, the permission, `merging.set`, its refusals, and the Settings switch and warning, quoted.
 - 5.14:
   - "Catervas never merges" becomes "Catervas never merges unless the owner allows it (0.128)";
-  - a new paragraph, "When Catervas merges (added in 0.128; ADR 0073)", carries the design's table, the merge, the methods, `NO_CHECKS_GRACE`, `integrated_by`, Today's lines, and the cases for member repositories, folder changes and solo;
+  - a new paragraph, "When Catervas merges (added in 0.128; ADR 0073)", carries the design's table, the merge, the methods, `integrated_by`, Today's lines, and the cases for member repositories, folder changes and solo;
   - the `gh pr view` fields of 0.122's paragraph gain the new ones.
 - 8.5: an "Added in 0.128" line names the three kinds, their bodies, and what each is about.
 
@@ -344,6 +343,6 @@ The output goes in the pull request. The founder's own test is in the web app, o
 
 ## Readiness (the planner, 2026-10-19)
 
-- **Every decision made.** The key, the gate, the RPC, the stop rules and their words, the method order, the grace period, `integrated_by`, the scope (members, folder changes, solo, offline, plan tasks, private folders) and the web control are fixed in ADR 0073, the design or above. No conditional is left to the executor.
+- **Every decision made.** The key, the gate, the RPC, the stop rules and their words, the method order, `integrated_by`, the scope (members, folder changes, solo, offline, plan tasks, private folders) and the web control are fixed in ADR 0073, the design or above. No conditional is left to the executor.
 - **No ambiguity.** Every path is exact. Signatures and `gh` arguments are exact. Each test names what it asserts. The single command has its expected output.
 - **No forward dependency.** Task 1 depends on main. Task 2 depends on Task 1. Task 3 depends on Tasks 1 and 2. Task 4 depends on main. Task 5 depends on Tasks 2 and 4. Task 6 depends on Task 3's wire. Task 7 depends on nothing in the code. No task touches a file another task changes for another reason, with one exception: Task 4 adds `..` to the `Open { mergeable }` patterns in `integrate.rs` so that it compiles, and Task 5 owns the file's behaviour. `fixtures.rs` is untouched.
