@@ -3604,6 +3604,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded")
@@ -3830,6 +3831,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded");
@@ -3944,6 +3946,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded");

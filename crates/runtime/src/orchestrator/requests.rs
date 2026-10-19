@@ -1567,6 +1567,7 @@ mod tests {
                 heard: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the greeting is recorded");

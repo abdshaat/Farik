@@ -2983,6 +2983,11 @@
               "minimum": 1,
               "maximum": 18446744073709551615,
               "description": "The seq of the agent's chat reply whose proposed request this is: the reply must carry a request not already sent, or the daemon refuses with a sentence. task.created records it."
+            },
+            "attachments": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "The documents the owner attached (docs/SPEC.md 5.17, ADR 0073): up to five attached documents a document.attached recorded, which task.created records. Refused with -32005 and data.errors: too_many_attachments (/attachments: more than five) and not_attached (/attachments/<i>: a path no document.attached recorded)."
             }
           },
           "required": [

@@ -756,7 +756,8 @@ pub(super) async fn call(
     if method == "request.file" {
         let text = params["text"].as_str().unwrap_or_default().to_string();
         let link = params["from_chat_message"].as_u64();
-        let filed = off_the_worker(move || file_words(&deps, &text, link)).await?;
+        let attachments = attachment_paths(&params["attachments"]);
+        let filed = off_the_worker(move || file_words(&deps, &text, link, &attachments)).await?;
         state.wakes().notify_one();
         return Ok(filed);
     }
@@ -867,16 +868,40 @@ pub(super) async fn off_the_worker<T: Send + 'static>(
         .unwrap_or_else(|error| Err(internal(&error)))
 }
 
+/// The paths of `request.file`'s `attachments`, which the schema holds to strings.
+fn attachment_paths(value: &Value) -> Vec<String> {
+    value
+        .as_array()
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(|path| path.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// `request.file`: the person's words filed as a draft request of the human's, from a chat's
-/// proposed request when `from_chat_message` names its reply.
+/// proposed request when `from_chat_message` names its reply, and naming the documents they
+/// attached (ADR 0073), each held to `check_attachments` before anything is recorded.
 fn file_words(
     deps: &ToolDeps,
     text: &str,
     from_chat_message: Option<u64>,
+    attachments: &[String],
 ) -> Result<Value, Failure> {
+    if let Err(refusal) =
+        crate::chat::check_attachments(&deps.log, attachments).map_err(|e| internal(&e))?
+    {
+        return Err(raise_refusal(
+            &refusal.pointer,
+            refusal.code,
+            refusal.message,
+        ));
+    }
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
     if team.is_solo() {
-        return file_for_the_one_agent(deps, &team, text);
+        return file_for_the_one_agent(deps, &team, text, attachments);
     }
     let request =
         request_from_text(text, placeholder_budget_usd(&team.rules())).map_err(|sentence| {
@@ -898,6 +923,7 @@ fn file_words(
         deps.clock.now(),
         &deps.ids,
         from_chat_message,
+        attachments,
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => Failure::new(REFUSED, format!("the request {reason}")),
@@ -909,7 +935,12 @@ fn file_words(
 
 /// `request.file` for one agent alone (ADR 0071): the owner's words are posted in the agent's chat
 /// and filed as a task given to it, as "Send as a task" does, so a given task's rules hold.
-fn file_for_the_one_agent(deps: &ToolDeps, team: &Team, text: &str) -> Result<Value, Failure> {
+fn file_for_the_one_agent(
+    deps: &ToolDeps,
+    team: &Team,
+    text: &str,
+    attachments: &[String],
+) -> Result<Value, Failure> {
     use crate::orchestrator::CommandError;
 
     let agent = team
@@ -923,6 +954,7 @@ fn file_for_the_one_agent(deps: &ToolDeps, team: &Team, text: &str) -> Result<Va
         agent.id.as_str(),
         text.to_string(),
         true,
+        attachments,
     ) {
         Ok((_, Some(task))) => {
             deps.projections.catch_up().map_err(|e| internal(&e))?;
@@ -3601,6 +3633,7 @@ pub(super) mod tests {
                 }),
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the chat message is recorded")
@@ -3747,6 +3780,7 @@ pub(super) mod tests {
                             &deps,
                             "Let customers pay with Apple Pay at the checkout",
                             Some(reply),
+                            &[],
                         )
                     })
                 })
@@ -4931,6 +4965,7 @@ pub(super) mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("recorded");

@@ -204,6 +204,8 @@ pub enum Command {
     MessagePost {
         /// What the human says.
         text: String,
+        /// The attached documents the message names (ADR 0073), in order; none when empty.
+        attachments: Vec<String>,
     },
     /// Say something in the human's one-to-one chat with one agent.
     ChatMessagePost {
@@ -213,6 +215,8 @@ pub enum Command {
         text: String,
         /// Send the message as a task for the agent (ADR 0063).
         as_task: bool,
+        /// The attached documents the message names (ADR 0073), in order; none when empty.
+        attachments: Vec<String>,
     },
     /// Give an agent a custom MCP server whose keys are already kept on this machine, or replace
     /// the one of its name (ADR 0030).
@@ -576,7 +580,10 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
         | CommandName::CatervaficationStart => empty_command(name, body),
         CommandName::MessagePost => {
             let body: MessagePostBody = read_body(body, name)?;
-            Ok(Command::MessagePost { text: body.text })
+            Ok(Command::MessagePost {
+                text: body.text,
+                attachments: body.attachments.map(Vec::from).unwrap_or_default(),
+            })
         }
         CommandName::ChatMessagePost => {
             let body: ChatMessagePostBody = read_body(body, name)?;
@@ -584,6 +591,7 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 agent_id: body.agent_id,
                 text: body.text,
                 as_task: body.as_task.unwrap_or(false),
+                attachments: body.attachments.map(Vec::from).unwrap_or_default(),
             })
         }
         CommandName::ConnectorConnect | CommandName::ConnectorDisconnect => {
@@ -955,19 +963,24 @@ pub fn command_to_value(command: &Command) -> Value {
         Command::TeamResume => (CommandName::TeamResume, json!({})),
         Command::ProductPlanDraft => (CommandName::ProductPlanDraft, json!({})),
         Command::CatervaficationStart => (CommandName::CatervaficationStart, json!({})),
-        Command::MessagePost { text } => (CommandName::MessagePost, json!({ "text": text })),
+        Command::MessagePost { text, attachments } => {
+            let mut body = json!({ "text": text });
+            with_attachments(&mut body, attachments);
+            (CommandName::MessagePost, body)
+        }
         Command::ChatMessagePost {
             agent_id,
             text,
             as_task,
-        } => (
-            CommandName::ChatMessagePost,
+            attachments,
+        } => {
+            let mut body = json!({ "agent_id": agent_id, "text": text });
             if *as_task {
-                json!({ "agent_id": agent_id, "text": text, "as_task": true })
-            } else {
-                json!({ "agent_id": agent_id, "text": text })
-            },
-        ),
+                body["as_task"] = json!(true);
+            }
+            with_attachments(&mut body, attachments);
+            (CommandName::ChatMessagePost, body)
+        }
         Command::ConnectorConnect { .. } | Command::ConnectorDisconnect { .. } => {
             connector_wire(command)
         }
@@ -1251,6 +1264,13 @@ fn with_flag(mut body: Value, key: &str, set: bool) -> Value {
 }
 
 /// `connector_connect` or `connector_disconnect` as its name and body.
+/// Writes `attachments` into `body`, and nothing when there are none.
+fn with_attachments(body: &mut Value, attachments: &[String]) {
+    if !attachments.is_empty() {
+        body["attachments"] = json!(attachments);
+    }
+}
+
 fn connector_wire(command: &Command) -> (CommandName, Value) {
     match command {
         Command::ConnectorConnect {
@@ -1725,7 +1745,8 @@ mod tests {
         assert_eq!(
             read("message_post", &json!({ "text": "@dev-a how is CTV-1?" })),
             Command::MessagePost {
-                text: "@dev-a how is CTV-1?".to_string()
+                text: "@dev-a how is CTV-1?".to_string(),
+                attachments: Vec::new(),
             }
         );
     }
@@ -1846,6 +1867,15 @@ mod tests {
             Command::ChatMessagePost { as_task: false, .. }
         ));
         assert_eq!(command_to_value(&command), plain);
+        let attached = wire(json!({
+            "agent_id": "dev", "text": "Read it", "attachments": ["docs/catervas/product/attached/a.md"]
+        }));
+        let command = command_from_value(&attached).expect("a message with a document reads");
+        assert!(matches!(
+            &command,
+            Command::ChatMessagePost { attachments, .. } if attachments.len() == 1
+        ));
+        assert_eq!(command_to_value(&command), attached);
         let bad = wire(json!({ "agent_id": "dev", "text": "Add a dark mode", "as_task": "yes" }));
         assert!(command_from_value(&bad).is_err());
     }

@@ -134,7 +134,7 @@ Files: the schemas' `attachments`; modified `gates.rs`, `requests.rs`, `human.rs
 - `a_request_a_chat_message_and_a_post_record_their_attachments` — after one `document.attach`, asserts `request.file { text, attachments: [p] }` records `task.created.attachments == [p]`, `chat_message_post` records `chat_message.posted.attachments == [p]`, `message_post` records `message.posted.attachments == [p]`, and a solo team's request (ADR 0071) carries them on its chat message.
 - `refuses_attachments_never_attached` — asserts `docs/catervas/product/spec.md` and six attached paths are refused `not_attached` at `/attachments/0` and `too_many_attachments` at `/attachments`, with nothing recorded.
 
-- [ ] `feat(runtime): a request, a chat message and a channel post name the owner's documents`
+- [x] `feat(runtime): a request, a chat message and a channel post name the owner's documents`
 
 ### Task 5: the answering session reads them
 

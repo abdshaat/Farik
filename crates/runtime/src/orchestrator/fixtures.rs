@@ -311,6 +311,7 @@ impl Harness {
             at(),
             &deps.ids,
             None,
+            &[],
         )
         .expect("the request is filed");
         deps.projections.catch_up().expect("the board catches up");

@@ -153,12 +153,13 @@ pub(super) async fn handle(
         Command::TeamResume => pause(tools, false),
         Command::ProductPlanDraft => draft_product_plan(tools),
         Command::CatervaficationStart => catervafication_start(tools),
-        Command::MessagePost { text } => post_message(tools, text),
+        Command::MessagePost { text, attachments } => post_message(tools, text, attachments),
         Command::ChatMessagePost {
             agent_id,
             text,
             as_task,
-        } => post_chat_message(tools, &agent_id, text, as_task),
+            attachments,
+        } => post_chat_message(tools, &agent_id, text, as_task, &attachments),
         Command::ConnectorConnect {
             agent,
             server,
@@ -472,7 +473,12 @@ fn pause(tools: &ToolDeps, pausing: bool) -> Result<CommandReport, CommandError>
 }
 
 /// The human's message in the team's channel (5.9), its mentions found by Catervas.
-fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, CommandError> {
+fn post_message(
+    tools: &ToolDeps,
+    text: String,
+    attachments: Vec<String>,
+) -> Result<CommandReport, CommandError> {
+    held_to_attachments(tools, &attachments)?;
     let team = tools.files.read_team().map_err(failed)?;
     let mentions = mentions_in(&text, &team, HUMAN);
     let seq = post(
@@ -489,6 +495,7 @@ fn post_message(tools: &ToolDeps, text: String) -> Result<CommandReport, Command
             thread: None,
             in_reply_to: None,
             session_id: None,
+            attachments,
         },
     )
     .map_err(|error| match error {
@@ -509,8 +516,19 @@ fn post_chat_message(
     agent_id: &str,
     text: String,
     as_task: bool,
+    attachments: &[String],
 ) -> Result<CommandReport, CommandError> {
-    posted_in_chat(tools, agent_id, text, as_task).map(|(report, _)| report)
+    posted_in_chat(tools, agent_id, text, as_task, attachments).map(|(report, _)| report)
+}
+
+/// Refuses `attachments` the owner may not name (ADR 0073), before anything is recorded: more than
+/// five is `too_many_attachments`, and a path no `document.attached` recorded is `not_attached`.
+fn held_to_attachments(tools: &ToolDeps, attachments: &[String]) -> Result<(), CommandError> {
+    crate::chat::check_attachments(&tools.log, attachments)
+        .map_err(failed)?
+        .map_err(|refusal| CommandError::Refused {
+            reason: refusal.reason(),
+        })
 }
 
 /// `post_chat_message`, and the id of the task it filed when sent `as_task`. A solo team's
@@ -520,6 +538,7 @@ pub(crate) fn posted_in_chat(
     agent_id: &str,
     text: String,
     as_task: bool,
+    attachments: &[String],
 ) -> Result<(CommandReport, Option<TaskId>), CommandError> {
     let team = tools.files.read_team().map_err(failed)?;
     let Some(agent) = team
@@ -539,6 +558,7 @@ pub(crate) fn posted_in_chat(
             ),
         });
     }
+    held_to_attachments(tools, attachments)?;
     let contract = if as_task {
         Some(given_contract(&team, agent, &text)?)
     } else {
@@ -557,6 +577,7 @@ pub(crate) fn posted_in_chat(
             request: None,
             session_id: None,
             as_task,
+            attachments: attachments.to_vec(),
         },
     )
     .map_err(|error| match error {
@@ -581,6 +602,7 @@ pub(crate) fn posted_in_chat(
         seq,
         tools.clock.now(),
         &tools.ids,
+        attachments,
     )
     .map_err(|error| from_request("task_refused", error))?;
     tools.projections.catch_up().map_err(failed)?;
@@ -2870,6 +2892,7 @@ mod tests {
                 heard: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the greeting is recorded");
@@ -3145,6 +3168,7 @@ mod tests {
             agent_id: agent.to_string(),
             text: text.to_string(),
             as_task: true,
+            attachments: Vec::new(),
         };
 
         let report = handled(&orchestrator, as_task("dev", text)).await;
@@ -4909,6 +4933,7 @@ mod tests {
         orchestrator
             .handle(Command::MessagePost {
                 text: text.to_string(),
+                attachments: Vec::new(),
             })
             .await
     }
@@ -4986,6 +5011,7 @@ mod tests {
             agent_id: agent.to_string(),
             text,
             as_task: false,
+            attachments: Vec::new(),
         };
 
         for (agent, text) in [
@@ -5034,6 +5060,7 @@ mod tests {
                     request: Some(crate::chat::ProposedRequest { title, text }),
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             );
             assert!(

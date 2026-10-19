@@ -187,6 +187,9 @@ pub fn fields_not_the_authors(wire: &Value) -> Vec<&'static str> {
 /// The contract goes through `command_from_value`, so that a request filed from a terminal is held
 /// to exactly the rules one arriving from an agent is.
 ///
+/// `attachments` are the documents the owner attached (ADR 0073), already checked by the caller
+/// against what `document.attached` recorded: `task.created` names them.
+///
 /// With `from_chat_message`, the request is a chat's proposal the user sent: that seq must be an
 /// agent's `chat_message.posted` carrying a `request` no `task.created` names yet, and
 /// `task.created` names it. Requests are filed one at a time, the check among them, so that two
@@ -207,6 +210,7 @@ pub fn file_request(
     now: DateTime<Utc>,
     ids: &EventIds,
     from_chat_message: Option<u64>,
+    attachments: &[String],
 ) -> Result<TaskContract, RequestError> {
     file(
         files,
@@ -223,6 +227,7 @@ pub fn file_request(
             catervafies: None,
             given_to: None,
             filed_as: None,
+            attachments,
         },
         (now, ids),
     )
@@ -341,6 +346,7 @@ pub fn file_rederive_request(
             catervafies: None,
             given_to: None,
             filed_as: None,
+            attachments: &[],
         },
         (now, ids),
     )
@@ -376,6 +382,7 @@ pub fn file_raise_request(
             catervafies: None,
             given_to: None,
             filed_as: None,
+            attachments: &[],
         },
         (now, ids),
     )
@@ -411,6 +418,7 @@ pub fn file_bug(
             catervafies: None,
             given_to: None,
             filed_as: None,
+            attachments: &[],
         },
         (now, ids),
     )
@@ -435,6 +443,7 @@ pub fn file_given_task(
     from_chat_message: u64,
     now: DateTime<Utc>,
     ids: &EventIds,
+    attachments: &[String],
 ) -> Result<TaskContract, RequestError> {
     file(
         files,
@@ -451,6 +460,7 @@ pub fn file_given_task(
             catervafies: None,
             given_to: Some(given_to),
             filed_as: None,
+            attachments,
         },
         (now, ids),
     )
@@ -576,6 +586,7 @@ pub fn file_product_plan_request(
             catervafies: None,
             given_to: None,
             filed_as: None,
+            attachments: &[],
         },
         (now, ids),
     )
@@ -611,6 +622,7 @@ pub fn file_catervafication_epic(
             catervafies: Some(project),
             given_to: None,
             filed_as: None,
+            attachments: &[],
         },
         (now, ids),
     )
@@ -870,6 +882,7 @@ pub fn file_small_request(
             catervafies: None,
             given_to: None,
             filed_as: Some((filed_as, reason)),
+            attachments: &[],
         },
         (now, ids),
     )
@@ -891,6 +904,8 @@ struct Filing<'a> {
     given_to: Option<&'a str>,
     /// How a whole contract was filed, and why it is triaged small.
     filed_as: Option<(TaskCreatedBodyFiledAs, &'a str)>,
+    /// The documents the owner attached to the request (ADR 0073), checked by whoever files it.
+    attachments: &'a [String],
 }
 
 fn file(
@@ -1024,9 +1039,12 @@ fn creation_bodies(
         catervafies,
         filed_as,
         given_to,
+        attachments,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
+        attachments: catervas_protocol::event::attachment_paths(attachments)
+            .map_err(|reason| RequestError::Refused { reason })?,
         summary: summary_of(contract),
         product_plan: product_plan.then_some(true),
         from_chat_message: from_chat_message.and_then(NonZeroU64::new),
@@ -1998,8 +2016,18 @@ mod tests {
         git_in(&root, &["commit", "--allow-empty", "-m", "first"]);
         git_in(&root, &["branch", "feature/CTV-7"]);
         let files = project.files();
-        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
-            .expect("the request is filed");
+        let request = file_request(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+            &[],
+        )
+        .expect("the request is filed");
         assert_eq!(
             request.id.as_str(),
             "CTV-8",
@@ -2020,6 +2048,7 @@ mod tests {
             at(),
             &ids(),
             None,
+            &[],
         )
         .expect("the request is filed");
         assert_eq!(
@@ -2046,8 +2075,18 @@ mod tests {
                 .expect("repos"),
             )
             .expect("repos.yaml is written");
-        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
-            .expect("the request is filed");
+        let request = file_request(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+            &[],
+        )
+        .expect("the request is filed");
         assert_eq!(request.id.as_str(), "CTV-8");
     }
 
@@ -2057,8 +2096,18 @@ mod tests {
         // The folder is not a repository, so its branches cannot be listed: it counts as having none.
         let (project, log) = a_project("requests-no-repository");
         let files = project.files();
-        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
-            .expect("the request is filed");
+        let request = file_request(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+            &[],
+        )
+        .expect("the request is filed");
         assert_eq!(request.id.as_str(), "CTV-1");
     }
 
@@ -2066,8 +2115,18 @@ mod tests {
     fn files_a_bug_triaged_small_and_linked_to_its_hunt() {
         let (project, log) = a_project("requests-bug");
         let files = project.files();
-        let hunt = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
-            .expect("the hunt stands in as a request");
+        let hunt = file_request(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+            &[],
+        )
+        .expect("the hunt stands in as a request");
         assert_eq!(hunt.id.as_str(), "CTV-1");
         let wire = request_from_brief(
             "The save button does nothing",
@@ -2112,6 +2171,7 @@ mod tests {
             request: None,
             heard: None,
             as_task: as_task.then_some(true),
+            attachments: None,
         });
         let ids = EventIds {
             agent_id: Some(agent.to_string()),
@@ -2130,7 +2190,7 @@ mod tests {
         let seq = chat_post(&log, "dev", "human", text, true);
         let wire = || request_from_brief("Dark mode switch", text, 20.0).expect("a request");
         let given = |wire: Value, from: u64| {
-            file_given_task(&files, &log, wire, "human", "dev", from, at(), &ids())
+            file_given_task(&files, &log, wire, "human", "dev", from, at(), &ids(), &[])
         };
         let task = given(wire(), seq).expect("the task is given");
         assert_eq!(task.id.as_str(), "CTV-1");
@@ -2190,8 +2250,18 @@ mod tests {
     fn files_a_request_with_the_next_id_the_log_hands_out() {
         let (project, log) = a_project("requests-next");
         let files = project.files();
-        let request = file_request(&files, &log, a_request(), "human", None, at(), &ids(), None)
-            .expect("the request is filed");
+        let request = file_request(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+            &[],
+        )
+        .expect("the request is filed");
 
         assert_eq!(request.id.as_str(), "CTV-1");
         assert_eq!(request.status, TaskStatus::Draft);
@@ -2216,6 +2286,7 @@ mod tests {
             at(),
             &ids(),
             None,
+            &[],
         )
         .expect("the child is filed");
 
@@ -2251,7 +2322,7 @@ mod tests {
         let files = project.files();
         let mut wire = a_request();
         wire["id"] = serde_json::json!("CTV-9");
-        let refused = file_request(&files, &log, wire, "human", None, at(), &ids(), None)
+        let refused = file_request(&files, &log, wire, "human", None, at(), &ids(), None, &[])
             .expect_err("an id is Catervas's to give");
 
         let RequestError::Refused { reason } = refused else {
@@ -2277,6 +2348,7 @@ mod tests {
             at(),
             &ids(),
             None,
+            &[],
         )
         .expect("the request is filed");
         let projections = open_projections(Arc::clone(&log)).expect("the projections open");

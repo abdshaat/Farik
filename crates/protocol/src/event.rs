@@ -11,6 +11,9 @@ use serde_json::Value;
 
 pub use catervas_core::contract::{TaskId, ValidationError};
 
+/// What `task.created`, `chat_message.posted` and `message.posted` record of the documents the
+/// owner attached (ADR 0073): the paths, or none when there are none; at most five.
+pub use crate::generated::event::AttachmentPaths;
 /// The body of `document.attached`, the owner attaching a file.
 pub use crate::generated::event::DocumentAttachedBody;
 pub use crate::generated::event::{
@@ -54,6 +57,28 @@ pub use crate::generated::event::{
     BlockerWire, GateId as GateWire, RejectionWire, TaskStatus as TaskStatusWire,
     TransitionActor as TransitionActorWire,
 };
+
+/// `paths` as the `attachments` of an event body: `None` for none, so that nothing is written.
+///
+/// # Errors
+///
+/// A sentence when a path is no document's path.
+pub fn attachment_paths(paths: &[String]) -> Result<Option<AttachmentPaths>, String> {
+    use crate::generated::event::FolderDocPath;
+
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let parsed = paths
+        .iter()
+        .map(|path| {
+            FolderDocPath::try_from(path.as_str())
+                .map_err(|_| format!("{path:?} is no document's path"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(AttachmentPaths::from(parsed)))
+}
+
 /// The bodies of the four `data_pipeline.` kinds, with the vocabularies they repeat.
 pub use crate::generated::event::{
     DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,

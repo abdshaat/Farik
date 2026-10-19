@@ -2869,4 +2869,208 @@ mod tests {
         );
         refused("scan.pdf", "product", scan, "no_text", "/data_base64");
     }
+
+    /// The body of every event of `kind`, as the wire shows it.
+    fn bodies(harness: &Harness, kind: EventKind) -> Vec<Value> {
+        harness
+            .project
+            .events(&[kind])
+            .iter()
+            .map(|event| catervas_protocol::event::event_to_value(event)["body"].clone())
+            .collect()
+    }
+
+    /// What `harness`'s orchestrator answers for `command`.
+    fn commanded(
+        harness: &Harness,
+        command: Command,
+    ) -> Result<crate::orchestrator::CommandReport, crate::orchestrator::CommandError> {
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime")
+            .block_on(orchestrator.handle(command))
+    }
+
+    fn chat(text: &str, as_task: bool, attachments: &[&str]) -> Command {
+        Command::ChatMessagePost {
+            agent_id: "dev-a".to_string(),
+            text: text.to_string(),
+            as_task,
+            attachments: attachments.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    fn post(text: &str, attachments: &[&str]) -> Command {
+        Command::MessagePost {
+            text: text.to_string(),
+            attachments: attachments.iter().map(ToString::to_string).collect(),
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_request_a_chat_message_and_a_post_record_their_attachments() {
+        let harness = project("files-attachments", "manual");
+        put_documents(&harness);
+        attach(
+            &harness,
+            "Trip spec.md",
+            "product",
+            b"# Trips\n\nPlan a trip.\n",
+        );
+        let named = json!([TRIP_SPEC]);
+        let before = |kind| bodies(&harness, kind).len();
+        let (tasks, chats, posts) = (
+            before(EventKind::TaskCreated),
+            before(EventKind::ChatMessagePosted),
+            before(EventKind::MessagePosted),
+        );
+
+        let filed = rpc(
+            &harness.daemon,
+            "request.file",
+            &json!({
+                "text": "Let people share a trip with their friends by a link.",
+                "attachments": [TRIP_SPEC],
+            }),
+        );
+        conforms(&filed["result"], "requestFileResult", &filed);
+        commanded(
+            &harness,
+            chat("Please read the trip spec.", false, &[TRIP_SPEC]),
+        )
+        .expect("the chat message is sent");
+        commanded(
+            &harness,
+            chat("Build what the trip spec describes.", true, &[TRIP_SPEC]),
+        )
+        .expect("the task is given");
+        commanded(
+            &harness,
+            post("@dev-a the trip spec is attached", &[TRIP_SPEC]),
+        )
+        .expect("the post is made");
+        commanded(&harness, post("No documents this time", &[])).expect("the post is made");
+
+        let created = bodies(&harness, EventKind::TaskCreated).split_off(tasks);
+        assert_eq!(created.len(), 2, "{created:?}");
+        assert!(created.iter().all(|body| body["attachments"] == named));
+        let chatted = bodies(&harness, EventKind::ChatMessagePosted).split_off(chats);
+        assert_eq!(chatted.len(), 2, "{chatted:?}");
+        assert!(chatted.iter().all(|body| body["attachments"] == named));
+        let posted = bodies(&harness, EventKind::MessagePosted).split_off(posts);
+        assert_eq!(posted.len(), 2, "{posted:?}");
+        assert_eq!(posted[0]["attachments"], named);
+        assert!(posted[1].get("attachments").is_none(), "{}", posted[1]);
+
+        // A solo team's request is its one agent's chat message and task (ADR 0071).
+        let solo = Harness::new("files-attachments-solo", |wire| {
+            wire["agents"] = json!([catervas_core::team::fixtures::an_agent_wire(
+                "pm",
+                "product_manager"
+            )]);
+            wire["policy"]["solo"] = json!(true);
+        });
+        attach(
+            &solo,
+            "Trip spec.md",
+            "product",
+            b"# Trips\n\nPlan a trip.\n",
+        );
+        let filed = rpc(
+            &solo.daemon,
+            "request.file",
+            &json!({
+                "text": "Let people share a trip with their friends by a link.",
+                "attachments": [TRIP_SPEC],
+            }),
+        );
+        conforms(&filed["result"], "requestFileResult", &filed);
+        for kind in [EventKind::ChatMessagePosted, EventKind::TaskCreated] {
+            let seen = bodies(&solo, kind);
+            assert_eq!(seen.len(), 1, "{seen:?}");
+            assert_eq!(seen[0]["attachments"], named, "{kind:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_attachments_never_attached() {
+        use crate::orchestrator::CommandError;
+
+        let harness = project("files-attachments-refused", "manual");
+        put_documents(&harness);
+        attach(
+            &harness,
+            "Trip spec.md",
+            "product",
+            b"# Trips\n\nPlan a trip.\n",
+        );
+        let text = "Let people share a trip with their friends by a link.";
+        let six = [TRIP_SPEC; 6];
+        let never = [
+            "docs/catervas/product/spec.md",
+            "docs/catervas/product/attached/never.md",
+        ];
+        let kinds = [
+            EventKind::TaskCreated,
+            EventKind::ChatMessagePosted,
+            EventKind::MessagePosted,
+        ];
+        let held: Vec<usize> = kinds
+            .iter()
+            .map(|kind| harness.project.events(&[*kind]).len())
+            .collect();
+
+        for path in never {
+            let reply = rpc(
+                &harness.daemon,
+                "request.file",
+                &json!({ "text": text, "attachments": [TRIP_SPEC, path] }),
+            );
+            assert_eq!(
+                refusal(&reply),
+                ("not_attached".to_string(), "/attachments/1".to_string()),
+                "{reply}"
+            );
+            assert!(!said(&reply).is_empty(), "{reply}");
+        }
+        let reply = rpc(
+            &harness.daemon,
+            "request.file",
+            &json!({ "text": text, "attachments": six }),
+        );
+        assert_eq!(
+            refusal(&reply),
+            (
+                "too_many_attachments".to_string(),
+                "/attachments".to_string()
+            ),
+            "{reply}"
+        );
+        assert!(!said(&reply).is_empty(), "{reply}");
+
+        // A command's refusal is `<code>: <sentence>`, and the code is the same.
+        let refused = |command: Command, code: &str| match commanded(&harness, command) {
+            Err(CommandError::Refused { reason }) => {
+                assert!(reason.starts_with(&format!("{code}: ")), "{reason}");
+            }
+            other => panic!("refused {code}, not {other:?}"),
+        };
+        for path in never {
+            refused(chat("Please read it.", false, &[path]), "not_attached");
+            refused(
+                chat("Build what it describes.", true, &[path]),
+                "not_attached",
+            );
+            refused(post("Please read it", &[path]), "not_attached");
+        }
+        refused(chat("Please read it.", false, &six), "too_many_attachments");
+        refused(post("Please read it", &six), "too_many_attachments");
+        for (kind, before) in kinds.iter().zip(held) {
+            assert_eq!(harness.project.events(&[*kind]).len(), before, "{kind:?}");
+        }
+    }
 }

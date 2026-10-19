@@ -268,6 +268,7 @@ pub(super) fn create_task(call: &Call<'_>, input: CreateTaskInput) -> Result<Val
         deps.clock.now(),
         &call.ids(None),
         None,
+        &[],
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => Refusal::RequestRefused { reason }.into(),

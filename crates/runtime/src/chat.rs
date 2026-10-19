@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU64;
 
 use catervas_core::contract::Role;
+use catervas_core::folders::is_attached_path;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, AgentStatus, Team};
 use chrono::{DateTime, Utc};
@@ -12,7 +13,7 @@ use chrono::{DateTime, Utc};
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
     CatervasEvent, ChatMessagePostedBody, EventBody, EventIds, EventKind,
-    SessionStartedBodyPurpose, new_event,
+    SessionStartedBodyPurpose, attachment_paths, new_event,
 };
 use catervas_store::product_plan::new_project;
 use catervas_store::requests::{placeholder_budget_usd, request_from_text};
@@ -79,6 +80,77 @@ pub struct NewChatMessage {
     pub session_id: Option<String>,
     /// The owner sent the message as a task for the chat's agent (ADR 0063).
     pub as_task: bool,
+    /// The documents the owner attached (ADR 0073), checked with [`check_attachments`] by whoever
+    /// takes the owner's words; empty for an agent's reply.
+    pub attachments: Vec<String>,
+}
+
+/// The most documents one message, request or post names (ADR 0073).
+pub const ATTACHMENTS_MAX: usize = 5;
+
+/// Why a list of attachments is refused: a code, the JSON pointer of the field at fault, and the
+/// sentence the owner is shown.
+#[derive(Debug, PartialEq, Eq)]
+pub struct AttachmentRefusal {
+    /// `too_many_attachments` or `not_attached`.
+    pub code: &'static str,
+    /// `/attachments`, or `/attachments/<i>`.
+    pub pointer: String,
+    /// What to tell the owner.
+    pub message: &'static str,
+}
+
+impl AttachmentRefusal {
+    /// The refusal as a command's reason, `<code>: <sentence>`, as the tools' refusals are.
+    #[must_use]
+    pub fn reason(&self) -> String {
+        format!("{}: {}", self.code, self.message)
+    }
+}
+
+/// Holds `attachments` to what a message, request or post may name (ADR 0073): at most five, each
+/// an attached document's path that a `document.attached` recorded. Every surface that takes the
+/// owner's attachments asks this before it records anything.
+///
+/// # Errors
+///
+/// `Ok(Err(..))` for a refusal: `too_many_attachments` at `/attachments`, else `not_attached` at
+/// the first path at fault, `/attachments/<i>`; `Err` when the log cannot be read.
+pub fn check_attachments(
+    log: &EventLog,
+    attachments: &[String],
+) -> Result<Result<(), AttachmentRefusal>, StoreError> {
+    if attachments.len() > ATTACHMENTS_MAX {
+        return Ok(Err(AttachmentRefusal {
+            code: "too_many_attachments",
+            pointer: "/attachments".to_string(),
+            message: "A message holds up to five documents.",
+        }));
+    }
+    if attachments.is_empty() {
+        return Ok(Ok(()));
+    }
+    let attached: BTreeSet<String> = log
+        .read(&EventQuery {
+            kinds: vec![EventKind::DocumentAttached],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::DocumentAttached(body) => Some(body.path.to_string()),
+            _ => None,
+        })
+        .collect();
+    Ok(attachments
+        .iter()
+        .position(|path| !(is_attached_path(path) && attached.contains(path)))
+        .map_or(Ok(()), |at| {
+            Err(AttachmentRefusal {
+                code: "not_attached",
+                pointer: format!("/attachments/{at}"),
+                message: "Only a document you attached can go with a message.",
+            })
+        }))
 }
 
 /// Why a chat message was not recorded.
@@ -213,6 +285,8 @@ pub fn post_chat(
             works_when: heard.works_when,
         }),
         as_task: message.as_task.then_some(true),
+        attachments: attachment_paths(&message.attachments)
+            .map_err(|reason| refused(format!("attachments_invalid: {reason}")))?,
     });
     let event = new_event(body, clock.now(), ids)
         .map_err(|error| refused(format!("the chat message cannot be recorded: {error:?}")))?;
@@ -593,6 +667,7 @@ mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the message is recorded")
@@ -687,6 +762,7 @@ mod tests {
                     heard: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded");
@@ -747,6 +823,7 @@ mod tests {
                 }),
                 session_id: Some("session-1".to_string()),
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the reply is recorded");
@@ -786,6 +863,7 @@ mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the user's message is recorded");
@@ -805,6 +883,7 @@ mod tests {
                 }),
                 session_id: Some("session-1".to_string()),
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the reply is recorded");

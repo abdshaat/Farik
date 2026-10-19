@@ -814,6 +814,7 @@ mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the chat message is recorded")
@@ -858,6 +859,7 @@ mod tests {
                 }),
                 session_id: Some("session-1".to_string()),
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the reply is recorded");
@@ -965,6 +967,7 @@ mod tests {
                 }),
                 session_id: Some("session-1".to_string()),
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the reply is recorded");
@@ -1052,6 +1055,7 @@ mod tests {
                     }),
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("the reply is recorded")

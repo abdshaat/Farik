@@ -2035,6 +2035,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("the chat message is recorded");

@@ -228,8 +228,14 @@
       "additionalProperties": false,
       "required": ["text"],
       "properties": {
-        "text": { "type": "string" }
+        "text": { "type": "string" },
+        "attachments": { "$ref": "#/$defs/attachments" }
       }
+    },
+    "attachments": {
+      "description": "The documents the owner attached to the message (docs/SPEC.md 5.17, ADR 0073): up to five attached documents that a document.attached recorded. The handler, not the schema, refuses more than five (too_many_attachments) and a path that was never attached (not_attached), so that the owner is told in words; nothing is recorded then.",
+      "type": "array",
+      "items": { "type": "string" }
     },
     "chatMessagePostBody": {
       "title": "Chat Message Post Body",
@@ -240,7 +246,8 @@
       "properties": {
         "agent_id": { "type": "string" },
         "text": { "type": "string" },
-        "as_task": { "type": "boolean", "description": "Send the message as a task for the agent (ADR 0063): the same command files a request given to that agent, which writes its contract and is assigned it. Written only when true." }
+        "as_task": { "type": "boolean", "description": "Send the message as a task for the agent (ADR 0063): the same command files a request given to that agent, which writes its contract and is assigned it. Written only when true." },
+        "attachments": { "$ref": "#/$defs/attachments" }
       }
     },
     "connectorConnectBody": {
