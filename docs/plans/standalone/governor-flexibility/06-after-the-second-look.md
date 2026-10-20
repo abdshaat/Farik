@@ -37,4 +37,4 @@ Files: `crates/runtime/src/tools/contracts.rs`, `crates/runtime/src/tools/work.r
 ### Task 29: the spec and the ADR say it
 
 Files: `docs/SPEC.md` (5.2 row, 5.11, 5.16 or wherever the epic session's tools are stated, the 0.134 line)
-- [ ] `docs(spec): a task with no branch opens, the owner sends a ready task back, the PM changes an epic's waiting tasks`
+- [x] `docs(spec): a task with no branch opens, the owner sends a ready task back, the PM changes an epic's waiting tasks`
