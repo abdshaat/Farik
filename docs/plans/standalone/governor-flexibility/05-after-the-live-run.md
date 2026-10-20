@@ -19,7 +19,7 @@ The build from plans 1 to 4 ran on the founder's project on 2026-10-20 from 06:0
 
 Files: `apps/web/src/pages/HelpNeeded.tsx`, `HelpNeeded.test.tsx`
 - `gives_room_without_a_note` — with an escalation offering "Give it more room", the button is enabled with an empty note and sends `extra_room: true`; "Answer and carry on" on a block stays disabled until a note is typed.
-- [ ] `fix(web): giving room needs no note`
+- [x] `fix(web): giving room needs no note`
 
 ### Task 22: the help page names who asked, everywhere
 

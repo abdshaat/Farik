@@ -58,13 +58,10 @@ test("an escalation is answered from Today in one action", async ({ page }) => {
 		for (const right of rights) expect(right).toBeLessThanOrEqual(360);
 		await wide(page);
 
-		// An answer must say something (ADR 0079): the button waits for a note.
+		// Giving room needs no note (ADR 0079): only an answer does.
 		await expect(
 			page.getByRole("button", { name: "Give it more room" }),
-		).toBeDisabled();
-		await page
-			.getByLabel("Add a note for Theo")
-			.fill("Take the room, and finish the file.");
+		).toBeEnabled();
 		await page.getByRole("button", { name: "Give it more room" }).click();
 		await expect(page).toHaveURL(`${new URL(serve.url).origin}/`);
 		await expect(

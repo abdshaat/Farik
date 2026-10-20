@@ -98,8 +98,11 @@ export function HelpNeeded() {
 			?.displayName ?? name;
 	const noteless = note.trim() === "";
 	const cancels = (c: EscalationChoice) => c.body?.body.to === "cancelled";
+	// Only a choice that answers needs words; room, tries and cancelling need none (ADR 0079).
+	const gives = (c: EscalationChoice) =>
+		c.body?.body.extraRoom === true || c.body?.body.extraTries !== undefined;
 	const wantsNote = (c: EscalationChoice) =>
-		c.kind === "command" && noteless && !cancels(c);
+		c.kind === "command" && noteless && !cancels(c) && !gives(c);
 
 	const resolve = async (choice: EscalationChoice) => {
 		if (!client || !choice.body) return;
@@ -111,7 +114,12 @@ export function HelpNeeded() {
 				command,
 				body:
 					command === "escalation_resolve"
-						? { ...body, message: note.trim() || t("helpCancelled") }
+						? {
+								...body,
+								message:
+									note.trim() ||
+									(cancels(choice) ? t("helpCancelled") : choice.label),
+							}
 						: body,
 			} as never);
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));

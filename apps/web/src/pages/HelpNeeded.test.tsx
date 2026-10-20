@@ -147,7 +147,7 @@ describe("help page", () => {
 		const button = (name: string) =>
 			screen.getByRole("button", { name }) as HTMLButtonElement;
 		await screen.findByLabelText("Add a note for Theo");
-		expect(button("Give 2 more tries").disabled).toBe(true);
+		expect(button("Give 2 more tries").disabled).toBe(false);
 		expect(button("Ask Mira to change the plan").disabled).toBe(true);
 		expect(button("Cancel the task").disabled).toBe(false);
 		expect(
@@ -163,6 +163,51 @@ describe("help page", () => {
 			((await sentCommand(s)).params as { command: { body: object } }).command
 				.body,
 		).toMatchObject({ message: "The file is on main now." });
+	});
+
+	it("gives_room_without_a_note", async () => {
+		const { s } = await openedGate(
+			"/tasks/CTV-1/help",
+			HELP,
+			ESCALATED,
+			undefined,
+			{
+				"escalation.choices": {
+					choices: [
+						{
+							label: "Give it more room",
+							next: "Theo carries on.",
+							suggested: true,
+							kind: "command",
+							body: {
+								command: "escalation_resolve",
+								body: { task_id: "CTV-1", to: "in_progress", extra_room: true },
+							},
+						},
+						{
+							label: "Answer and carry on",
+							next: "Theo reads your note.",
+							suggested: false,
+							kind: "command",
+							body: {
+								command: "escalation_resolve",
+								body: { task_id: "CTV-1", to: "in_progress" },
+							},
+						},
+					],
+				},
+			},
+		);
+		const button = (name: string) =>
+			screen.getByRole("button", { name }) as HTMLButtonElement;
+		await screen.findByLabelText("Add a note for Theo");
+		expect(button("Answer and carry on").disabled).toBe(true);
+		expect(button("Give it more room").disabled).toBe(false);
+		fireEvent.click(button("Give it more room"));
+		expect(
+			((await sentCommand(s)).params as { command: { body: object } }).command
+				.body,
+		).toMatchObject({ extra_room: true, to: "in_progress" });
 	});
 
 	it("names_the_reviewer_who_raised_the_block", async () => {
