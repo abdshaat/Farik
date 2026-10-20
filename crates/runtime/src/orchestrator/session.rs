@@ -2547,17 +2547,23 @@ mod tests {
         use crate::preview::PreviewError;
         use crate::preview::fixtures::FakePreviews;
 
-        for (name, committed) in [
-            ("preview-merge-only", false),
-            ("preview-merge-and-own", true),
+        // The third branch began from a start ref older than main, so main's own commits come in
+        // with the merge and are still not the task's.
+        for (name, committed, from_start_ref) in [
+            ("preview-merge-only", false, false),
+            ("preview-merge-and-own", true, false),
+            ("preview-merge-from-start-ref", false, true),
         ] {
             let mut harness = Harness::new(name, browsing);
             harness.previews = Arc::new(FakePreviews::failing(PreviewError::Prepare {
                 tail: "npm error The `npm ci` command needs a package-lock.json".to_string(),
             }));
             harness.in_progress("CTV-1", "iris", "ada");
-            // Main moves on, and the task's branch is brought up to date with it by a merge.
             let repo = harness.project.repo.path.clone();
+            if from_start_ref {
+                git_in(&repo, &["update-ref", "refs/catervas/start/CTV-1", "main"]);
+            }
+            // Main moves on, and the task's branch is brought up to date with it by a merge.
             std::fs::write(repo.join("from_main.txt"), "main moved\n").expect("written");
             git_in(&repo, &["add", "-A"]);
             git_in(&repo, &["commit", "-m", "main gains a file"]);
