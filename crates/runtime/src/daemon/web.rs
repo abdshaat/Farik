@@ -361,6 +361,19 @@ pub(super) async fn connect(
     }
 }
 
+/// `POST /connect/code`, from the token holder: a new one-time code for `/connect`, answered
+/// `{ "code" }`, so that `catervas open` can print a link for a browser that has none. A daemon
+/// without the browser routes answers 404.
+pub(super) async fn connect_code(State(state): State<Arc<DaemonState>>) -> Response {
+    let Some(web) = state.web() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match web.codes.issue() {
+        Ok(code) => Json(serde_json::json!({ "code": code })).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
 /// Every session secret a request's `Cookie` header carries: a browser can send the name twice,
 /// a stale cookie beside the live one, and either may be the one that opens. One cookie needs no
 /// library: the header is `name=value` pairs split by `;`.
@@ -1318,6 +1331,33 @@ pub(super) mod tests {
         let now = daemon.state.deps().expect("a project").clock.now();
         let web = daemon.state.web().expect("the browser routes are on");
         assert!(web.sessions.verify(secret, now), "{cookie}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn issues_a_new_start_link_to_the_token_holder() {
+        let (daemon, _first) = served("web-new-code");
+        let ask = |token: Option<&str>| {
+            let mut request = Request::post("/connect/code");
+            if let Some(token) = token {
+                request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+            }
+            request.body(Body::empty()).expect("a request is built")
+        };
+
+        let refused = send(&daemon.state, ask(None)).await;
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+
+        let answer = send(&daemon.state, ask(Some(TOKEN))).await;
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body: Value = serde_json::from_str(&body_text(answer).await).expect("JSON");
+        let code = body["code"].as_str().expect("a code").to_string();
+        assert!(is_hex_64(&code), "{code}");
+
+        let first = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(first.status(), StatusCode::NO_CONTENT);
+        let again = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(again.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -60,7 +60,7 @@ Tests:
 - `issues_a_new_start_link_to_the_token_holder` (daemon.rs) — `POST /connect/code` with the token answers 200 and a 64-hex code that `/connect` then redeems once; without the token, 401.
 - `says_how_to_start_when_nothing_runs` (cli tests) — `catervas open` in a project with no `daemon.json` exits 1 with "Catervas is not running here".
 
-- [ ] `feat(cli): catervas open prints a new start link from the running driver`
+- [x] `feat(cli): catervas open prints a new start link from the running driver`
 
 ### Task 13: the board says what a waiting task waits on
 
