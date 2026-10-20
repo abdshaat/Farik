@@ -36,7 +36,7 @@ keyring = "=4.2.0"
 keyring-core = "=1.0.0"
 # Already locked through rmcp; direct for Catervas's own PKCE sign-in: the verifier, its S256 challenge and `state`.
 oauth2 = { version = "=5.0.0", default-features = false }
-# Attached documents (ADR 0073): a PDF's text, and a Word file as a zip of XML. Used by catervas-runtime alone; zip and quick-xml are already locked.
+# Attached documents (ADR 0076): a PDF's text, and a Word file as a zip of XML. Used by catervas-runtime alone; zip and quick-xml are already locked.
 pdf-extract = "=0.12.1"
 quick-xml = "=0.41.0"
 regress = "=0.12.0"

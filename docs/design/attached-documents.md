@@ -1,6 +1,6 @@
 # Attached documents: the owner gives the team a spec, a description or an architecture
 
-Status: decided by the founder on 2026-10-19, in conversation (the four answers below), and by the planner (Opus 5.5) for the mechanism; ADR 0073; standalone plan `attached-documents`.
+Status: decided by the founder on 2026-10-19, in conversation (the four answers below), and by the planner (Opus 5.5) for the mechanism; ADR 0076; standalone plan `attached-documents`.
 
 ## The brief
 

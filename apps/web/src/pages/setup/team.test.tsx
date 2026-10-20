@@ -629,6 +629,25 @@ describe("team setup", () => {
 		);
 	});
 
+	it("starts_with_the_documents_kept_on_this_computer", async () => {
+		const { socket } = await renderApp("/setup/finish");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", proposed());
+		await answerStatus(s, false, 1, { setup_pending: true });
+		await screen.findByRole("heading", { name: en.finishTitle });
+		fireEvent.click(screen.getByRole("button", { name: en.advancedSwitch }));
+		const keep = await screen.findByRole("switch", { name: en.documentsLocal });
+		expect(keep.getAttribute("aria-checked")).toBe("false");
+		fireEvent.click(keep);
+		expect(keep.getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(screen.getByRole("button", { name: en.startTeam }));
+		const frame = await sent(s, "team.start");
+		expect(
+			(frame.params as { team: { policy: Record<string, unknown> } }).team
+				.policy,
+		).toMatchObject({ documents_local: true });
+	});
+
 	it("shows_an_example_of_the_limit", async () => {
 		const { socket } = await renderApp("/setup/spending");
 		const s = socket as FakeSocket;
@@ -706,7 +725,7 @@ describe("team setup", () => {
 	});
 
 	it("setup_and_rules_offer_no_integration_choice", async () => {
-		// Catervas never merges (ADR 0061): finished work always opens a pull request.
+		// Finished work always opens a pull request (ADR 0061); merging it is the switch's (ADR 0073).
 		const first = await renderApp("/setup/finish");
 		const s = first.socket as FakeSocket;
 		await answerQuery(s, "team.propose", proposed());
@@ -732,7 +751,15 @@ describe("team setup", () => {
 		});
 		expect(within(finish).getByText(en.finishLead)).toBeTruthy();
 		expect(within(finish).queryByRole("radio")).toBeNull();
-		expect(within(finish).queryByRole("button")).toBeNull();
+		expect(
+			within(finish).queryByRole("button", { name: en.putBack }),
+		).toBeNull();
+		// The one control is the switch that lets Catervas merge (ADR 0073), off until confirmed.
+		expect(
+			within(finish)
+				.getByRole("switch", { name: en.mergingSwitch })
+				.getAttribute("aria-checked"),
+		).toBe("false");
 	});
 
 	it("edits_the_checks", async () => {

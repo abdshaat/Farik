@@ -2,8 +2,8 @@
 
 Status: done
 Branch: `feat/attach-documents` (its own pull request to `main`)
-Design: `docs/design/attached-documents.md`; ADR 0073
-Spec: `docs/SPEC.md` 4.2, 4.3, 4.5, 5.9, 5.17, 8.5, F7 (revision 0.128)
+Design: `docs/design/attached-documents.md`; ADR 0076
+Spec: `docs/SPEC.md` 4.2, 4.3, 4.5, 5.9, 5.17, 8.5, F7 (revision 0.131)
 Depends on: `origin/main` at `ca21251`
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-19, against the three readiness rules (ADR 0065)
 
@@ -13,7 +13,7 @@ The founder's brief (design, "The brief"). When done: the owner attaches `.md`, 
 
 ## Decisions
 
-- The upload, conversion, place, pairing, message and setup: ADR 0073 decisions 1 to 6, and the design's rules (slug, kinds, the three formats, the limits, the refusal codes `unsupported_type`, `no_text`, `unreadable`, `too_large`, `no_folder_owner`).
+- The upload, conversion, place, pairing, message and setup: ADR 0076 decisions 1 to 6, and the design's rules (slug, kinds, the three formats, the limits, the refusal codes `unsupported_type`, `no_text`, `unreadable`, `too_large`, `no_folder_owner`).
 - Dependencies, exact pins in `[workspace.dependencies]`: `pdf-extract = "=0.12.1"`, `zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }`, `quick-xml = "=0.41.0"` (the last two the versions `Cargo.lock` holds). Used by `catervas-runtime` alone.
 - A PDF read that panics (pdf-extract can on malformed fonts) is caught with `std::panic::catch_unwind` and refused `unreadable`. Rejected: a child process (a second binary to ship).
 - Conversion is in `crates/runtime/src/attach.rs`, not core: it parses bytes with third-party crates; core keeps the path rules, which are pure.
@@ -60,7 +60,7 @@ apps/web/src/pages/FileDocument.tsx               modifies: the attached line
 apps/web/src/pages/files.ts                       modifies: FileRead.attached
 apps/web/src/pages/setup/SetupProject.tsx, SetupFinish.tsx      modifies
 apps/web/src/strings/en.ts                        modifies: the strings
-docs/SPEC.md                                      modifies: revision 0.128
+docs/SPEC.md                                      modifies: revision 0.131
 ```
 
 ## Interfaces
@@ -165,9 +165,9 @@ Files: modified `SetupProject.tsx`, `SetupFinish.tsx`, `setup.test.tsx`.
 
 ### Task 8: spec
 
-Records 0.128: 4.2 (the request box's attach), 4.3 (the chat's), 4.5 (the attached line on Files), 5.9 (the channel's), 5.17 (attached pairs, `document.attach`, its refusals, the conversion, the prompt section), 8.5 (`document.attached`, the `attachments` fields), F7.
+Records 0.131: 4.2 (the request box's attach), 4.3 (the chat's), 4.5 (the attached line on Files), 5.9 (the channel's), 5.17 (attached pairs, `document.attach`, its refusals, the conversion, the prompt section), 8.5 (`document.attached`, the `attachments` fields), F7.
 
-- [x] `docs(spec): record documents the owner attaches (0.128)`
+- [x] `docs(spec): record documents the owner attaches (0.131)`
 
 ## Verification
 

@@ -68,7 +68,7 @@ pub struct NewMessage {
     pub in_reply_to: Option<u64>,
     /// The session it was said from, when it was said from one.
     pub session_id: Option<String>,
-    /// The documents the owner attached (ADR 0073), checked with
+    /// The documents the owner attached (ADR 0076), checked with
     /// [`crate::chat::check_attachments`] by whoever takes the owner's words; empty otherwise.
     pub attachments: Vec<String>,
 }

@@ -4,7 +4,8 @@ Status: approved by the founder on 2026-10-09, in conversation (ADR 0051); its m
 
 Amended on 2026-10-12 (ADR 0058): documents may now be HTML as well as Markdown; see `docs/design/html-documents.md`.
 
-Amended on 2026-10-19 (ADR 0073): documents the owner attaches are pairs too, under `attached/` in the product and architecture folders; see `docs/design/attached-documents.md`.
+Amended on 2026-10-19 (ADR 0074): the owner may keep the documents on this computer, out of git, so that "every document is in git" and "a save commits at once" hold only for a team that does not; see `docs/design/local-documents.md`.
+Amended on 2026-10-19 (ADR 0076): documents the owner attaches are pairs too, under `attached/` in the product and architecture folders; see `docs/design/attached-documents.md`.
 
 ## Why
 

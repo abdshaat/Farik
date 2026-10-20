@@ -59,7 +59,13 @@
         "folder_change_integrate",
         "folder_doc_decide",
         "product_plan_draft",
-        "catervafication_start"
+        "catervafication_start",
+        "goal_set",
+        "goal_edit",
+        "goal_pause",
+        "goal_resume",
+        "goal_end",
+        "goal_report"
       ]
     },
     "commandBodyWire": {
@@ -102,6 +108,11 @@
         { "$ref": "#/$defs/purchaseOrderSendBody" },
         { "$ref": "#/$defs/folderChangeIntegrateBody" },
         { "$ref": "#/$defs/folderDocDecideBody" },
+        { "$ref": "#/$defs/goalSetBody" },
+        { "$ref": "#/$defs/goalEditBody" },
+        { "$ref": "#/$defs/goalIdBody" },
+        { "$ref": "#/$defs/goalEndBody" },
+        { "$ref": "#/$defs/goalReportBody" },
         { "$ref": "#/$defs/emptyBody" }
       ]
     },
@@ -233,7 +244,7 @@
       }
     },
     "attachments": {
-      "description": "The documents the owner attached to the message (docs/SPEC.md 5.17, ADR 0073): up to five attached documents that a document.attached recorded. The handler, not the schema, refuses more than five (too_many_attachments) and a path that was never attached (not_attached), so that the owner is told in words; nothing is recorded then.",
+      "description": "The documents the owner attached to the message (docs/SPEC.md 5.17, ADR 0076): up to five attached documents that a document.attached recorded. The handler, not the schema, refuses more than five (too_many_attachments) and a path that was never attached (not_attached), so that the owner is told in words; nothing is recorded then.",
       "type": "array",
       "items": { "type": "string" }
     },
@@ -475,6 +486,67 @@
         "status": { "type": "string", "maxLength": 32 },
         "note": { "type": "string", "maxLength": 600 },
         "expected_on": { "type": "string", "format": "date" }
+      }
+    },
+    "goalId": {
+      "type": "string",
+      "pattern": "^goal-[1-9][0-9]*$"
+    },
+    "goalSetBody": {
+      "title": "Goal Set Body",
+      "description": "The owner sets the team's goal (docs/SPEC.md 5.18; ADR 0075): words in 1 to 300 characters; target (a number above 0) and unit (1 to 40 characters) come together or not at all; server is the connector an active agent has connected and reads the number from, and only a goal with a target has one. goal.set is appended with the next id, no agent and no session. Refused, in this order, goal_active, goal_needs_daily_budget, goal_target_unit, goal_server_without_target and goal_server_not_connected.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["words"],
+      "properties": {
+        "words": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "target": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "goalEditBody": {
+      "title": "Goal Edit Body",
+      "description": "The owner changes the standing goal's words, target, unit or server: goal.set is appended again with the same goal, and its readings and rounds are kept. Refused goal_unknown for a goal that does not stand, then as goal_set but goal_active.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "words"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "words": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "target": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "goalIdBody": {
+      "title": "Goal Id Body",
+      "description": "The body of goal_pause and goal_resume. goal_pause refuses goal_unknown and goal_already_paused. goal_resume also answers Keep going on a goal that is not paused: the owner's word, which clears a stall; it refuses goal_unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": { "goal": { "$ref": "#/$defs/goalId" } }
+    },
+    "goalEndBody": {
+      "title": "Goal End Body",
+      "description": "The owner ends the standing goal as reached or dropped. Only this marks a goal reached. Refused goal_unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "outcome"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "outcome": { "type": "string", "enum": ["reached", "dropped"] }
+      }
+    },
+    "goalReportBody": {
+      "title": "Goal Report Body",
+      "description": "The owner tells the team the goal's number: goal.measured with source owner, no agent. Refused goal_unknown, goal_not_measured for a goal with no target, and goal_value for a number that is below 0 or not finite.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "value"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "value": { "type": "number" }
       }
     },
     "renewalDismissBody": {

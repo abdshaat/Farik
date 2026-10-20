@@ -353,6 +353,19 @@ export const en = {
 	finishLead: "Finished work opens a pull request on GitHub for you to merge.",
 	finishLeadLocal:
 		"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
+	mergingSwitch: "Let Catervas merge finished work",
+	mergingSwitchNote:
+		"Catervas merges a pull request once its checks pass, or once its own checks pass when your repository has none.\nIt uses a merge method your repository allows, and never skips a rule of the branch.\nIt asks only on this computer. Anyone else who clones the project turns it on for themselves.",
+	mergingOffline: "Needs your project on GitHub.",
+	mergingWarnTitle: "Let Catervas merge?",
+	mergingWarn:
+		"Catervas will merge finished work into {branch} by itself.\nIt merges only when GitHub's checks pass. If your repository has no automatic checks, Catervas merges once its own checks pass.\nYou won't see the work before it lands.",
+	mergingWarnSolo: "{name} works alone, so no other agent reviews its code.",
+	mergingWarnNote:
+		"A failing check, a needed review or a conflict stops the merge and tells you on Today.\nCatervas never uses an administrator's override.\nTurn it off here at any time.",
+	mergingTurnOn: "Turn on",
+	mergingMainBranch: "your main branch",
+	mergingCancel: "Cancel",
 	finishSafe:
 		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",
@@ -914,6 +927,35 @@ export const en = {
 	documentsRewriteNote:
 		"Each role rewrites its own documents as HTML.\nMarketing plans stay as they were approved.",
 	documentsRewriteStarted: "Your team will rewrite its documents as HTML.",
+	documentsLocal: "Keep documents on this computer",
+	documentsLocalNote:
+		"Your team's documents stay in docs/catervas in this folder.\nThey are not added to your repository or pushed to GitHub.\nNo history of changes is kept, and pull requests don't show them.",
+	keepHereTitle: "Keep documents on this computer?",
+	keepHereLines:
+		"Documents already in your repository are taken out in one pull request.\nThe files stay in your folder.\nUntil you merge it, documents can't be changed.",
+	keepHereYes: "Keep them here",
+	keepHereCancel: "Cancel",
+	putBackTitle: "Put documents back in your repository?",
+	putBackLines:
+		"Your documents go into one pull request.\nUntil you merge it, documents can't be changed.",
+	putBackYes: "Put them back",
+	putBackCancel: "Cancel",
+	documentsTakingOut:
+		"Taking your documents out of the repository. Merge the pull request to finish.",
+	documentsPuttingBack:
+		"Putting your documents back in the repository. Merge the pull request to finish.",
+	filesSaveLocal: "Saving changes the document on this computer.",
+	filesSavedLocal: "Saved.",
+	filesMoving:
+		"Documents can't be changed until you merge the pull request that moves them.",
+	refuseProjectFolder:
+		"Your documents already stay on this computer: a project folder is never pushed.",
+	refuseDocumentsSwitching:
+		"Your documents are being moved. Merge the pull request that moves them first.",
+	refuseDocumentsInFlight:
+		"Finish or merge the work that changes documents first.",
+	refuseDocumentsBusy:
+		"Some documents have changes on your computer that aren't committed. Commit or undo them first.",
 	refuseNotHtml: "Turn on Write documents as HTML first.",
 	refuseRewriteOpen: "Your team is still rewriting its documents.",
 	refuseNothingToRewrite:
@@ -2559,6 +2601,82 @@ export const en = {
 		"A first piece of work where your team reads your project, writes down what it learns, looks for bugs and starts your marketing.",
 	toldCatervafication: "Catervas filed it to document the project.",
 	toldConnectionRequested: "Asked you to connect a service.",
+	goalCardTitle: "Give your team a goal",
+	goalCardLabel: "Your team's goal",
+	goalCardLead:
+		"They keep working on it, day after day, within your daily budget.",
+	goalSet: "Set a goal",
+	goalEditTitle: "Edit the goal",
+	goalWords: "What should your team achieve?",
+	goalInfo:
+		"Your team plans work towards it, round after round.\nThey spend only within your daily budget.\nThey count progress from a connected service, or ask you.\nOnly you mark it reached.",
+	goalTarget: "A number to reach",
+	goalTargetHint: "Optional",
+	goalUnit: "What it counts",
+	goalHow: "How do we count it?",
+	goalHowOwner: "You tell us",
+	goalHowService: "From {service} ({name} reads it)",
+	goalSave: "Set goal",
+	goalSaveEdit: "Save goal",
+	goalCancel: "Cancel",
+	goalNeedsBudget:
+		"Set a daily budget first: a goal keeps your team working every day.",
+	goalProgress: "{value} of {target} {unit}",
+	goalNotCounted: "Not counted yet",
+	goalWhenYouSay: "Reached when you say so",
+	goalFromService: "From {service}, read by {name} {ago}",
+	goalFromYou: "You told us {ago}",
+	goalNobodyHas: "Nobody on the team has {service} connected.",
+	goalPlanning: "{name} is planning the next steps",
+	goalUnderWay: "{open} tasks under way, {done} done",
+	goalUnderWayOne: "1 task under way, {done} done",
+	goalWaitingOnYou: "Waiting on you ({count})",
+	goalPaused: "Paused",
+	goalNextRound: "The next steps are planned when the team is free",
+	goalPlannerOff: "{name} is {status}",
+	goalMet: "Your team counts {value} of {target} {unit}. Is the goal reached?",
+	goalStallNoProgress: "Five rounds of work and the count hasn't moved.",
+	goalStallCheckIn: "Five rounds of work since you last checked in.",
+	goalStallNothing: "{name} found nothing more to plan. Tell {name} more?",
+	goalMarkReached: "Mark reached",
+	goalUpdate: "Update the number",
+	goalMore: "More",
+	goalEdit: "Edit",
+	goalPause: "Pause",
+	goalResume: "Resume",
+	goalEnd: "End goal",
+	goalKeepGoing: "Keep going",
+	goalConfirmReached: "Mark ‘{words}’ reached?",
+	goalReachedNote: "Your team stops planning. You can set a new goal after.",
+	goalEndTitle: "End this goal?",
+	goalEndNote: "Work already planned carries on.",
+	goalTargetInvalid: "Give a number above 0.",
+	goalYesReached: "Yes, mark reached",
+	goalYesEnd: "Yes, end goal",
+	goalNotYet: "Not yet",
+	goalReportTitle: "Update the number",
+	goalReportLabel: "How many {unit} now?",
+	goalReportSave: "Save number",
+	goalLastReached: "Reached on {date}: {words}",
+	goalLastDropped: "Ended on {date}: {words}",
+	goalAgoNow: "just now",
+	goalAgoMinutes: "{count} minutes ago",
+	goalAgoMinute: "1 minute ago",
+	goalAgoHours: "{count} hours ago",
+	goalAgoHour: "1 hour ago",
+	goalAgoDays: "{count} days ago",
+	goalAgoDay: "1 day ago",
+	refuseGoalActive: "A goal stands already. End it before you set another.",
+	refuseGoalTargetUnit:
+		"Give the number and what it counts, or leave both empty.",
+	refuseGoalServerWithoutTarget:
+		"Only a goal with a number can be counted from a service.",
+	refuseGoalServerNotConnected:
+		"Nobody on the team has that service connected.",
+	refuseGoalUnknown: "That goal is not there any more.",
+	refuseGoalAlreadyPaused: "The goal is paused already.",
+	refuseGoalNotMeasured: "This goal has no number to give.",
+	refuseGoalValue: "Give a number of 0 or more.",
 	toldTidied:
 		"Catervas put back files a tool changed outside this task: {files}.",
 	attachButton: "Attach a document",

@@ -57,6 +57,7 @@
         "template.preview",
         "product_plan.state",
         "catervafication.get",
+        "goal.get",
         "skills.list",
         "skill.get",
         "allowances.list",
@@ -275,6 +276,9 @@
             },
             {
               "$ref": "#/$defs/catervaficationGetQuery"
+            },
+            {
+              "$ref": "#/$defs/goalGetQuery"
             },
             {
               "$ref": "#/$defs/costsSummaryQuery"
@@ -539,6 +543,12 @@
         },
         {
           "$ref": "#/$defs/filesRewriteRequest"
+        },
+        {
+          "$ref": "#/$defs/documentsSetLocalRequest"
+        },
+        {
+          "$ref": "#/$defs/mergingSetRequest"
         },
         {
           "$ref": "#/$defs/teamSaveRequest"
@@ -1028,9 +1038,16 @@
             }
           }
         },
+        "merging_allowed": {
+          "type": "boolean",
+          "description": "Whether Catervas may merge its pull requests once GitHub's checks pass: policy.merge_when_checks_pass is true and the newest of merge_permission.granted and merge_permission.withdrawn in this project's log is the grant (ADR 0073). A clone whose team file says true answers false until its owner confirms the warning here."
+        },
         "online": {
           "type": "boolean",
           "description": "Whether the project is online: its repository has an origin, and for a project folder every member's repository has one. Finished work then opens a pull request; otherwise it waits on this computer for a merge by hand (spec 5.6, 5.14)."
+        },
+        "documents_mode": {
+          "$ref": "#/$defs/documentsMode"
         },
         "members_present": {
           "type": "boolean",
@@ -1190,7 +1207,9 @@
         "hidden_suggestions",
         "preview_env_present",
         "members_present",
+        "documents_mode",
         "online",
+        "merging_allowed",
         "requested_connections"
       ]
     },
@@ -2366,6 +2385,20 @@
         }
       }
     },
+    "goalGetQuery": {
+      "title": "Goal Get Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "goal.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "catervaficationGetQuery": {
       "title": "Catervafication Get Query",
       "type": "object",
@@ -2596,7 +2629,7 @@
     },
     "filesSaveRequest": {
       "title": "Files Save Request",
-      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_a_document, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). Saved text the file already holds answers null for both and records nothing.",
+      "description": "The owner's edit of a document of a role's folder (docs/SPEC.md 5.17): base is the blob files.read answered for the document, so that an edit made on a version the team has since changed is refused. The text is committed on a branch of its own as a folder change, which the team's integration policy adds to the project as it does an accepted task's branch. Refused with -32005 and data.errors, each with path (a JSON pointer: /path, /text or /base), message and code, in this order: outside_folders, not_a_document, agent_twin, marketing_plan (/path), too_large (/text, over 262144 bytes), documents_switching (/path: the documents are moving, ADR 0074), then file_changed (/base: the integration branch has no file there, or its blob is not base), file_busy (/path: the project's checkout has an uncommitted change to it), is_a_link (/path) and change_waiting (/path: an earlier change of the document is not added yet). With the documents kept on this computer a save writes the file at once, checks base against the file's own bytes, and answers null for both. Saved text the file already holds answers null for both and records nothing.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -2628,7 +2661,7 @@
     },
     "documentAttachRequest": {
       "title": "Document Attach Request",
-      "description": "The owner attaches a file (docs/SPEC.md 5.17, ADR 0073): data_base64 (standard base64, at most 10 MiB decoded) is turned into Markdown and committed as the owner's own folder change at docs/catervas/<kind>/attached/<slug>.md, recorded as folder_doc.edited then document.attached, and the integrated change files the task that writes its agent version. Answers the document's path and the change. Refused with -32005 and data.errors, each with path, message and code, in this order: no_folder_owner (/kind: no active agent of the kind's role), unreadable (/data_base64: not base64), unsupported_type, no_text, unreadable and too_large (/data_base64: the file or its text), then file_busy, is_a_link and change_waiting (/name).",
+      "description": "The owner attaches a file (docs/SPEC.md 5.17, ADR 0076): data_base64 (standard base64, at most 10 MiB decoded) is turned into Markdown and committed as the owner's own folder change at docs/catervas/<kind>/attached/<slug>.md, recorded as folder_doc.edited then document.attached, and the integrated change files the task that writes its agent version. Answers the document's path and the change. Refused with -32005 and data.errors, each with path, message and code, in this order: no_folder_owner (/kind: no active agent of the kind's role), unreadable (/data_base64: not base64), unsupported_type, no_text, unreadable and too_large (/data_base64: the file or its text), then file_busy, is_a_link and change_waiting (/name).",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -2657,6 +2690,41 @@
         "path": { "type": "string", "minLength": 1 },
         "change": { "type": "integer", "minimum": 1 }
       }
+    },
+    "documentsSetLocalRequest": {
+      "title": "Documents Set Local Request",
+      "description": "The owner chooses where the team's documents are kept (docs/SPEC.md 5.17, ADR 0074): local true keeps docs/catervas/ on this computer, out of the repository, and false puts it back. Turning it on makes one folder change that takes the documents out of the integration branch and keeps the files on disk, ignored through the repository's info/exclude; turning it off makes one that adds what is on disk. Both are pull requests the owner merges, and until then no document can be changed. The same value as now answers the current mode and changes nothing. Refused with -32005 and data.errors, each with path /local, message and code, in this order: project_folder (a project folder's documents never leave the computer), documents_switching (a switch is already moving), documents_in_flight (a task that changes documents has a worktree or awaits integration; the message names the tasks), change_waiting (a folder change is neither integrated nor escalated), documents_busy (turning on: the checkout has an uncommitted change under docs/catervas) and is_a_link (docs or docs/catervas is a symbolic link).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "documents.set_local" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["local"],
+          "properties": {
+            "local": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "documentsSetLocalResult": {
+      "description": "The mode the documents are in after the call and the folder change that moves them, null when nothing moves.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "change"],
+      "properties": {
+        "mode": { "$ref": "#/$defs/documentsMode" },
+        "change": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
+    "documentsMode": {
+      "description": "Where the team's documents are kept (ADR 0074): committed, in the repository; taking_out, kept on this computer with the pull request that takes them out not merged yet; local, kept on this computer; putting_back, the pull request that puts them back not merged yet.",
+      "type": "string",
+      "enum": ["committed", "taking_out", "local", "putting_back"]
     },
     "filesAskChangeRequest": {
       "title": "Files Ask Change Request",
@@ -2703,6 +2771,36 @@
           "additionalProperties": false,
           "properties": {}
         }
+      }
+    },
+    "mergingSetRequest": {
+      "title": "Merging Set Request",
+      "description": "The owner turns on or off letting Catervas merge its pull requests once GitHub's checks pass (docs/SPEC.md 5.12, ADR 0073), on this computer. Turning on writes policy.merge_when_checks_pass and records merge_permission.granted; turning off removes the key and records merge_permission.withdrawn; a call that changes nothing records nothing. Answers mergingSetResult. Refused with -32005 and data.errors at /policy/merge_when_checks_pass: merge_warning_unconfirmed (on without confirmed true: the web app sends it only from the warning's Turn on) and merging_offline (on when the project has no origin).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "merging.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["on"],
+          "properties": {
+            "on": { "type": "boolean" },
+            "confirmed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "mergingSetResult": {
+      "description": "Whether Catervas may merge now: the team file says so and this computer's owner confirmed the warning.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["merging_allowed"],
+      "properties": {
+        "merging_allowed": { "type": "boolean" }
       }
     },
     "filesRewriteResult": {
@@ -2906,7 +3004,7 @@
       "required": ["document", "twin", "stale", "rederiving", "editable", "askable", "waiting", "attached"],
       "properties": {
         "attached": {
-          "description": "For a document the owner attached (ADR 0073), the name of the file it came from; null for any other.",
+          "description": "For a document the owner attached (ADR 0076), the name of the file it came from; null for any other.",
           "type": ["object", "null"],
           "additionalProperties": false,
           "required": ["name"],
@@ -2987,7 +3085,7 @@
             "attachments": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "The documents the owner attached (docs/SPEC.md 5.17, ADR 0073): up to five attached documents a document.attached recorded, which task.created records. Refused with -32005 and data.errors: too_many_attachments (/attachments: more than five) and not_attached (/attachments/<i>: a path no document.attached recorded)."
+              "description": "The documents the owner attached (docs/SPEC.md 5.17, ADR 0076): up to five attached documents a document.attached recorded, which task.created records. Refused with -32005 and data.errors: too_many_attachments (/attachments: more than five) and not_attached (/attachments/<i>: a path no document.attached recorded)."
             }
           },
           "required": [
@@ -3741,6 +3839,74 @@
         "total_usd",
         "limit_usd"
       ]
+    },
+    "goalGetResult": {
+      "description": "The goal that stands and the last one ended (docs/SPEC.md 5.18, ADR 0075). goal is null when none stands. status is active, paused, met (the count has reached the target and the owner decides) or stalled, with stall saying why (nothing_planned: the last round filed nothing; no_progress: rounds of work and the number has not moved) and null otherwise. reader is the agent that reads the goal's service and planner the agent that plans, each null when there is none. readings run newest first, at most 10. open counts the board's tasks that are neither accepted nor cancelled, done the accepted tasks filed towards this goal, waiting_on_owner the open ones that wait on the owner. planning is true while the planner's goal session runs.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "last_ended"],
+      "properties": {
+        "goal": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "goal", "words", "target", "unit", "server", "reader", "planner", "status",
+                "stall", "readings", "open", "done", "waiting_on_owner", "planning"
+              ],
+              "properties": {
+                "goal": { "type": "string", "pattern": "^goal-[1-9][0-9]*$" },
+                "words": { "type": "string" },
+                "target": { "type": ["number", "null"] },
+                "unit": { "type": ["string", "null"] },
+                "server": { "type": ["string", "null"] },
+                "reader": { "type": ["string", "null"] },
+                "planner": { "type": ["string", "null"] },
+                "status": { "type": "string", "enum": ["active", "paused", "met", "stalled"] },
+                "stall": { "enum": ["nothing_planned", "no_progress", null] },
+                "readings": {
+                  "type": "array",
+                  "maxItems": 10,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["value", "source", "server", "agent", "at"],
+                    "properties": {
+                      "value": { "type": "number" },
+                      "source": { "type": "string", "enum": ["connector", "owner"] },
+                      "server": { "type": ["string", "null"] },
+                      "agent": { "type": ["string", "null"] },
+                      "at": { "type": "string", "format": "date-time" }
+                    }
+                  }
+                },
+                "open": { "type": "integer", "minimum": 0 },
+                "done": { "type": "integer", "minimum": 0 },
+                "waiting_on_owner": { "type": "integer", "minimum": 0 },
+                "planning": { "type": "boolean" }
+              }
+            }
+          ]
+        },
+        "last_ended": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["goal", "words", "outcome", "at"],
+              "properties": {
+                "goal": { "type": "string", "pattern": "^goal-[1-9][0-9]*$" },
+                "words": { "type": "string" },
+                "outcome": { "type": "string", "enum": ["reached", "dropped"] },
+                "at": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        }
+      }
     },
     "catervaficationGetResult": {
       "description": "Whether the team offers to document an existing repository now, and with which roles (docs/SPEC.md 4.1, 5.16, ADR 0051). offered is true while the log holds neither catervafication.started nor project.started and a Start would not be refused for want of a Product Manager and someone to check its notes. roles are the roles that would get a task, in the order they are filed.",
@@ -6310,6 +6476,8 @@
             "question_length",
             "integration_branch_name",
             "integration_branch_missing",
+            "merge_warning_unconfirmed",
+            "merging_offline",
             "too_few",
             "solo_one_agent",
             "solo_role",

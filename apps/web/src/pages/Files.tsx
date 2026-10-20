@@ -16,7 +16,10 @@ import type { Agent, Team } from "./setup/TeamSetup.tsx";
 export function Files() {
 	const splat = useParams()["*"];
 	const wide = useWide();
-	const { data: team } = useQuery<{ team: Team }>("team.get", {});
+	const { data: team } = useQuery<{ team: Team; documentsMode?: string }>(
+		"team.get",
+		{},
+	);
 	const { data: tree, again } = useQuery<FilesTree>("files.tree", {});
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
@@ -35,6 +38,7 @@ export function Files() {
 			tree={tree}
 			path={open.document.path}
 			agents={agents}
+			mode={team?.documentsMode ?? "committed"}
 			onSaved={again}
 		/>
 	) : (

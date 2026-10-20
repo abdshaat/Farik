@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use catervas_core::branch::task_branch;
 use catervas_core::budget::{
     BudgetScope, BudgetState, CHAT_SESSION_LIMITS, SessionLedger, SessionLimits, add_usage, tighter,
 };
@@ -28,7 +27,6 @@ use catervas_protocol::event::{
 use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
 use catervas_store::files::ProjectFiles;
-use catervas_store::git::{integration_branch, stale_twins};
 use catervas_store::product_plan::is_the_product_plan;
 use catervas_store::repos::{TaskRepositoryError, repo_present};
 use chrono::{DateTime, Utc};
@@ -485,6 +483,7 @@ fn gives_connectors(ask: &SessionAsk<'_>) -> bool {
             | SessionPurpose::Explore
             | SessionPurpose::Implement
             | SessionPurpose::Verify
+            | SessionPurpose::Goal
     ) && ask.only_tool.is_none()
 }
 
@@ -650,7 +649,7 @@ async fn open_preview(
         }
         Err(error) => return Err(repository_refused(&contract.id, &error)),
     };
-    let tree = repository.git.tree(&task_branch(contract))?;
+    let tree = repository.git.tree(&super::rev_of(tools, team, contract))?;
     let cache = tools
         .files
         .root()
@@ -987,6 +986,9 @@ const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
 /// The tool a bug hunt's assignee files a bug with, offered in the implement session of a hunt
 /// alone (ADR 0063).
 const FILE_BUG_TOOL: &str = "catervas_file_bug";
+/// The tools a goal session files and records with, offered in a goal session alone (ADR 0075).
+const FILE_GOAL_WORK_TOOL: &str = "catervas_file_goal_work";
+const RECORD_GOAL_PROGRESS_TOOL: &str = "catervas_record_goal_progress";
 /// The tool that schedules a social post, the Marketing Specialist's alone (ADR 0042).
 const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
@@ -1058,6 +1060,11 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
         .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
+        // What a goal session files and records is its own (ADR 0075).
+        .filter(|tool| {
+            (tool.name != FILE_GOAL_WORK_TOOL && tool.name != RECORD_GOAL_PROGRESS_TOOL)
+                || ask.purpose == SessionPurpose::Goal
+        })
         // A bug is filed in the implement session of a hunt (ADR 0063).
         .filter(|tool| {
             tool.name != FILE_BUG_TOOL
@@ -1185,7 +1192,7 @@ fn session_spec(
     session_spec_without(deps, team, ask, &BTreeSet::new())
 }
 
-/// The section of the documents the owner attached to what `ask`'s session answers (ADR 0073): a
+/// The section of the documents the owner attached to what `ask`'s session answers (ADR 0076): a
 /// task's triage, refine and implement sessions are shown those its `task.created` names, a chat
 /// session those of the newest message of the user's in its chat, a conversation those of the
 /// newest pending post that names any. Read from the integration branch, else from the branch of
@@ -1308,9 +1315,10 @@ fn stale_twins_of(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) ->
     if ask.purpose == SessionPurpose::Chat {
         return Vec::new();
     }
-    integration_branch(team, &deps.tools.git)
-        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
-        .unwrap_or_default()
+    let Ok(mode) = catervas_store::document_source::documents_mode_of(team, &deps.tools.log) else {
+        return Vec::new();
+    };
+    catervas_store::document_source::stale_twins_now(&deps.tools.git, &deps.tools.log, team, mode)
 }
 
 /// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
@@ -1405,6 +1413,7 @@ fn session_spec_without(
         own_repo,
         document_format: team.document_format(),
         attached: attached.as_deref(),
+        documents_local: catervas_store::document_source::documents_on_disk(team, &deps.tools.log)?,
     })?;
     let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {

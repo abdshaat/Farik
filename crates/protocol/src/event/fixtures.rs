@@ -346,9 +346,35 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "into": "main",
             "paths": ["src/lib.rs"]
         }),
+        EventKind::DocumentStorageChanged => json!({
+            "local": true,
+            "change": 4,
+            "branch": "docs/keep-documents-on-this-computer",
+            "sha": "0123456789abcdef0123456789abcdef01234567"
+        }),
+        EventKind::LocalDocumentsWritten => json!({
+            "paths": ["docs/catervas/product/spec.html"],
+            "removed": [],
+            "by": "task",
+            "written_by": null,
+            "task_id": "CTV-3",
+            "set_aside": []
+        }),
         EventKind::PullRequestRefreshed => json!({
             "url": "https://github.com/o/r/pull/7",
             "sha": "0123456789abcdef0123456789abcdef01234567"
+        }),
+        EventKind::GoalSet => json!({ "goal": "goal-1", "words": "Reach 10 paying customers" }),
+        EventKind::GoalPaused | EventKind::GoalResumed => json!({ "goal": "goal-1" }),
+        EventKind::GoalEnded => json!({ "goal": "goal-1", "outcome": "reached" }),
+        EventKind::GoalMeasured => json!({ "goal": "goal-1", "value": 4.0, "source": "owner" }),
+        EventKind::GoalPlanned => json!({ "goal": "goal-1", "filed": ["CTV-2"] }),
+        EventKind::MergePermissionGranted | EventKind::MergePermissionWithdrawn => {
+            json!({ "by": "human", "into": "main" })
+        }
+        EventKind::PullRequestMerged => json!({
+            "url": "https://github.com/o/r/pull/7",
+            "method": "merge"
         }),
         EventKind::TaskReassigned => {
             json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" })

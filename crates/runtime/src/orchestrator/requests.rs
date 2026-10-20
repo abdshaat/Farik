@@ -19,13 +19,14 @@ use catervas_protocol::event::{
 };
 use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
-use catervas_store::git::{GitError, held_document};
+use catervas_store::git::GitError;
 use catervas_store::product_plan::is_the_product_plan;
 use catervas_store::repos::TaskRepository;
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
-    given_task_message, plan_task_message, plan_tasks_message, refine_message, triage_message,
+    given_task_message, goal_task_message, plan_task_message, plan_tasks_message, refine_message,
+    triage_message,
 };
 use super::rules::{Waiting, acted, active, has_room, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
@@ -190,9 +191,21 @@ pub(super) async fn refining(
         .any(|event| event.envelope.seq > began && event.body.kind() == EventKind::QuestionAsked);
     let failures = last_readiness_failures(&history, began);
     let stuck = came_back_from_a_block(&history);
-    let initial_prompt = match lead {
-        Some(agent) => given_task_message(&contract, agent, !asked, &failures, stuck.as_ref()),
-        None => refine_message(&contract, !asked, &failures, stuck.as_ref()),
+    let goal = match lead {
+        Some(_) => crate::goals::goal_words(
+            &deps.tools.log,
+            catervas_store::requests::goal_of(&deps.tools.log, &contract.id)?.as_deref(),
+        )?,
+        None => None,
+    };
+    let initial_prompt = match (lead, goal) {
+        (Some(agent), Some(goal)) => {
+            goal_task_message(&contract, agent, &goal, !asked, &failures, stuck.as_ref())
+        }
+        (Some(agent), None) => {
+            given_task_message(&contract, agent, !asked, &failures, stuck.as_ref())
+        }
+        (None, _) => refine_message(&contract, !asked, &failures, stuck.as_ref()),
     };
     let end = run_session(
         deps,
@@ -583,15 +596,12 @@ fn children_of_epic(
 /// that does not exist holds no plan.
 fn plan_on(
     git: &catervas_store::Git,
-    branch: &str,
+    source: &catervas_store::document_source::DocumentSource,
     stem: &str,
     team: &Team,
 ) -> Result<Option<(String, String)>, OrchestratorError> {
-    match held_document(git, branch, stem, team.document_format()) {
-        Ok(Some(plan)) => {
-            let text = git.file_at(branch, &plan)?;
-            Ok(Some((plan, text)))
-        }
+    match source.held_document(git, stem, team.document_format()) {
+        Ok(Some(plan)) => Ok(source.text(git, &plan)?.map(|text| (plan, text))),
         Ok(None) | Err(GitError::CommandFailed { .. }) => Ok(None),
         Err(error) => Err(error.into()),
     }
@@ -612,16 +622,23 @@ fn product_managers_message(
     let unextended = plan_stem(contract.id.as_str());
     if *step == EpicStep::WriteThePlansTasks {
         let git = &deps.tools.git;
-        let branch = integration_branch(team, git)?;
-        // The plan is read in the format it was written in: on the integration branch, else on the
-        // branch of the accepted plan task that has not been integrated yet.
-        if let Some(found) = plan_on(git, &branch, &unextended, team)? {
+        let mode = catervas_store::document_source::documents_mode_of(team, &deps.tools.log)?;
+        let source = catervas_store::document_source::team_documents(team, git, mode)?;
+        // The plan is read in the format it was written in: where the team keeps its documents
+        // (on this computer, a plan task's lands there when it is accepted), else on the branch of
+        // the accepted plan task that has not been integrated yet.
+        if let Some(found) = plan_on(git, &source, &unextended, team)? {
             return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
         }
         if let Some(plan_task) = plan_task
             && let Ok(theirs) = deps.tools.files.read_contract(plan_task)
             && let Ok(repository) = task_repository_of(deps, team, &theirs)
-            && let Some(found) = plan_on(&repository.git, &task_branch(&theirs), &unextended, team)?
+            && let Some(found) = plan_on(
+                &repository.git,
+                &catervas_store::document_source::DocumentSource::Branch(task_branch(&theirs)),
+                &unextended,
+                team,
+            )?
         {
             return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
         }
@@ -989,6 +1006,8 @@ async fn run_on_the_integration_branch(
     let tools = Arc::clone(&deps.tools);
     let factory = Arc::clone(&deps.sandboxes);
     let contract = contract.clone();
+    // The documents kept on this computer are not in the commit: the criteria read a copy of them.
+    let documents_on_disk = catervas_store::document_source::documents_on_disk(team, &tools.log)?;
     tokio::task::spawn_blocking(move || -> Result<EpicRan, OrchestratorError> {
         let git = &tools.git;
         let worktree = tools
@@ -1005,6 +1024,13 @@ async fn run_on_the_integration_branch(
             git.create_detached_worktree(&worktree, &sha)
                 .map_err(Into::into)
         }) {
+            return Ok(unrunnable(pending[0].id.as_str(), &error));
+        }
+        if documents_on_disk
+            && let Err(error) =
+                catervas_store::local_documents::copy_in(git, tools.files.root(), &worktree, None)
+        {
+            let _ = remove_base_worktree(git, &worktree);
             return Ok(unrunnable(pending[0].id.as_str(), &error));
         }
         let sandbox = match factory.create_base(&tools.ids.project_id, &contract.id, &worktree) {
@@ -1323,6 +1349,15 @@ mod tests {
             .map(|spec| (spec.agent_id.as_str(), spec.purpose))
             .collect();
         assert_eq!(who, [("dev", SessionPurpose::Refine)]);
+        // The goal's two tools belong to a goal session alone.
+        assert!(
+            !started[0]
+                .catervas_tools
+                .iter()
+                .any(|tool| tool.contains("goal")),
+            "{:?}",
+            started[0].catervas_tools
+        );
         let lead = GIVEN_TASK_LEAD
             .replace("{name}", "dev")
             .replace("{role}", "software_developer");
@@ -1330,6 +1365,34 @@ mod tests {
             started[0].initial_prompt.starts_with(&lead),
             "{}",
             started[0].initial_prompt
+        );
+
+        // A task its agent filed towards the owner's goal says so, in the goal's words.
+        let towards = Harness::with_the_suggested_six("req-given-refine-goal");
+        towards.project.record(
+            "",
+            "goal.set",
+            &json!({ "goal": "goal-1", "words": "Reach 10 paying customers" }),
+        );
+        towards.file_given_with(
+            "CTV-1",
+            "refining",
+            "dev",
+            &json!({ "goal": "goal-1" }),
+            |_| {},
+        );
+        let adapter = towards.recorded(vec![implement_stops_early()]);
+        towards
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(
+            prompt.starts_with(
+                "dev, you filed this task working towards the owner's goal \u{201c}Reach 10 paying customers\u{201d}, and you write its contract yourself"
+            ),
+            "{prompt}"
         );
 
         // A paused agent's task waits: no session starts.

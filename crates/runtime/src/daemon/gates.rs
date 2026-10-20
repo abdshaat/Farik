@@ -326,6 +326,7 @@ pub(super) fn query(
         })),
         "product_plan.state" => product_plan_state(deps, &team()?),
         "catervafication.get" => catervafication_get(deps, &team()?),
+        "goal.get" => crate::goals::goal_get(deps, &team()?).map_err(|e| internal(&e)),
         "questions.list" => questions(deps, params["task_id"].as_str()),
         _ => {
             let task_id = task_of(deps, params)?;
@@ -600,11 +601,23 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             .files
             .read_contract(&row.task_id)
             .map_err(|e| internal(&e))?;
-        let branch = task_branch(&contract);
+        // The plan task of a team that keeps its documents on this computer has no branch: its
+        // draft is in its worktree's copy of the folder.
+        let source = if catervas_store::document_source::is_branchless(team, &deps.log, &contract)
+            .map_err(|e| internal(&e))?
+        {
+            catervas_store::document_source::DocumentSource::Disk(
+                deps.files
+                    .root()
+                    .join(".catervas/local/worktrees")
+                    .join(contract.id.as_str()),
+            )
+        } else {
+            catervas_store::document_source::DocumentSource::Branch(task_branch(&contract))
+        };
         for stem in PRODUCT_PLAN_STEMS {
-            if let Ok(Some(path)) =
-                catervas_store::git::held_document(&deps.git, &branch, stem, team.document_format())
-                && let Ok(text) = deps.git.file_at(&branch, &path)
+            if let Ok(Some(path)) = source.held_document(&deps.git, stem, team.document_format())
+                && let Ok(Some(text)) = source.text(&deps.git, &path)
             {
                 documents.push(json!({ "path": path, "text": text }));
             }
@@ -883,7 +896,7 @@ fn attachment_paths(value: &Value) -> Vec<String> {
 
 /// `request.file`: the person's words filed as a draft request of the human's, from a chat's
 /// proposed request when `from_chat_message` names its reply, and naming the documents they
-/// attached (ADR 0073), each held to `check_attachments` before anything is recorded.
+/// attached (ADR 0076), each held to `check_attachments` before anything is recorded.
 fn file_words(
     deps: &ToolDeps,
     text: &str,
@@ -3269,6 +3282,47 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_catervas_merges_a_folder_change_while_merging_is_allowed() {
+        let harness = Harness::new("gates-folder-change-merging", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
+            }));
+            wire["policy"]["merge_when_checks_pass"] = json!(true);
+        });
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 1, "sha": "def"
+            }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 1, "url": "https://github.com/o/r/pull/7", "number": 7 }),
+        );
+        harness.project.record(
+            "",
+            "merge_permission.granted",
+            &json!({ "by": "human", "into": "main" }),
+        );
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult"
+            )["waiting"][0]["line"],
+            "Catervas merges its pull request when GitHub's checks pass"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lists_a_design_review_that_waits_on_the_human() {
         let harness = Harness::new("gates-design-review-waits", |wire| {
             crate::tools::fixtures::browsing(wire);
@@ -4772,6 +4826,77 @@ pub(super) mod tests {
                 .set_command_handler(command_handler(orchestrator))
         );
         harness
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn goal_get_answers_the_standing_goal_and_the_last_ended() {
+        let get =
+            |harness: &Harness| query(&harness.daemon, "goal.get", &json!({}), "goalGetResult");
+        let command = |harness: &Harness, command: &str, body: &Value| {
+            let reply = rpc(
+                &harness.daemon,
+                "command",
+                &json!({ "command": { "command": command, "body": body } }),
+            );
+            assert!(reply["error"].is_null(), "{reply}");
+        };
+        let harness = driven_by(Harness::new("gates-goal", |wire| {
+            wire["budgets"]["daily_usd"] = json!(10);
+            wire["agents"][1]["mcp_servers"] = json!([{
+                "name": "stripe", "source": "custom", "transport": "stdio",
+                "command": "stripe-mcp", "args": ["stdio"], "credential_keys": ["API_KEY"],
+                "tools": { "read": "network" }
+            }]);
+        }));
+        assert_eq!(get(&harness), json!({ "goal": null, "last_ended": null }));
+
+        command(
+            &harness,
+            "goal_set",
+            &json!({
+                "words": "Reach 10 paying customers", "target": 10.0,
+                "unit": "paying customers", "server": "stripe"
+            }),
+        );
+        harness.project.record_by(
+            Some("dev-a"),
+            harness.project.deps.clock.now(),
+            "",
+            "goal.measured",
+            &json!({ "goal": "goal-1", "value": 4.0, "source": "connector", "server": "stripe" }),
+        );
+        harness.project.filed("CTV-1", "draft", "task", None);
+        let answer = get(&harness);
+        let goal = &answer["goal"];
+        assert_eq!(goal["goal"], "goal-1");
+        assert_eq!(goal["status"], "active");
+        assert_eq!(goal["stall"], Value::Null);
+        assert_eq!(
+            (goal["reader"].as_str(), goal["planner"].as_str()),
+            (Some("dev-a"), Some("pm"))
+        );
+        assert_eq!(goal["readings"][0]["value"], 4.0);
+        assert_eq!(
+            (
+                goal["open"].as_u64(),
+                goal["done"].as_u64(),
+                goal["waiting_on_owner"].as_u64()
+            ),
+            (Some(1), Some(0), Some(0))
+        );
+        assert_eq!(goal["planning"], false);
+        assert_eq!(answer["last_ended"], Value::Null);
+
+        command(
+            &harness,
+            "goal_end",
+            &json!({ "goal": "goal-1", "outcome": "reached" }),
+        );
+        let answer = get(&harness);
+        assert_eq!(answer["goal"], Value::Null);
+        assert_eq!(answer["last_ended"]["outcome"], "reached");
+        assert_eq!(answer["last_ended"]["words"], "Reach 10 paying customers");
     }
 
     #[test]

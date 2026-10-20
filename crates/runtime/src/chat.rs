@@ -80,12 +80,12 @@ pub struct NewChatMessage {
     pub session_id: Option<String>,
     /// The owner sent the message as a task for the chat's agent (ADR 0063).
     pub as_task: bool,
-    /// The documents the owner attached (ADR 0073), checked with [`check_attachments`] by whoever
+    /// The documents the owner attached (ADR 0076), checked with [`check_attachments`] by whoever
     /// takes the owner's words; empty for an agent's reply.
     pub attachments: Vec<String>,
 }
 
-/// The most documents one message, request or post names (ADR 0073).
+/// The most documents one message, request or post names (ADR 0076).
 pub const ATTACHMENTS_MAX: usize = 5;
 
 /// Why a list of attachments is refused: a code, the JSON pointer of the field at fault, and the
@@ -108,7 +108,7 @@ impl AttachmentRefusal {
     }
 }
 
-/// Holds `attachments` to what a message, request or post may name (ADR 0073): at most five, each
+/// Holds `attachments` to what a message, request or post may name (ADR 0076): at most five, each
 /// an attached document's path that a `document.attached` recorded. Every surface that takes the
 /// owner's attachments asks this before it records anything.
 ///
@@ -584,7 +584,7 @@ fn named(attachments: Option<&AttachmentPaths>) -> Vec<String> {
 }
 
 /// The documents the newest message of the user's in `agent_id`'s chat names, which the chat
-/// session answering it is shown (ADR 0073); none when that message names none.
+/// session answering it is shown (ADR 0076); none when that message names none.
 ///
 /// # Errors
 ///
@@ -638,7 +638,7 @@ pub fn task_attachments(log: &EventLog, task_id: &str) -> Result<Vec<String>, St
 
 /// The attached documents `paths` name, each with its text when it can be read: from the
 /// integration branch, else from the branch of the newest folder change that holds it and has not
-/// reached the integration branch, else `None` (ADR 0073). A git or log error leaves a text out.
+/// reached the integration branch, else `None` (ADR 0076). A git or log error leaves a text out.
 #[must_use]
 pub fn read_attached(
     log: &EventLog,

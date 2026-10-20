@@ -445,13 +445,24 @@ impl TestProject {
         agent: &str,
         change: impl FnOnce(&mut Value),
     ) {
-        self.filed_extra(
-            task,
-            (status, "task", None),
-            &json!({ "given_to": agent }),
-            None,
-            change,
-        );
+        self.filed_given_with(task, status, agent, &json!({}), change);
+    }
+
+    /// `filed_given_to`, the `task.created` body also holding `more` (a goal, for one the agent
+    /// filed for it).
+    pub(crate) fn filed_given_with(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        more: &Value,
+        change: impl FnOnce(&mut Value),
+    ) {
+        let mut extra = json!({ "given_to": agent });
+        if let (Some(extra), Some(more)) = (extra.as_object_mut(), more.as_object()) {
+            extra.extend(more.clone());
+        }
+        self.filed_extra(task, (status, "task", None), &extra, None, change);
     }
 
     /// `filed_with` and no change.

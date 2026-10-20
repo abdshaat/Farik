@@ -3,7 +3,9 @@
 
 use catervas_core::contract::{Role, TaskContract};
 use catervas_core::criteria::CriteriaLibrary;
-use catervas_core::folders::{DocumentFormat, folders_line, format_line, stale_line};
+use catervas_core::folders::{
+    DocumentFormat, folders_line, format_line, local_documents_line, stale_line,
+};
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, TeamPermissions};
@@ -69,6 +71,9 @@ pub struct PromptInput<'a> {
     /// The section of the documents the owner attached to what the session answers, whole with its
     /// heading, as [`attached_section`] writes it; it follows `From the human`.
     pub attached: Option<&'a str>,
+    /// Whether the team's documents are read from this computer's folder (ADR 0074), for the Team
+    /// rules' line about finding them.
+    pub documents_local: bool,
 }
 
 /// One repository of the project, as the Team rules' line says it.
@@ -112,7 +117,7 @@ pub const PROMPT_SECTIONS: [&str; 11] = [
 ];
 
 /// The `This session` section of each purpose: what the session is for and the tool it ends with.
-pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
+pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
     (
         SessionPurpose::Triage,
         "This session sizes the request you were given. Decide whether it is large (an epic) or \
@@ -194,6 +199,11 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 9] = [
          your reply, a title and what it asks for, for the user to send. Otherwise answer. Then \
          end the session.",
     ),
+    (
+        SessionPurpose::Goal,
+        "This session works towards the owner's goal; the first message says what to do. Change \
+         nothing in the project. Then end the session.",
+    ),
 ];
 
 /// The `This session` section of a new project's Product Manager's chat session while the owner's
@@ -242,6 +252,7 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
                 input.own_repo.as_ref(),
             ),
             input.document_format,
+            input.documents_local,
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -285,7 +296,7 @@ pub const ATTACHED_BYTES: usize = 64 * 1024;
 /// The title of the section of the documents the owner attached.
 const ATTACHED_TITLE: &str = "Documents the owner attached";
 
-/// The section of the documents the owner attached to what the session answers (ADR 0073), with its
+/// The section of the documents the owner attached to what the session answers (ADR 0076), with its
 /// heading: each `(path, text)` in the order given, its text, when it was read, inside an
 /// untrusted block named `attached_document` under the path; the texts share [`ATTACHED_BYTES`],
 /// and a document whose text was not read, or does not fit in what is left, is named by its path
@@ -508,6 +519,7 @@ fn rules_section(
         Option<&OwnRepo>,
     ),
     format: DocumentFormat,
+    documents_local: bool,
 ) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
@@ -536,6 +548,7 @@ fn rules_section(
         }),
         Some(folders_line(role, active_roles, &[])),
         Some(format_line(format)),
+        documents_local.then(|| local_documents_line().to_string()),
         stale_line(stale_twins),
         repositories_line(members, own_repo),
     ]
@@ -670,7 +683,7 @@ mod tests {
         a_criteria_library_wire, an_empty_criteria_library_wire,
     };
     use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
-    use catervas_core::folders::{DocumentFormat, format_line};
+    use catervas_core::folders::{DocumentFormat, format_line, local_documents_line};
     use catervas_core::governor::permissions::{PermissionTier, default_tiers};
     use catervas_core::governor::team_rules::TeamRules;
     use catervas_core::team::fixtures::an_agent_wire;
@@ -776,6 +789,7 @@ mod tests {
                 own_repo: None,
                 document_format: DocumentFormat::Html,
                 attached: None,
+                documents_local: false,
             }
         }
     }
@@ -1336,6 +1350,30 @@ mod tests {
                 .position(|line| line.starts_with("- folders:"))
                 .expect("the folders line");
             assert_eq!(lines[folders + 1], format_line(format), "{rules}");
+        }
+    }
+
+    #[test]
+    fn every_session_is_told_the_documents_stay_on_this_computer() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        for purpose in [SessionPurpose::Implement, SessionPurpose::Chat] {
+            let kept = assembled(&PromptInput {
+                documents_local: true,
+                ..inputs.full(purpose)
+            });
+            let rules = section(&kept, "Team rules");
+            let lines: Vec<&str> = rules.lines().collect();
+            let documents = lines
+                .iter()
+                .position(|line| *line == format_line(DocumentFormat::Html))
+                .expect("the documents line");
+            assert_eq!(lines[documents + 1], local_documents_line(), "{rules}");
+
+            let committed = assembled(&inputs.full(purpose));
+            assert!(
+                !section(&committed, "Team rules").contains(local_documents_line()),
+                "{committed}"
+            );
         }
     }
 

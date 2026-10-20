@@ -1,7 +1,7 @@
-import { Button, InfoTip, Switch, TextField } from "@catervas/ui";
+import { Button, Dialog, InfoTip, Switch, TextField } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
-import { type Refusal, said, saidAll } from "../app/refusals.ts";
+import { type Refusal, refusalsOf, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";
@@ -32,6 +32,10 @@ type Part = {
 	done: () => void;
 	/** Whether the project is online, so that finished work opens a pull request. */
 	online?: boolean;
+	/** Where the team's documents are kept now (ADR 0074). */
+	documentsMode?: string;
+	/** Whether Catervas may merge its pull requests on this computer (ADR 0073). */
+	mergingAllowed?: boolean;
 };
 
 /**
@@ -44,6 +48,8 @@ export function useRuleParts() {
 		team: Team;
 		membersPresent?: boolean;
 		online?: boolean;
+		documentsMode?: string;
+		mergingAllowed?: boolean;
 	}>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
@@ -59,6 +65,8 @@ export function useRuleParts() {
 		defaults,
 		base,
 		online: Boolean(data?.online),
+		...(data?.documentsMode && { documentsMode: data.documentsMode }),
+		mergingAllowed: Boolean(data?.mergingAllowed),
 		done: () => {
 			setRounds((r) => ({ ...r, [name]: (r[name] ?? 0) + 1 }));
 			again();
@@ -236,10 +244,80 @@ export function Spend(part: Part) {
 	);
 }
 
-export function Finish({ online }: Pick<Part, "online">) {
+/**
+ * How finished work is added, and the switch that lets Catervas merge it (ADR 0073): turning it
+ * on shows the warning first, and only its Turn on sends the confirmation.
+ */
+export function Finish({ saved, online, mergingAllowed, done }: Part) {
+	const { client } = useConnection();
+	const [asking, setAsking] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [refused, setRefused] = useState<string>();
+	const set = async (params: { on: boolean; confirmed?: boolean }) => {
+		if (!client) return;
+		setBusy(true);
+		setRefused(undefined);
+		try {
+			await client.call("merging.set", params);
+			done();
+		} catch (e) {
+			setRefused(saidAll(e));
+			setBusy(false);
+			setAsking(false);
+		}
+	};
+	const alone = saved.policy.solo
+		? saved.agents.find((a) => a.status !== "retired")?.displayName
+		: undefined;
+	const warning = [
+		t("mergingWarn", {
+			branch: saved.policy.integrationBranch ?? t("mergingMainBranch"),
+		}),
+		...(alone ? [t("mergingWarnSolo", { name: alone })] : []),
+	].join("\n");
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
 			<p>{t(online ? "finishLead" : "finishLeadLocal")}</p>
+			<Switch
+				id="catervas-merges"
+				label={t("mergingSwitch")}
+				info={<Bullets text={t("mergingSwitchNote")} />}
+				checked={Boolean(mergingAllowed)}
+				disabled={!online || busy}
+				onChange={(on) => (on ? setAsking(true) : set({ on: false }))}
+			/>
+			{!online && <p className={styles.muted}>{t("mergingOffline")}</p>}
+			{refused && (
+				<p role="alert" className={styles.alert}>
+					{refused}
+				</p>
+			)}
+			{asking && (
+				<Dialog
+					open
+					title={t("mergingWarnTitle")}
+					onClose={() => setAsking(false)}
+					actions={
+						<>
+							<Button onClick={() => setAsking(false)}>
+								{t("mergingCancel")}
+							</Button>
+							<Button
+								kind="primary"
+								busy={busy}
+								onClick={() => set({ on: true, confirmed: true })}
+							>
+								{t("mergingTurnOn")}
+							</Button>
+						</>
+					}
+				>
+					<Bullets text={warning} />
+					<InfoTip id="merging-warn-info">
+						<Bullets text={t("mergingWarnNote")} />
+					</InfoTip>
+				</Dialog>
+			)}
 		</Part>
 	);
 }
@@ -282,7 +360,7 @@ const rewritable = (path: string) =>
 	!/\/marketing\/plans\/MP-[1-9]\d*(\.agent)?\.md$/.test(path);
 
 /** "Documents": the format new ones are written in, and the rewrite of the Markdown that remains. */
-export function Documents(part: Part) {
+export function Documents(part: Part & { membersPresent?: boolean }) {
 	const { saved, defaults } = part;
 	const { client } = useConnection();
 	const { data: tree } = useQuery<FilesTree>("files.tree", {});
@@ -335,6 +413,7 @@ export function Documents(part: Part) {
 				}
 			/>
 			{foot}
+			{!part.membersPresent && <KeepDocuments part={part} />}
 			{was && markdown && (
 				<div>
 					<Button busy={pending} onClick={rewrite}>
@@ -355,6 +434,86 @@ export function Documents(part: Part) {
 			)}
 		</Part>
 	);
+}
+
+/**
+ * "Keep documents on this computer" (ADR 0074): the owner's choice of where the team's documents
+ * live. Turning it either way asks first, then sends `documents.set_local`; the pull request that
+ * moves them is the owner's to merge, and until then the switch stays as it is.
+ */
+function KeepDocuments({ part }: { part: Part }) {
+	const { client } = useConnection();
+	const [asking, setAsking] = useState<"keep" | "back">();
+	const [busy, setBusy] = useState(false);
+	const [refused, setRefused] = useState<string>();
+	const mode = part.documentsMode ?? "committed";
+	const moving = mode === "taking_out" || mode === "putting_back";
+	const kept = part.saved.policy.documentsLocal === true;
+	const ask = asking === "keep";
+	const send = async () => {
+		if (!client || !asking) return;
+		setBusy(true);
+		setRefused(undefined);
+		try {
+			await client.call("documents.set_local", { local: ask });
+			setAsking(undefined);
+			part.done();
+		} catch (e) {
+			setAsking(undefined);
+			setRefused(saidDocuments(e));
+		}
+		setBusy(false);
+	};
+	return (
+		<div>
+			<Switch
+				id="documents-local"
+				label={t("documentsLocal")}
+				info={<Bullets text={t("documentsLocalNote")} />}
+				checked={kept}
+				disabled={moving}
+				onChange={(on) => setAsking(on ? "keep" : "back")}
+			/>
+			{moving && (
+				<p role="status">
+					{t(
+						mode === "taking_out"
+							? "documentsTakingOut"
+							: "documentsPuttingBack",
+					)}
+				</p>
+			)}
+			{refused && (
+				<p role="alert" className={styles.alert}>
+					{refused}
+				</p>
+			)}
+			<Dialog
+				open={asking !== undefined}
+				title={t(ask ? "keepHereTitle" : "putBackTitle")}
+				onClose={() => setAsking(undefined)}
+				actions={
+					<>
+						<Button onClick={() => setAsking(undefined)}>
+							{t(ask ? "keepHereCancel" : "putBackCancel")}
+						</Button>
+						<Button kind="primary" busy={busy} onClick={send}>
+							{t(ask ? "keepHereYes" : "putBackYes")}
+						</Button>
+					</>
+				}
+			>
+				<Bullets text={t(ask ? "keepHereLines" : "putBackLines")} />
+			</Dialog>
+		</div>
+	);
+}
+
+/** A refusal of the switch in words: the daemon's own list of tasks for the one that names them. */
+function saidDocuments(e: unknown): string {
+	return refusalsOf(e)
+		.map((r) => (r.code === "documents_in_flight" ? r.message : said(r.code)))
+		.join(" ");
 }
 
 /**

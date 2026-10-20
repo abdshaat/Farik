@@ -357,12 +357,12 @@ async fn run_what_catervas_runs(
             let project = deps.tools.git.root().to_path_buf();
             let project_id = deps.tools.ids.project_id.clone();
             let base = base.clone();
+            let head = super::rev_of(&deps.tools, team, &alone);
             let outcomes = tokio::task::spawn_blocking(move || {
                 let git = Git::open(root);
                 let base_worktree = project
                     .join(".catervas/local/worktrees")
                     .join(format!("{}-base", alone.id.as_str()));
-                let head = task_branch(&alone);
                 let input = NewTestsInput {
                     git: &git,
                     base_worktree: &base_worktree,
@@ -568,14 +568,7 @@ async fn design_review_first(
         Err(TaskRepositoryError::Missing { .. }) => return Ok(Some(ran_criteria(row, ran))),
         Err(error) => return Err(repository_refused(&row.task_id, &error)),
     };
-    let diff = repository.git.diff(
-        &task_base(
-            &repository.git,
-            &repository.integration_branch,
-            &contract.id,
-        ),
-        &task_branch(contract),
-    )?;
+    let diff = diff_of(deps, team, &repository, contract)?;
     let end = run_session(
         deps,
         team,
@@ -691,14 +684,7 @@ async fn review(
             Err(TaskRepositoryError::Missing { .. }) => return Ok(ran_criteria(row, ran)),
             Err(error) => return Err(repository_refused(&row.task_id, &error)),
         };
-        diff = repository.git.diff(
-            &task_base(
-                &repository.git,
-                &repository.integration_branch,
-                &contract.id,
-            ),
-            &task_branch(&contract),
-        )?;
+        diff = diff_of(deps, team, &repository, &contract)?;
         Changes::Diff(&diff)
     };
     let initial_prompt = review_message(&ReviewBrief {
@@ -723,6 +709,38 @@ async fn review(
     .await?;
     record_review(deps, team, &contract, reviewer, &end.session_id, since)?;
     Ok(Some(acted(row, reviewer, "verify", &end)))
+}
+
+/// What the task's branch changed since the integration branch, as a patch. A task with no branch
+/// (it changes documents only, and they stay on this computer, ADR 0074) has nothing committed:
+/// its changed documents are listed in the patch's place, for the reviewer to read in the task's
+/// worktree.
+fn diff_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    repository: &catervas_store::repos::TaskRepository,
+    contract: &TaskContract,
+) -> Result<String, OrchestratorError> {
+    if catervas_store::document_source::is_branchless(team, &deps.tools.log, contract)? {
+        let changed = catervas_store::local_documents::document_changes(
+            deps.tools.files.root(),
+            &worktree(deps, &contract.id),
+            &contract.id,
+        )?;
+        return Ok(format!(
+            "Nothing is committed: this task changes documents kept on this computer. Read them in \
+             your working directory. Changed: {}",
+            changed.join(", ")
+        ));
+    }
+    Ok(repository.git.diff(
+        &task_base(
+            &repository.git,
+            &repository.integration_branch,
+            &contract.id,
+        ),
+        &task_branch(contract),
+    )?)
 }
 
 /// One line for each file a task changed in its private `folder` since the copy taken for it:

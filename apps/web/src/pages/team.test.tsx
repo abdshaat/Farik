@@ -1081,6 +1081,83 @@ describe("team page", () => {
 		});
 	});
 
+	it("keeps_documents_on_this_computer", async () => {
+		const { s, part } = await settings(TEAM, "/settings/work", {
+			documents_mode: "committed",
+		});
+		const documents = part(en.rulesDocuments);
+		const local = within(documents).getByRole("switch", {
+			name: en.documentsLocal,
+		});
+		expect(local.getAttribute("aria-checked")).toBe("false");
+		for (const line of en.documentsLocalNote.split("\n")) onlyInTips(line);
+
+		// Turning it on asks first, and "Cancel" changes nothing.
+		fireEvent.click(local);
+		let dialog = await screen.findByRole("dialog", { name: en.keepHereTitle });
+		for (const line of en.keepHereLines.split("\n"))
+			expect(within(dialog).getByText(line)).toBeTruthy();
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.keepHereCancel }),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(s.calls("documents.set_local")).toEqual([]);
+
+		// "Keep them here" sends the choice; a refusal is said in words.
+		fireEvent.click(local);
+		dialog = await screen.findByRole("dialog", { name: en.keepHereTitle });
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.keepHereYes }),
+		);
+		const frame = await sent(s, "documents.set_local");
+		expect(frame.params).toEqual({ local: true });
+		await s.fail(frame as never, -32005, "refused", {
+			errors: [
+				{
+					path: "/local",
+					code: "documents_busy",
+					message: "Some documents have changes",
+				},
+			],
+		});
+		expect(await screen.findByText(en.refuseDocumentsBusy)).toBeTruthy();
+		cleanup();
+
+		// While the pull request waits, the switch is off limits and says why.
+		const moving = {
+			...TEAM,
+			policy: { ...TEAM.policy, documents_local: true },
+		};
+		const taking = await settings(moving, "/settings/work", {
+			documents_mode: "taking_out",
+		});
+		const documentsTaking = taking.part(en.rulesDocuments);
+		const disabled = within(documentsTaking).getByRole("switch", {
+			name: en.documentsLocal,
+		});
+		expect(disabled.getAttribute("aria-checked")).toBe("true");
+		expect((disabled as HTMLInputElement).disabled).toBe(true);
+		expect(
+			within(documentsTaking).getByText(en.documentsTakingOut),
+		).toBeTruthy();
+		cleanup();
+
+		// Turned on and out of the repository, it can be turned off again, with its own question.
+		const on = await settings(moving, "/settings/work", {
+			documents_mode: "local",
+		});
+		fireEvent.click(
+			within(on.part(en.rulesDocuments)).getByRole("switch", {
+				name: en.documentsLocal,
+			}),
+		);
+		const back = await screen.findByRole("dialog", { name: en.putBackTitle });
+		fireEvent.click(within(back).getByRole("button", { name: en.putBackYes }));
+		expect((await sent(on.s, "documents.set_local")).params).toEqual({
+			local: false,
+		});
+	});
+
 	it("puts_back_the_default_document_format", async () => {
 		const markdown = {
 			...TEAM,

@@ -13,11 +13,14 @@ use serde_json::{Value, json};
 pub use catervas_core::contract::{TaskContract, TaskId, ValidationError};
 
 pub use crate::generated::command::CommandName;
+/// How the owner ended a goal.
+pub use crate::generated::command::GoalEndBodyOutcome;
 use crate::generated::command::{
     AgentUpdateBody, CatervasCommand as CommandWire, ChatMessagePostBody, ConnectorConnectBody,
     ConnectorDisconnectBody, DataPipelineDecideBody, DataPipelineDecideBodyDecision, EmptyBody,
     EscalationResolveBody, FolderChangeIntegrateBody, FolderDocDecideBody,
-    FolderDocDecideBodyDecision, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
+    FolderDocDecideBodyDecision, GoalEditBody, GoalEndBody, GoalIdBody, GoalReportBody,
+    GoalSetBody, HumanAcceptBody, HumanAcceptBodySubject, HumanSendBackBody,
     HumanSendBackBodySubject, MarketingPlanDecideBody, MarketingPlanDecideBodyDecision,
     MarketingPlanEndBody, MessagePostBody, PurchaseOrderDecideBody,
     PurchaseOrderDecideBodyDecision, PurchaseOrderSendBody, PurchaseOrderStepBody,
@@ -204,7 +207,7 @@ pub enum Command {
     MessagePost {
         /// What the human says.
         text: String,
-        /// The attached documents the message names (ADR 0073), in order; none when empty.
+        /// The attached documents the message names (ADR 0076), in order; none when empty.
         attachments: Vec<String>,
     },
     /// Say something in the human's one-to-one chat with one agent.
@@ -215,7 +218,7 @@ pub enum Command {
         text: String,
         /// Send the message as a task for the agent (ADR 0063).
         as_task: bool,
-        /// The attached documents the message names (ADR 0073), in order; none when empty.
+        /// The attached documents the message names (ADR 0076), in order; none when empty.
         attachments: Vec<String>,
     },
     /// Give an agent a custom MCP server whose keys are already kept on this machine, or replace
@@ -421,6 +424,54 @@ pub enum Command {
         note: Option<String>,
         /// The day the seller expects the order.
         expected_on: Option<chrono::NaiveDate>,
+    },
+    /// Set the team's goal (ADR 0075).
+    GoalSet {
+        /// The owner's words.
+        words: String,
+        /// The number to reach.
+        target: Option<f64>,
+        /// What the number counts.
+        unit: Option<String>,
+        /// The connector the number is read from.
+        server: Option<String>,
+    },
+    /// Change the standing goal (ADR 0075).
+    GoalEdit {
+        /// The goal's id.
+        goal: String,
+        /// The owner's words.
+        words: String,
+        /// The number to reach.
+        target: Option<f64>,
+        /// What the number counts.
+        unit: Option<String>,
+        /// The connector the number is read from.
+        server: Option<String>,
+    },
+    /// Pause the goal (ADR 0075).
+    GoalPause {
+        /// The goal's id.
+        goal: String,
+    },
+    /// Resume the goal, or tell a stalled one to keep going (ADR 0075).
+    GoalResume {
+        /// The goal's id.
+        goal: String,
+    },
+    /// End the goal, reached or dropped (ADR 0075).
+    GoalEnd {
+        /// The goal's id.
+        goal: String,
+        /// How it ended.
+        outcome: GoalEndBodyOutcome,
+    },
+    /// Tell the team the goal's number (ADR 0075).
+    GoalReport {
+        /// The goal's id.
+        goal: String,
+        /// The number.
+        value: f64,
     },
     /// Dismiss a renewal coming up (ADR 0039).
     RenewalDismiss {
@@ -722,6 +773,48 @@ fn human_command(name: CommandName, body: &Value) -> Result<Command, Vec<Validat
                 status: body.status.to_string(),
                 note: body.note.map(|note| note.as_str().to_string()),
                 expected_on: body.expected_on,
+            })
+        }
+        CommandName::GoalSet => {
+            let body: GoalSetBody = read_body(body, name)?;
+            Ok(Command::GoalSet {
+                words: body.words.as_str().to_string(),
+                target: body.target,
+                unit: body.unit.map(|unit| unit.as_str().to_string()),
+                server: body.server.map(|server| server.as_str().to_string()),
+            })
+        }
+        CommandName::GoalEdit => {
+            let body: GoalEditBody = read_body(body, name)?;
+            Ok(Command::GoalEdit {
+                goal: body.goal.to_string(),
+                words: body.words.as_str().to_string(),
+                target: body.target,
+                unit: body.unit.map(|unit| unit.as_str().to_string()),
+                server: body.server.map(|server| server.as_str().to_string()),
+            })
+        }
+        CommandName::GoalPause | CommandName::GoalResume => {
+            let body: GoalIdBody = read_body(body, name)?;
+            let goal = body.goal.to_string();
+            Ok(if name == CommandName::GoalPause {
+                Command::GoalPause { goal }
+            } else {
+                Command::GoalResume { goal }
+            })
+        }
+        CommandName::GoalEnd => {
+            let body: GoalEndBody = read_body(body, name)?;
+            Ok(Command::GoalEnd {
+                goal: body.goal.to_string(),
+                outcome: body.outcome,
+            })
+        }
+        CommandName::GoalReport => {
+            let body: GoalReportBody = read_body(body, name)?;
+            Ok(Command::GoalReport {
+                goal: body.goal.to_string(),
+                value: body.value,
             })
         }
         CommandName::RenewalDismiss => {
@@ -1136,6 +1229,45 @@ pub fn command_to_value(command: &Command) -> Value {
                 renews_on.map(|day| json!(day.to_string())),
             ),
         ),
+        Command::GoalSet {
+            words,
+            target,
+            unit,
+            server,
+        } => (
+            CommandName::GoalSet,
+            goal_fields(
+                json!({ "words": words }),
+                *target,
+                unit.as_ref(),
+                server.as_ref(),
+            ),
+        ),
+        Command::GoalEdit {
+            goal,
+            words,
+            target,
+            unit,
+            server,
+        } => (
+            CommandName::GoalEdit,
+            goal_fields(
+                json!({ "goal": goal, "words": words }),
+                *target,
+                unit.as_ref(),
+                server.as_ref(),
+            ),
+        ),
+        Command::GoalPause { goal } => (CommandName::GoalPause, json!({ "goal": goal })),
+        Command::GoalResume { goal } => (CommandName::GoalResume, json!({ "goal": goal })),
+        Command::GoalEnd { goal, outcome } => (
+            CommandName::GoalEnd,
+            json!({ "goal": goal, "outcome": outcome.to_string() }),
+        ),
+        Command::GoalReport { goal, value } => (
+            CommandName::GoalReport,
+            json!({ "goal": goal, "value": value }),
+        ),
         Command::RenewalDismiss { renewal } => {
             (CommandName::RenewalDismiss, json!({ "renewal": renewal }))
         }
@@ -1348,6 +1480,18 @@ fn only(body: &Value, command: CommandName, allowed: &[&str]) -> Result<(), Vec<
     if stray.is_empty() { Ok(()) } else { Err(stray) }
 }
 
+/// A goal body's optional target, unit and server, set on `body` when there.
+fn goal_fields(
+    body: Value,
+    target: Option<f64>,
+    unit: Option<&String>,
+    server: Option<&String>,
+) -> Value {
+    let body = with_optional(body, "target", target.map(|target| json!(target)));
+    let body = with_optional(body, "unit", unit.map(|unit| json!(unit)));
+    with_optional(body, "server", server.map(|server| json!(server)))
+}
+
 fn with_optional(mut body: Value, key: &str, value: Option<Value>) -> Value {
     if let Some(value) = value {
         body[key] = value;
@@ -1524,8 +1668,9 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::{
-        AcceptSubject, Command, CommandReply, ReplyKind, RequestSize, SkillScope, ValidationError,
-        command_from_value, command_to_value, reply_from_value, reply_to_value,
+        AcceptSubject, Command, CommandReply, GoalEndBodyOutcome, ReplyKind, RequestSize,
+        SkillScope, ValidationError, command_from_value, command_to_value, reply_from_value,
+        reply_to_value,
     };
 
     fn a_task_create_wire() -> Value {
@@ -2527,6 +2672,81 @@ mod tests {
         ] {
             let errors = refusal(&json!({ "command": "folder_doc_decide", "body": body }));
             assert!(!errors.is_empty(), "{body}");
+        }
+    }
+
+    #[test]
+    fn reads_the_goal_commands() {
+        let full = json!({
+            "words": "Reach 10 paying customers", "target": 10.0,
+            "unit": "paying customers", "server": "stripe"
+        });
+        let Command::GoalSet {
+            words,
+            target,
+            unit,
+            server,
+        } = read("goal_set", &full)
+        else {
+            panic!("goal_set reads as GoalSet");
+        };
+        assert_eq!(words, "Reach 10 paying customers");
+        assert_eq!(target, Some(10.0));
+        assert_eq!(unit.as_deref(), Some("paying customers"));
+        assert_eq!(server.as_deref(), Some("stripe"));
+        assert_eq!(
+            command_to_value(&read("goal_set", &full)),
+            json!({ "command": "goal_set", "body": full })
+        );
+
+        let words_alone = json!({ "words": "Create a mobile application" });
+        assert_eq!(
+            read("goal_set", &words_alone),
+            Command::GoalSet {
+                words: "Create a mobile application".to_string(),
+                target: None,
+                unit: None,
+                server: None,
+            }
+        );
+        let ended = read(
+            "goal_end",
+            &json!({ "goal": "goal-1", "outcome": "reached" }),
+        );
+        assert!(matches!(
+            ended,
+            Command::GoalEnd { ref goal, outcome: GoalEndBodyOutcome::Reached } if goal == "goal-1"
+        ));
+        assert_eq!(
+            command_to_value(&ended),
+            json!({ "command": "goal_end", "body": { "goal": "goal-1", "outcome": "reached" } })
+        );
+        for (name, body) in [
+            ("goal_pause", json!({ "goal": "goal-1" })),
+            ("goal_resume", json!({ "goal": "goal-1" })),
+            ("goal_report", json!({ "goal": "goal-1", "value": 3.0 })),
+            (
+                "goal_edit",
+                json!({ "goal": "goal-1", "words": "Reach 12" }),
+            ),
+        ] {
+            let command = read(name, &body);
+            assert_eq!(
+                command_to_value(&command),
+                json!({ "command": name, "body": body })
+            );
+        }
+
+        for (name, body) in [
+            ("goal_report", json!({ "goal": "goal-1" })),
+            ("goal_set", json!({ "words": "x", "goal": "goal-1" })),
+            ("goal_set", json!({ "words": "" })),
+            ("goal_set", json!({ "words": "x", "target": 0 })),
+            ("goal_pause", json!({ "goal": "goal-0" })),
+            ("goal_end", json!({ "goal": "goal-1", "outcome": "won" })),
+        ] {
+            let errors = refusal(&json!({ "command": name, "body": body }));
+            assert!(!errors.is_empty(), "{name} {body}");
         }
     }
 

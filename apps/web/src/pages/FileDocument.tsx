@@ -47,7 +47,8 @@ function Changed({
 }
 
 /** What saving does; for a pair, who then updates the team's version. */
-function whatSaving(owner: string | null) {
+function whatSaving(owner: string | null, local: boolean) {
+	if (local) return t("filesSaveLocal");
 	if (owner === null) return t("filesSavePullRequest");
 	return `${t("filesSavePullRequest")} ${t("filesThen", { owner })}`;
 }
@@ -61,11 +62,14 @@ export function FileDocument({
 	tree,
 	path,
 	agents,
+	mode,
 	onSaved,
 }: {
 	tree: FilesTree;
 	path: string;
 	agents: Agent[];
+	/** Where the team's documents are kept now (ADR 0074). */
+	mode: string;
 	onSaved: () => void;
 }) {
 	const { client } = useConnection();
@@ -75,6 +79,7 @@ export function FileDocument({
 	const [refusal, setRefusal] = useState<string | "changed" | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [advanced, setAdvanced] = useState(false);
+	const [savedHere, setSavedHere] = useState(false);
 	const [words, setWords] = useState("");
 	const [asking, setAsking] = useState(false);
 	const [asked, setAsked] = useState<
@@ -90,6 +95,9 @@ export function FileDocument({
 	const pair = data.twin !== null;
 	const version = team && data.twin ? data.twin : data.document;
 	const html = isHtml(path);
+	// Kept on this computer, a save changes the file at once; while they move, nothing changes.
+	const local = mode === "local";
+	const moving = mode === "taking_out" || mode === "putting_back";
 
 	const ask = async () => {
 		if (!client || words.trim() === "") return;
@@ -110,6 +118,7 @@ export function FileDocument({
 
 	const edit = () => {
 		setRefusal(null);
+		setSavedHere(false);
 		setDraft({
 			text: data.document.text,
 			base: data.document.blob,
@@ -127,6 +136,7 @@ export function FileDocument({
 			});
 			setDraft(null);
 			setRefusal(null);
+			setSavedHere(local);
 			again();
 			onSaved();
 		} catch (e) {
@@ -183,6 +193,8 @@ export function FileDocument({
 					{!draft && !pair && data.editable && (
 						<p className={styles.forTeam}>{t("filesWrittenForTeam")}</p>
 					)}
+					{savedHere && !draft && <p role="status">{t("filesSavedLocal")}</p>}
+					{moving && <p className={styles.forTeam}>{t("filesMoving")}</p>}
 					{document.task && (
 						<p className={styles.forTeam}>
 							{t("filesNotMerged", { task: document.task })}
@@ -265,7 +277,7 @@ export function FileDocument({
 						<Button kind="quiet" onClick={() => setDraft(null)}>
 							{t("filesCancel")}
 						</Button>
-						<p>{whatSaving(pair ? (owner?.displayName ?? "") : null)}</p>
+						<p>{whatSaving(pair ? (owner?.displayName ?? "") : null, local)}</p>
 					</div>
 				</>
 			) : (

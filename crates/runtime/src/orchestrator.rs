@@ -39,6 +39,7 @@ pub(crate) mod human;
 pub(crate) use human::{
     forget_removed_keys, status_effects, update_agent_held, with_status, without_connector,
 };
+mod goal;
 mod integrate;
 mod messages;
 mod recover;
@@ -245,6 +246,13 @@ pub enum TickReport {
     Chat {
         /// The agent.
         agent_id: String,
+        /// What was done.
+        what: String,
+    },
+    /// An agent planned towards the owner's goal, or read its number (ADR 0075).
+    Goal {
+        /// The goal's id.
+        goal_id: String,
         /// What was done.
         what: String,
     },
@@ -1017,6 +1025,33 @@ fn worktree(deps: &OrchestratorDeps, task_id: &TaskId) -> PathBuf {
         .root()
         .join(".catervas/local/worktrees")
         .join(task_id.as_str())
+}
+
+/// What the task's work is read from: its branch, or, for a task that has none because it changes
+/// documents only while they stay on this computer (ADR 0074), the commit its worktree is at.
+pub(crate) fn task_rev(
+    git: &catervas_store::Git,
+    files: &catervas_store::files::ProjectFiles,
+    contract: &TaskContract,
+    stays_local: bool,
+) -> String {
+    if stays_local {
+        let tree = files
+            .root()
+            .join(".catervas/local/worktrees")
+            .join(contract.id.as_str());
+        if let Ok(head) = git.head_of(&tree) {
+            return head;
+        }
+    }
+    catervas_core::branch::task_branch(contract)
+}
+
+/// `task_rev` for a caller that has the team: whether the task has no branch is read from it.
+pub(crate) fn rev_of(tools: &ToolDeps, team: &Team, contract: &TaskContract) -> String {
+    let stays_local =
+        catervas_store::document_source::is_branchless(team, &tools.log, contract).unwrap_or(false);
+    task_rev(&tools.git, &tools.files, contract, stays_local)
 }
 
 /// The repository `contract` works in: the project folder's own, or the member it names.

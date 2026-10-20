@@ -1,4 +1,4 @@
-//! An attached file turned into Markdown (`docs/SPEC.md` 5.17, ADR 0073): a PDF's text, a Word
+//! An attached file turned into Markdown (`docs/SPEC.md` 5.17, ADR 0076): a PDF's text, a Word
 //! file's paragraphs, headings, lists and tables, or a Markdown or plain text file as it is. It
 //! does no I/O and says why it refused in a code the web screens put into words.
 

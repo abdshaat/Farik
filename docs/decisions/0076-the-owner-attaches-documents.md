@@ -1,11 +1,11 @@
-# 0073. The owner attaches documents, which become team documents in the role folders
+# 0076. The owner attaches documents, which become team documents in the role folders
 
 Date: 2026-10-19
 Status: accepted (the founder, 2026-10-19, quoted in `docs/design/attached-documents.md`; the mechanism decided by the planner)
 
 Amends:
 - **ADR 0051** (Catervas folders): a pair is no longer only the product plan and a marketing plan; an attached document is one too.
-- **SPEC 4.2, 4.3, 4.5, 5.9, 5.17, 8.5** (revision 0.128).
+- **SPEC 4.2, 4.3, 4.5, 5.9, 5.17, 8.5** (revision 0.131).
 
 ## Context
 

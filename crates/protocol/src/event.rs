@@ -12,7 +12,7 @@ use serde_json::Value;
 pub use catervas_core::contract::{TaskId, ValidationError};
 
 /// What `task.created`, `chat_message.posted` and `message.posted` record of the documents the
-/// owner attached (ADR 0073): the paths, or none when there are none; at most five.
+/// owner attached (ADR 0076): the paths, or none when there are none; at most five.
 pub use crate::generated::event::AttachmentPaths;
 /// The body of `document.attached`, the owner attaching a file.
 pub use crate::generated::event::DocumentAttachedBody;
@@ -27,18 +27,21 @@ pub use crate::generated::event::{
     ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
     CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
     DeliveryClosedBody, DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody,
-    DocumentRewriteStartedBody, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, Heard,
-    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MarketingBudgetReachedBody,
-    MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
-    MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
-    MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
-    MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
-    MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
+    DocumentRewriteStartedBody, DocumentStorageChangedBody, DriftDetectedBody,
+    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventKind, GoalEndedBody, GoalEndedBodyOutcome, GoalIdBody,
+    GoalMeasuredBody, GoalMeasuredBodySource, GoalPlannedBody, GoalSetBody, Heard,
+    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, LocalDocumentsWrittenBody,
+    LocalDocumentsWrittenBodyBy, MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope,
+    MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
+    MarketingCampaignPausedBody, MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody,
+    MarketingPlanBudget, MarketingPlanCampaign, MarketingPlanCampaignChannel,
+    MarketingPlanEndedBody, MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
     MarketingPlanProposedBody, MarketingPlanProposedBodyFormat, MarketingPlanReturnedBody,
-    MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
-    PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
-    ProjectStartedBody, ProposedRequest, PullRequestConflictedBody, PullRequestOpenedBody,
+    MemoryWrittenBody, MergePermissionBody, MessagePostedBody, NoteWrittenBody,
+    NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
+    ProductDocWrittenBody, ProjectScannedBody, ProjectStartedBody, ProposedRequest,
+    PullRequestConflictedBody, PullRequestMergedBody, PullRequestOpenedBody,
     PullRequestRefreshedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
     RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
     SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
@@ -301,6 +304,17 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::WorktreeTidied => "worktreeTidiedBody",
         EventKind::PullRequestConflicted => "pullRequestConflictedBody",
         EventKind::PullRequestRefreshed => "pullRequestRefreshedBody",
+        EventKind::GoalSet => "goalSetBody",
+        EventKind::GoalPaused | EventKind::GoalResumed => "goalIdBody",
+        EventKind::GoalEnded => "goalEndedBody",
+        EventKind::GoalMeasured => "goalMeasuredBody",
+        EventKind::GoalPlanned => "goalPlannedBody",
+        EventKind::DocumentStorageChanged => "documentStorageChangedBody",
+        EventKind::LocalDocumentsWritten => "localDocumentsWrittenBody",
+        EventKind::MergePermissionGranted | EventKind::MergePermissionWithdrawn => {
+            "mergePermissionBody"
+        }
+        EventKind::PullRequestMerged => "pullRequestMergedBody",
     }
 }
 
@@ -405,6 +419,9 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::ContractLocked(body) => Some(("locked_by", &mut body.locked_by)),
         EventBody::ContractUnlocked(body) => Some(("unlocked_by", &mut body.unlocked_by)),
         EventBody::TeamUpdated(body) => Some(("updated_by", &mut body.updated_by)),
+        EventBody::MergePermissionGranted(body) | EventBody::MergePermissionWithdrawn(body) => {
+            Some(("by", &mut body.by))
+        }
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::TaskTransitioned(body) => Some(("requested_by", &mut body.requested_by)),
         EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),
@@ -521,13 +538,22 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::ConnectionRequested(_)
         | EventBody::WorktreeTidied(_)
         | EventBody::PullRequestConflicted(_)
-        | EventBody::PullRequestRefreshed(_) => None,
+        | EventBody::PullRequestRefreshed(_)
+        | EventBody::GoalSet(_)
+        | EventBody::GoalPaused(_)
+        | EventBody::GoalResumed(_)
+        | EventBody::GoalEnded(_)
+        | EventBody::GoalMeasured(_)
+        | EventBody::GoalPlanned(_)
+        | EventBody::DocumentStorageChanged(_)
+        | EventBody::LocalDocumentsWritten(_)
+        | EventBody::PullRequestMerged(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 123] = [
+pub const EVERY_KIND: [EventKind; 134] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -651,6 +677,17 @@ pub const EVERY_KIND: [EventKind; 123] = [
     EventKind::WorktreeTidied,
     EventKind::PullRequestConflicted,
     EventKind::PullRequestRefreshed,
+    EventKind::GoalSet,
+    EventKind::GoalPaused,
+    EventKind::GoalResumed,
+    EventKind::GoalEnded,
+    EventKind::GoalMeasured,
+    EventKind::GoalPlanned,
+    EventKind::DocumentStorageChanged,
+    EventKind::LocalDocumentsWritten,
+    EventKind::MergePermissionGranted,
+    EventKind::MergePermissionWithdrawn,
+    EventKind::PullRequestMerged,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -1061,6 +1098,39 @@ pub enum EventBody {
     /// An accepted task's pull request stopped merging and Catervas brought it up to date (ADR 0069).
     #[serde(rename = "pull_request.refreshed")]
     PullRequestRefreshed(PullRequestRefreshedBody),
+    /// The owner set a goal, or edited the standing one (ADR 0075).
+    #[serde(rename = "goal.set")]
+    GoalSet(GoalSetBody),
+    /// The owner paused the goal.
+    #[serde(rename = "goal.paused")]
+    GoalPaused(GoalIdBody),
+    /// The owner resumed the goal, or told a stalled one to keep going.
+    #[serde(rename = "goal.resumed")]
+    GoalResumed(GoalIdBody),
+    /// The owner ended the goal, reached or dropped.
+    #[serde(rename = "goal.ended")]
+    GoalEnded(GoalEndedBody),
+    /// The goal's number was read by an agent or told by the owner.
+    #[serde(rename = "goal.measured")]
+    GoalMeasured(GoalMeasuredBody),
+    /// A planning round ended, with the requests it filed.
+    #[serde(rename = "goal.planned")]
+    GoalPlanned(GoalPlannedBody),
+    /// The owner chose to keep the team's documents on this computer, or to put them back (ADR 0074).
+    #[serde(rename = "document_storage.changed")]
+    DocumentStorageChanged(DocumentStorageChangedBody),
+    /// Documents kept on this computer were written (ADR 0074).
+    #[serde(rename = "local_documents.written")]
+    LocalDocumentsWritten(LocalDocumentsWrittenBody),
+    /// `merge_permission.granted`: the owner confirmed the warning on this computer (ADR 0073).
+    #[serde(rename = "merge_permission.granted")]
+    MergePermissionGranted(MergePermissionBody),
+    /// `merge_permission.withdrawn`: the owner turned merging off.
+    #[serde(rename = "merge_permission.withdrawn")]
+    MergePermissionWithdrawn(MergePermissionBody),
+    /// `pull_request.merged`: Catervas merged a pull request itself.
+    #[serde(rename = "pull_request.merged")]
+    PullRequestMerged(PullRequestMergedBody),
 }
 
 impl EventBody {
@@ -1192,6 +1262,17 @@ impl EventBody {
             Self::WorktreeTidied(_) => EventKind::WorktreeTidied,
             Self::PullRequestConflicted(_) => EventKind::PullRequestConflicted,
             Self::PullRequestRefreshed(_) => EventKind::PullRequestRefreshed,
+            Self::GoalSet(_) => EventKind::GoalSet,
+            Self::GoalPaused(_) => EventKind::GoalPaused,
+            Self::GoalResumed(_) => EventKind::GoalResumed,
+            Self::GoalEnded(_) => EventKind::GoalEnded,
+            Self::GoalMeasured(_) => EventKind::GoalMeasured,
+            Self::GoalPlanned(_) => EventKind::GoalPlanned,
+            Self::DocumentStorageChanged(_) => EventKind::DocumentStorageChanged,
+            Self::LocalDocumentsWritten(_) => EventKind::LocalDocumentsWritten,
+            Self::MergePermissionGranted(_) => EventKind::MergePermissionGranted,
+            Self::MergePermissionWithdrawn(_) => EventKind::MergePermissionWithdrawn,
+            Self::PullRequestMerged(_) => EventKind::PullRequestMerged,
         }
     }
 }
@@ -1552,7 +1633,11 @@ mod tests {
                 // do design_plan.approved, design_plan.returned and preview.stopped, and
                 // tool_approval.granted and tool_approval.refused; no others do, and a
                 // fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 6] = [
+                let shared: [&[EventKind]; 8] = [
+                    &[
+                        EventKind::MergePermissionGranted,
+                        EventKind::MergePermissionWithdrawn,
+                    ],
                     &[
                         EventKind::SkillAdded,
                         EventKind::SkillChanged,
@@ -1581,6 +1666,8 @@ mod tests {
                         EventKind::PurchaseOrderRejected,
                         EventKind::PurchaseOrderClosed,
                     ],
+                    // A goal paused and a goal resumed are `{ goal }` alone.
+                    &[EventKind::GoalPaused, EventKind::GoalResumed],
                 ];
                 if other == kind
                     || shared
@@ -2212,7 +2299,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 123);
+        assert_eq!(EVERY_KIND.len(), 134);
     }
 
     #[test]
@@ -2241,7 +2328,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 123);
+        assert_eq!(EVERY_KIND.len(), 134);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2640,6 +2727,62 @@ mod tests {
         assert_eq!(event_to_value(&event), created);
     }
 
+    /// A wire event of one kind with the body replaced.
+    fn with_body(kind: EventKind, body: serde_json::Value) -> serde_json::Value {
+        let mut wire = an_event_wire(kind);
+        wire["body"] = body;
+        wire
+    }
+
+    #[test]
+    fn reads_the_goal_events() {
+        let set = json!({
+            "goal": "goal-1", "words": "Reach 10 paying customers", "target": 10.0,
+            "unit": "paying customers", "server": "stripe"
+        });
+        for (kind, body) in [
+            (EventKind::GoalSet, set.clone()),
+            (EventKind::GoalPaused, json!({ "goal": "goal-1" })),
+            (EventKind::GoalResumed, json!({ "goal": "goal-1" })),
+            (
+                EventKind::GoalEnded,
+                json!({ "goal": "goal-1", "outcome": "reached" }),
+            ),
+            (
+                EventKind::GoalMeasured,
+                json!({
+                    "goal": "goal-1", "value": 4.0, "source": "connector", "server": "stripe",
+                    "note": "Four active subscriptions."
+                }),
+            ),
+            (
+                EventKind::GoalPlanned,
+                json!({ "goal": "goal-1", "filed": ["CTV-3", "CTV-4"] }),
+            ),
+        ] {
+            let wire = with_body(kind, body);
+            let event = event_from_value(&wire).expect("a goal event reads");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event), wire, "{kind}");
+        }
+
+        let mut extra = set;
+        extra["x"] = json!(1);
+        assert!(event_from_value(&with_body(EventKind::GoalSet, extra)).is_err());
+        let guess = json!({ "goal": "goal-1", "value": 4, "source": "guess" });
+        assert!(event_from_value(&with_body(EventKind::GoalMeasured, guess)).is_err());
+
+        let mut created = an_event_wire(EventKind::TaskCreated);
+        created["body"]["goal"] = json!("goal-1");
+        let event = event_from_value(&created).expect("a task created for a goal reads");
+        assert_eq!(event_to_value(&event), created);
+
+        let mut started = an_event_wire(EventKind::SessionStarted);
+        started["body"]["purpose"] = json!("goal");
+        let event = event_from_value(&started).expect("a goal session reads");
+        assert_eq!(event_to_value(&event), started);
+    }
+
     #[test]
     fn reads_a_task_created_that_rederives() {
         let mut wire = an_event_wire(EventKind::TaskCreated);
@@ -2672,7 +2815,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 123);
+        assert_eq!(EVERY_KIND.len(), 134);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2813,7 +2956,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 123);
+        assert_eq!(EVERY_KIND.len(), 134);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3128,7 +3271,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 123);
+        assert_eq!(EVERY_KIND.len(), 134);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

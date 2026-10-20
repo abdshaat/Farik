@@ -38,6 +38,8 @@ pub enum SessionPurpose {
     Conversation,
     /// Answering the user in the agent's one-to-one chat, on the read tier alone (ADR 0026).
     Chat,
+    /// Working towards the owner's goal: planning its next steps, or reading its number (ADR 0075).
+    Goal,
 }
 
 /// Whether a session works on a task: only an `implement` session about one does. Every other

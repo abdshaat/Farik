@@ -179,7 +179,18 @@
         "connection.requested",
         "worktree.tidied",
         "pull_request.conflicted",
-        "pull_request.refreshed"
+        "pull_request.refreshed",
+        "goal.set",
+        "goal.paused",
+        "goal.resumed",
+        "goal.ended",
+        "goal.measured",
+        "goal.planned",
+        "document_storage.changed",
+        "local_documents.written",
+        "merge_permission.granted",
+        "merge_permission.withdrawn",
+        "pull_request.merged"
       ]
     },
     "eventBodyWire": {
@@ -298,7 +309,16 @@
         { "$ref": "#/$defs/connectionRequestedBody" },
         { "$ref": "#/$defs/worktreeTidiedBody" },
         { "$ref": "#/$defs/pullRequestConflictedBody" },
-        { "$ref": "#/$defs/pullRequestRefreshedBody" }
+        { "$ref": "#/$defs/pullRequestRefreshedBody" },
+        { "$ref": "#/$defs/goalSetBody" },
+        { "$ref": "#/$defs/goalIdBody" },
+        { "$ref": "#/$defs/goalEndedBody" },
+        { "$ref": "#/$defs/goalMeasuredBody" },
+        { "$ref": "#/$defs/goalPlannedBody" },
+        { "$ref": "#/$defs/documentStorageChangedBody" },
+        { "$ref": "#/$defs/localDocumentsWrittenBody" },
+        { "$ref": "#/$defs/mergePermissionBody" },
+        { "$ref": "#/$defs/pullRequestMergedBody" }
       ]
     },
     "contractSummary": {
@@ -351,6 +371,10 @@
           "maxLength": 512,
           "pattern": "^docs/catervas/.+\\.agent\\.(md|html)$",
           "description": "The .agent.md or .agent.html twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+        },
+        "goal": {
+          "$ref": "#/$defs/goalId",
+          "description": "The owner's goal this request was filed towards (docs/SPEC.md 5.18; ADR 0075); written by catervas_file_goal_work alone. Such a request is triaged at filing."
         },
         "filed_as": {
           "type": "string",
@@ -452,7 +476,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model_id", "usage", "cost_usd"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal"] },
         "model_id": { "type": "string", "minLength": 1 },
         "usage": { "$ref": "#/$defs/tokenUsage" },
         "cost_usd": { "type": "number", "minimum": 0 },
@@ -664,7 +688,7 @@
     },
     "taskIntegratedBody": {
       "title": "Task Integrated Body",
-      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Catervas's own merge and human for the human's integrate or a pull request the human merged on the forge.",
+      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Catervas's own merge, also when Catervas merged the pull request itself (ADR 0073), and human for the human's integrate or a pull request the human merged on the forge.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sha", "into", "integrated_by"],
@@ -996,7 +1020,7 @@
     },
     "attachmentPaths": {
       "title": "Attachment Paths",
-      "description": "The documents the owner attached to what they said (docs/SPEC.md 5.17, ADR 0073): one to five attached documents, each a path a document.attached recorded, in the order the owner gave them. Written only when there are some.",
+      "description": "The documents the owner attached to what they said (docs/SPEC.md 5.17, ADR 0076): one to five attached documents, each a path a document.attached recorded, in the order the owner gave them. Written only when there are some.",
       "type": "array",
       "minItems": 1,
       "maxItems": 5,
@@ -1799,6 +1823,10 @@
       "description": "The numbers of the proposals one decision covers; a proposal's number is its event's seq."
     },
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "folderDocSha": { "type": "string", "minLength": 1 },
+    "localDocumentPath": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "localWriterId": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "localTaskId": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
     "folderChangeBranch": {
       "type": "string",
       "maxLength": 64,
@@ -1873,7 +1901,7 @@
     },
     "documentAttachedBody": {
       "title": "Document Attached Body",
-      "description": "The owner attached a file (docs/SPEC.md 5.17, ADR 0073): Catervas turned it into the Markdown document at path, an attached document under the product or the architecture folder, which folder_doc.edited, recorded just before, committed as a folder change. name is the file's own name and media_type what it was read as. The envelope names no agent, no session and no task.",
+      "description": "The owner attached a file (docs/SPEC.md 5.17, ADR 0076): Catervas turned it into the Markdown document at path, an attached document under the product or the architecture folder, which folder_doc.edited, recorded just before, committed as a folder change. name is the file's own name and media_type what it was read as. The envelope names no agent, no session and no task.",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "name", "media_type"],
@@ -2057,6 +2085,73 @@
         "paths": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
       }
     },
+    "goalId": {
+      "type": "string",
+      "pattern": "^goal-[1-9][0-9]*$",
+      "description": "The owner's goal, counted from 1 in the project's log (docs/SPEC.md 5.18)."
+    },
+    "goalSetBody": {
+      "title": "Goal Set Body",
+      "description": "The owner set a goal, or edited the standing one: an edit records this again with the same goal (docs/SPEC.md 5.18; ADR 0075). target and unit come together; server is the connector an active agent reads the number from, and only a goal with a target has one. It names no agent and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "words"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "words": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "target": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "goalIdBody": {
+      "title": "Goal Id Body",
+      "description": "The body of goal.paused and goal.resumed. paused: the owner paused the goal, so no round and no reading runs until it resumes. resumed: the owner resumed it, or told a stalled one to keep going, which is the owner's word and clears a stall (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": { "goal": { "$ref": "#/$defs/goalId" } }
+    },
+    "goalEndedBody": {
+      "title": "Goal Ended Body",
+      "description": "The owner ended the goal: reached, or dropped. Only the owner marks a goal reached (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "outcome"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "outcome": { "type": "string", "enum": ["reached", "dropped"] }
+      }
+    },
+    "goalMeasuredBody": {
+      "title": "Goal Measured Body",
+      "description": "The goal's number was read: by an agent from the goal's connector (source connector, with the server and the agent and session on the envelope), or told by the owner (source owner, no agent). note is the agent's own words on what it counted (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "value", "source"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "value": { "type": "number", "minimum": 0 },
+        "source": { "type": "string", "enum": ["connector", "owner"] },
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "note": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "goalPlannedBody": {
+      "title": "Goal Planned Body",
+      "description": "A planning round ended: filed names the requests it filed towards the goal, none when it found nothing more to plan. Catervas records it; the envelope names the planner and the session (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "filed"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "filed": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
+      }
+    },
     "pullRequestRefreshedBody": {
       "title": "Pull Request Refreshed Body",
       "description": "An accepted task's pull request stopped merging, and Catervas brought its branch up to date with a clean merge and pushed it (ADR 0069, docs/SPEC.md 5.14): url is the pull request, sha the merge commit now at the branch's tip. It is about one task and names no actor.",
@@ -2066,6 +2161,56 @@
       "properties": {
         "url": { "type": "string" },
         "sha": { "type": "string" }
+      }
+    },
+    "documentStorageChangedBody": {
+      "title": "Document Storage Changed Body",
+      "description": "The owner chose where the team's documents are kept (ADR 0074, docs/SPEC.md 5.17): local is true to keep them on this computer, out of the repository, and false to put them back. change, branch and sha name the folder change that moves them (docs/SPEC.md 5.14), all null when there was nothing to move. It is the owner's: the envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local", "change", "branch", "sha"],
+      "properties": {
+        "local": { "type": "boolean" },
+        "change": { "oneOf": [{ "$ref": "#/$defs/folderChangeNumber" }, { "type": "null" }] },
+        "branch": { "oneOf": [{ "$ref": "#/$defs/folderChangeBranch" }, { "type": "null" }] },
+        "sha": { "oneOf": [{ "$ref": "#/$defs/folderDocSha" }, { "type": "null" }] }
+      }
+    },
+    "localDocumentsWrittenBody": {
+      "title": "Local Documents Written Body",
+      "description": "Documents kept on this computer were written (ADR 0074, docs/SPEC.md 5.17): paths are the files written and removed the files deleted, repository paths under docs/catervas. by is owner for a save on the Files page, agent for catervas_write_folder_doc (written_by names the agent and the envelope names it and its session) and task for a task's documents landing when it was accepted (task_id names it). set_aside lists the documents of a task whose version was not put in because the file changed meanwhile. It is about no contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "removed", "by", "written_by", "task_id", "set_aside"],
+      "properties": {
+        "paths": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } },
+        "removed": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } },
+        "by": { "type": "string", "enum": ["owner", "agent", "task"] },
+        "written_by": { "oneOf": [{ "$ref": "#/$defs/localWriterId" }, { "type": "null" }] },
+        "task_id": { "oneOf": [{ "$ref": "#/$defs/localTaskId" }, { "type": "null" }] },
+        "set_aside": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } }
+      }
+    },
+    "mergePermissionBody": {
+      "title": "Merge Permission Body",
+      "description": "The body of both merge_permission.granted and merge_permission.withdrawn (ADR 0073). The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is: a team.paused body is also a by alone, so this one carries into as well. granted: the owner confirmed the warning on this computer, and Catervas may merge its pull requests once GitHub's checks pass. withdrawn: the owner turned merging off. by is who did, into the resolved integration branch. It is about no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by", "into"],
+      "properties": {
+        "by": { "type": "string" },
+        "into": { "type": "string" }
+      }
+    },
+    "pullRequestMergedBody": {
+      "title": "Pull Request Merged Body",
+      "description": "Catervas merged a pull request itself, once GitHub's checks passed (ADR 0073): url is the pull request and method the one used. It is about no task, even for a task's pull request, and names no actor; the integrated event that follows ties it to the work.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "method"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "enum": ["merge", "squash", "rebase"] }
       }
     },
     "connectorTag": {
@@ -2162,7 +2307,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal"] },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },

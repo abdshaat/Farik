@@ -279,22 +279,35 @@ impl Harness {
         agent: &str,
         change: impl FnOnce(&mut Value),
     ) {
-        self.project.filed_given_to(task, status, agent, |wire| {
-            wire["assignee_role"] = json!("software_developer");
-            wire["reviewer_role"] = json!("software_developer");
-            wire["allowed_paths"] = json!(["done.txt"]);
-            wire["exit_criteria"] = json!([{
-                "id": "C1",
-                "text": "done.txt exists.",
-                "satisfies": ["R1"],
-                "verification": {
-                    "method": "command",
-                    "command": "test -f done.txt",
-                    "expect": { "exit_code": 0 }
-                }
-            }]);
-            change(wire);
-        });
+        self.file_given_with(task, status, agent, &json!({}), change);
+    }
+
+    /// `file_given`, the `task.created` body also holding `more`.
+    pub(crate) fn file_given_with(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        more: &Value,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.project
+            .filed_given_with(task, status, agent, more, |wire| {
+                wire["assignee_role"] = json!("software_developer");
+                wire["reviewer_role"] = json!("software_developer");
+                wire["allowed_paths"] = json!(["done.txt"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "done.txt exists.",
+                    "satisfies": ["R1"],
+                    "verification": {
+                        "method": "command",
+                        "command": "test -f done.txt",
+                        "expect": { "exit_code": 0 }
+                    }
+                }]);
+                change(wire);
+            });
     }
 
     /// Files a request titled `title`, as the human does through `file_request`: step 11's CTV-1
@@ -1648,12 +1661,14 @@ impl FakeGh {
         let script = format!(
             "#!/bin/sh\n\
              dir='{dir}'\n\
-             sub=\"$2\"\n\
+             sub=$(printf '%s' \"$2\" | tr '/' '_')\n\
              for arg in \"$@\"; do printf '%s\\0' \"$arg\"; done >> \"$dir/calls\"\n\
              printf '\\n' >> \"$dir/calls\"\n\
              pwd -P >> \"$dir/cwds\"\n\
              cat > \"$dir/$sub.stdin\"\n\
-             if [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
+             n=$(cat \"$dir/$sub.n\" 2>/dev/null || echo 0); n=$((n+1)); echo \"$n\" > \"$dir/$sub.n\"\n\
+             if [ -f \"$dir/$sub.out.$n\" ]; then cat \"$dir/$sub.out.$n\"; \
+             elif [ -f \"$dir/$sub.out\" ]; then cat \"$dir/$sub.out\"; fi\n\
              if [ -f \"$dir/$sub.err\" ]; then cat \"$dir/$sub.err\" >&2; fi\n\
              code=0\n\
              if [ -f \"$dir/$sub.code\" ]; then code=$(cat \"$dir/$sub.code\"); fi\n\
@@ -1678,10 +1693,21 @@ impl FakeGh {
     }
 
     /// Makes `sub` print `stdout` and `stderr` and exit with `code`.
+    /// A `sub` with slashes (`gh api repos/{owner}/{repo}`) is kept in one file, slashes as
+    /// underscores, as the script does.
     pub(crate) fn answers(&self, sub: &str, stdout: &str, stderr: &str, code: i32) -> &Self {
+        let sub = sub.replace('/', "_");
         std::fs::write(self.dir.join(format!("{sub}.out")), stdout).expect("written");
         std::fs::write(self.dir.join(format!("{sub}.err")), stderr).expect("written");
         std::fs::write(self.dir.join(format!("{sub}.code")), code.to_string()).expect("written");
+        self
+    }
+
+    /// Makes the `turn`th call of `sub` (from 1) print `stdout`, whatever `answers` says, so that
+    /// a pull request read twice can be open and then merged.
+    pub(crate) fn answers_on_call(&self, sub: &str, turn: u32, stdout: &str) -> &Self {
+        let sub = sub.replace('/', "_");
+        std::fs::write(self.dir.join(format!("{sub}.out.{turn}")), stdout).expect("written");
         self
     }
 

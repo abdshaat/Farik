@@ -187,7 +187,7 @@ pub fn fields_not_the_authors(wire: &Value) -> Vec<&'static str> {
 /// The contract goes through `command_from_value`, so that a request filed from a terminal is held
 /// to exactly the rules one arriving from an agent is.
 ///
-/// `attachments` are the documents the owner attached (ADR 0073), already checked by the caller
+/// `attachments` are the documents the owner attached (ADR 0076), already checked by the caller
 /// against what `document.attached` recorded: `task.created` names them.
 ///
 /// With `from_chat_message`, the request is a chat's proposal the user sent: that seq must be an
@@ -228,6 +228,7 @@ pub fn file_request(
             given_to: None,
             filed_as: None,
             attachments,
+            goal: None,
         },
         (now, ids),
     )
@@ -347,6 +348,7 @@ pub fn file_rederive_request(
             given_to: None,
             filed_as: None,
             attachments: &[],
+            goal: None,
         },
         (now, ids),
     )
@@ -383,6 +385,7 @@ pub fn file_raise_request(
             given_to: None,
             filed_as: None,
             attachments: &[],
+            goal: None,
         },
         (now, ids),
     )
@@ -419,6 +422,7 @@ pub fn file_bug(
             given_to: None,
             filed_as: None,
             attachments: &[],
+            goal: None,
         },
         (now, ids),
     )
@@ -461,6 +465,7 @@ pub fn file_given_task(
             given_to: Some(given_to),
             filed_as: None,
             attachments,
+            goal: None,
         },
         (now, ids),
     )
@@ -483,6 +488,68 @@ pub fn given_to(log: &EventLog, task: &TaskId) -> Result<Option<String>, StoreEr
         .into_iter()
         .find_map(|event| match event.body {
             EventBody::TaskCreated(body) => body.given_to.map(|agent| agent.to_string()),
+            _ => None,
+        }))
+}
+
+/// Files a request planned towards the owner's goal as a draft created by `created_by` (ADR 0075):
+/// `task.created` names the `goal`, and `request.triaged { size }` by `catervas` follows at once,
+/// so that no triage session runs. With `given_to` the request is also given to that agent, as
+/// `file_given_task` gives one, but with no chat message behind it.
+///
+/// # Errors
+///
+/// As [`file_request`].
+#[allow(clippy::too_many_arguments)]
+pub fn file_goal_request(
+    files: &ProjectFiles,
+    log: &EventLog,
+    wire: Value,
+    created_by: &str,
+    goal: &str,
+    size: RequestTriagedBodySize,
+    given_to: Option<&str>,
+    now: DateTime<Utc>,
+    ids: &EventIds,
+) -> Result<TaskContract, RequestError> {
+    file(
+        files,
+        log,
+        wire,
+        Filing {
+            created_by,
+            parent: None,
+            from_chat_message: None,
+            raises: None,
+            found_by: None,
+            rederives: None,
+            product_plan: false,
+            catervafies: None,
+            given_to,
+            filed_as: None,
+            goal: Some((goal, size)),
+            attachments: &[],
+        },
+        (now, ids),
+    )
+}
+
+/// The goal `task` was planned towards, when it was (`task.created`'s `goal`).
+///
+/// # Errors
+///
+/// The log could not be read.
+pub fn goal_of(log: &EventLog, task: &TaskId) -> Result<Option<String>, StoreError> {
+    Ok(log
+        .read(&EventQuery {
+            task_id: Some(task.clone()),
+            kinds: vec![EventKind::TaskCreated],
+            limit: Some(1),
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .find_map(|event| match event.body {
+            EventBody::TaskCreated(body) => body.goal.map(|goal| goal.to_string()),
             _ => None,
         }))
 }
@@ -587,6 +654,7 @@ pub fn file_product_plan_request(
             given_to: None,
             filed_as: None,
             attachments: &[],
+            goal: None,
         },
         (now, ids),
     )
@@ -623,6 +691,7 @@ pub fn file_catervafication_epic(
             given_to: None,
             filed_as: None,
             attachments: &[],
+            goal: None,
         },
         (now, ids),
     )
@@ -883,6 +952,7 @@ pub fn file_small_request(
             given_to: None,
             filed_as: Some((filed_as, reason)),
             attachments: &[],
+            goal: None,
         },
         (now, ids),
     )
@@ -904,8 +974,10 @@ struct Filing<'a> {
     given_to: Option<&'a str>,
     /// How a whole contract was filed, and why it is triaged small.
     filed_as: Option<(TaskCreatedBodyFiledAs, &'a str)>,
-    /// The documents the owner attached to the request (ADR 0073), checked by whoever files it.
+    /// The documents the owner attached to the request (ADR 0076), checked by whoever files it.
     attachments: &'a [String],
+    /// The goal this request is planned towards, and the size its planner gave it (ADR 0075).
+    goal: Option<(&'a str, RequestTriagedBodySize)>,
 }
 
 fn file(
@@ -1040,6 +1112,7 @@ fn creation_bodies(
         filed_as,
         given_to,
         attachments,
+        goal,
     } = filing;
     let mut bodies = vec![EventBody::TaskCreated(TaskCreatedBody {
         created_by: created_by.to_string(),
@@ -1067,6 +1140,15 @@ fn creation_bodies(
             })
             .transpose()?,
         filed_as: filed_as.map(|(kind, _)| kind),
+        goal: goal
+            .map(|(goal, _)| {
+                goal.to_string()
+                    .try_into()
+                    .map_err(|_| RequestError::Refused {
+                        reason: format!("is towards {goal:?}, which is no goal's id"),
+                    })
+            })
+            .transpose()?,
         given_to: given_to
             .map(|agent| {
                 agent
@@ -1102,10 +1184,17 @@ fn creation_bodies(
             triaged_by: "catervas".to_string(),
         }));
     }
-    if let Some(agent) = given_to {
+    if let (Some(agent), None) = (given_to, goal) {
         bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
             size: RequestTriagedBodySize::Small,
             reason: format!("a task the owner gave {agent} in their chat"),
+            triaged_by: "catervas".to_string(),
+        }));
+    }
+    if let Some((goal, size)) = goal {
+        bodies.push(EventBody::RequestTriaged(RequestTriagedBody {
+            size,
+            reason: format!("planned towards {goal}"),
             triaged_by: "catervas".to_string(),
         }));
     }
@@ -2244,6 +2333,100 @@ mod tests {
             refused(given(wire(), elsewhere)),
             format!("links to message {elsewhere}, which is not the owner's message in dev's chat")
         );
+    }
+
+    #[test]
+    fn files_goal_work_triaged_by_its_planner() {
+        use super::{file_goal_request, goal_of};
+        let (project, log) = a_project("requests-goal");
+        let files = project.files();
+        let wire = |title: &str| {
+            request_from_brief(title, "Build what the goal needs, in small steps.", 20.0)
+                .expect("a request")
+        };
+
+        let large = file_goal_request(
+            &files,
+            &log,
+            wire("Take payments"),
+            "pm",
+            "goal-1",
+            RequestTriagedBodySize::Large,
+            None,
+            at(),
+            &ids(),
+        )
+        .expect("the work is filed");
+        assert_eq!(large.id.as_str(), "CTV-1");
+        assert_eq!(large.status, TaskStatus::Draft);
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        let EventBody::TaskCreated(created) = &events[0].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(
+            created.goal.as_ref().map(|goal| goal.as_str()),
+            Some("goal-1")
+        );
+        assert_eq!(created.created_by, "pm");
+        let EventBody::RequestTriaged(triaged) = &events[1].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Large);
+        assert_eq!(triaged.reason, "planned towards goal-1");
+        assert_eq!(triaged.triaged_by, "catervas");
+        assert_eq!(events.len(), 2);
+
+        let small = file_goal_request(
+            &files,
+            &log,
+            wire("Add a pricing page"),
+            "theo",
+            "goal-1",
+            RequestTriagedBodySize::Small,
+            Some("theo"),
+            at(),
+            &ids(),
+        )
+        .expect("the work is filed");
+        assert_eq!(small.id.as_str(), "CTV-2");
+        let events = log.read(&EventQuery::default()).expect("the log reads");
+        assert_eq!(
+            events.len(),
+            4,
+            "one triage, not a second for the given task"
+        );
+        let EventBody::TaskCreated(created) = &events[2].body else {
+            panic!("a task.created");
+        };
+        assert_eq!(
+            created.given_to.as_ref().map(|agent| agent.as_str()),
+            Some("theo")
+        );
+        assert!(created.from_chat_message.is_none());
+        let EventBody::RequestTriaged(triaged) = &events[3].body else {
+            panic!("a request.triaged");
+        };
+        assert_eq!(triaged.size, RequestTriagedBodySize::Small);
+
+        let plain = file_request(
+            &files,
+            &log,
+            a_request(),
+            "human",
+            None,
+            at(),
+            &ids(),
+            None,
+            &[],
+        )
+        .expect("a plain request");
+        for task in [&large.id, &small.id] {
+            assert_eq!(
+                goal_of(&log, task).expect("reads").as_deref(),
+                Some("goal-1")
+            );
+        }
+        assert_eq!(goal_of(&log, &plain.id).expect("reads"), None);
     }
 
     #[test]

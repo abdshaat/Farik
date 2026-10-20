@@ -113,6 +113,9 @@ pub(super) struct Resume {
     /// the task's pull request stopped merging and no move into `verifying` has followed
     /// (ADR 0069).
     pub(super) conflicts: Option<(String, Vec<String>)>,
+    /// Whether the team's documents are kept on this computer (ADR 0074), and when they are,
+    /// whether the task has no branch because it changes documents only.
+    pub(super) local_documents: Option<bool>,
 }
 
 /// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
@@ -223,6 +226,31 @@ pub(super) fn refine_message(
 /// What the agent a task was given to in its chat is told before the refine message (ADR 0063).
 /// `{name}` is the agent's display name and `{role}` its role's wire name.
 pub(super) const GIVEN_TASK_LEAD: &str = "{name}, the owner gave you this task in your one-to-one chat, and you write its contract yourself, as the Product Manager would. Its intent is their words: keep it, and set its scope, requirements, exit criteria, allowed paths and budget. Its assignee_role stays {role}: you do the work once it is ready. Only a code change is reviewed; a task that changes no code is checked by its command, test and artifact criteria alone. Ask the owner first with catervas_ask_human only if you cannot write it without an answer.";
+
+/// What the agent that filed a task towards the owner's goal is told before the refine message
+/// (ADR 0075). `{name}` is the agent's display name, `{goal}` the goal's words and `{role}` the
+/// agent's role's wire name.
+pub(super) const GOAL_TASK_LEAD: &str = "{name}, you filed this task working towards the owner's goal \u{201c}{goal}\u{201d}, and you write its contract yourself, as the Product Manager would. Its intent is the request you filed: keep it, and set its scope, requirements, exit criteria, allowed paths and budget. Its assignee_role stays {role}: you do the work once it is ready. Only a code change is reviewed; a task that changes no code is checked by its command, test and artifact criteria alone. Ask the owner first with catervas_ask_human only if you cannot write it without an answer.";
+
+/// The refine session's message for a task `agent` filed towards the goal whose words are `goal`:
+/// `GOAL_TASK_LEAD`, a blank line, then [`refine_message`].
+pub(super) fn goal_task_message(
+    contract: &TaskContract,
+    agent: &Agent,
+    goal: &str,
+    first: bool,
+    failures: &[String],
+    stuck: Option<&Blocker>,
+) -> String {
+    format!(
+        "{}\n\n{}",
+        GOAL_TASK_LEAD
+            .replace("{name}", agent.display_name.as_str())
+            .replace("{goal}", goal)
+            .replace("{role}", &agent.role.to_string()),
+        refine_message(contract, first, failures, stuck)
+    )
+}
 
 /// The refine session's message for a task given to `agent` in its chat: `GIVEN_TASK_LEAD`, a
 /// blank line, then [`refine_message`].
@@ -1011,12 +1039,23 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
             "Do the work of {task} under its contract, in your private folder, `{folder}`, where \
              nothing is committed."
         )
+    } else if resume.local_documents == Some(true) {
+        format!(
+            "Do the work of {task} under its contract, in this worktree. This task has no branch \
+             and needs no commit."
+        )
     } else {
         format!(
             "Do the work of {task} under its contract, in this worktree, on the branch {}.",
             task_branch(contract)
         )
     };
+    if resume.local_documents.is_some() {
+        message = format!(
+            "{message}\n\nYour documents in docs/catervas/ are kept on this computer and never \
+             committed: write them, record your criteria, then ask for verifying."
+        );
+    }
     if let Some((failed, reasons)) = &resume.rejection {
         let words = format!("failed criteria: {}\nreasons: {reasons}", listed(failed));
         message = format!(
@@ -1645,6 +1684,7 @@ mod tests {
             rejection: None,
             posts: Vec::new(),
             conflicts: None,
+            local_documents: None,
         }
     }
 

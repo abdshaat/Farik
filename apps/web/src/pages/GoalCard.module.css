@@ -1,0 +1,109 @@
+/* The goal card of the "Today" mockup: the team's aim, outside "Waiting on you". */
+.card {
+	display: grid;
+	gap: var(--catervas-space-3);
+}
+
+/* With no goal, the card is quiet: a dashed box, as the Catervafication card is. */
+.quiet {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-3) var(--catervas-space-4);
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	border: 1px dashed var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+}
+
+.quiet > div {
+	flex: 1 1 20rem;
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+
+.quiet p,
+.note {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+}
+
+.standing {
+	display: grid;
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-raised);
+	background: var(--catervas-color-surface);
+}
+
+.words {
+	margin: 0;
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+
+.count {
+	margin: 0;
+	font-variant-numeric: tabular-nums;
+}
+
+.meter {
+	height: var(--catervas-space-2);
+	max-width: 32rem;
+	background: var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+	overflow: hidden;
+}
+
+.meter > span {
+	display: block;
+	height: 100%;
+	background: var(--catervas-color-status-working);
+}
+
+.status {
+	margin: 0;
+}
+
+.asking {
+	margin: 0;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+}
+
+.buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+}
+
+.more {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+	padding-inline-start: var(--catervas-space-3);
+	border-inline-start: 1px solid var(--catervas-color-rule);
+}
+
+.form {
+	display: grid;
+	gap: var(--catervas-space-3);
+}
+
+.pair {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+	gap: var(--catervas-space-3);
+}
+
+.alert {
+	margin: 0;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+}
+
+.last {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+}

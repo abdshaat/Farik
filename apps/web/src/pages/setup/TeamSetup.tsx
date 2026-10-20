@@ -54,6 +54,8 @@ export type Team = {
 		integrationBranch?: string;
 		/** One agent working alone, outside any team function (ADR 0071). */
 		solo?: boolean;
+		/** Whether the team's documents are kept on this computer, out of git (ADR 0074). */
+		documentsLocal?: boolean;
 		[key: string]: unknown;
 	};
 	rules: {
