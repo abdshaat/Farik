@@ -47,7 +47,13 @@ export const approvesPlan = (e: HistoryEvent) =>
 	(e.kind === "task.transitioned" && e.body.to === "ready");
 
 /** The try in progress, of all the task gets, as `task.tries` works them out. */
-export type Tries = { try: number; of: number };
+export type Tries = {
+	try: number;
+	of: number;
+	/** The task's sessions so far and the most it may have, as the budget counts them. */
+	sessions: number;
+	maxSessions: number;
+};
 type Check = { criterionId: string; text: string; passed: boolean };
 type Diff = {
 	diff: string;

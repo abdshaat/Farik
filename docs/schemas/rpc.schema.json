@@ -3572,11 +3572,23 @@
         "of": {
           "type": "integer",
           "minimum": 1
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The task's work sessions so far, as the budget counts them (a session the provider refused the key of is not one)."
+        },
+        "max_sessions": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The sessions the task may have: the contract's max_sessions, four more for each extra try the owner gave, and the sessions of every room the owner granted."
         }
       },
       "required": [
         "try",
-        "of"
+        "of",
+        "sessions",
+        "max_sessions"
       ]
     },
     "questionsListResult": {

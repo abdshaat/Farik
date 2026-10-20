@@ -746,6 +746,7 @@ export const en = {
 	gateAbout: "About this task",
 	gatePlanApproved: "Plan approved",
 	gateTries: "Tries",
+	helpSessions: "Sessions",
 	triesOf: "{try} of {of}",
 	gateCost: "Cost",
 	gateHistory: "See the whole history",

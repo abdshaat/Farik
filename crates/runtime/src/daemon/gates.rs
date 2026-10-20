@@ -356,7 +356,23 @@ pub(super) fn query(
                         .unwrap_or(u32::MAX)
                         .saturating_add(extra_tries(&history(deps, &task_id)?))
                         .saturating_add(1);
-                    Ok(json!({ "try": row.iteration.saturating_add(1), "of": of }))
+                    // The sessions as the budget counts them, so that a sessions escalation shows
+                    // what it was about (ADR 0081).
+                    let budget = crate::cost::budget_state(
+                        &deps.projections,
+                        &team()?,
+                        contract.assignee_role,
+                        Some(&contract),
+                        &catervas_core::budget::SessionLedger::default(),
+                        deps.clock.now(),
+                    )
+                    .map_err(|e| internal(&e))?;
+                    Ok(json!({
+                        "try": row.iteration.saturating_add(1),
+                        "of": of,
+                        "sessions": budget.task_sessions,
+                        "max_sessions": budget.task_max_sessions,
+                    }))
                 }
                 "escalation.choices" => escalation_choices(deps, &team()?, &task_id),
                 _ => Err(Failure::new(
@@ -4551,6 +4567,33 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_the_sessions_of_a_task() {
+        let harness = driven("gates-sessions");
+        harness.file("CTV-1", "in_progress", |wire| {
+            wire["budget"]["max_sessions"] = json!(6);
+        });
+        for session in ["s-1", "s-2", "s-3"] {
+            harness
+                .project
+                .spent("dev-a", Some("CTV-1"), session, "2026-09-22", (0.1, 1000));
+        }
+        harness.project.record(
+            "CTV-1",
+            "task.room_granted",
+            &json!({ "sessions": 6, "cost_usd": 5.0, "granted_by": "human" }),
+        );
+        let tries = query(
+            &harness.daemon,
+            "task.tries",
+            &json!({ "task_id": "CTV-1" }),
+            "taskTriesResult",
+        );
+        assert_eq!(tries["sessions"], 3, "{tries}");
+        assert_eq!(tries["max_sessions"], 12, "{tries}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_tries() {
         let harness = driven("gates-tries");
         harness.rejected("CTV-1", 3, "C1 still fails");
@@ -4565,13 +4608,15 @@ pub(super) mod tests {
             "escalation.raised",
             &json!({ "reason": "iterations", "detail": "three tries" }),
         );
+        // The tries alone: the sessions are `counts_the_sessions_of_a_task`'s.
         let tries = |task: &str| {
-            query(
+            let answer = query(
                 &harness.daemon,
                 "task.tries",
                 &json!({ "task_id": task }),
                 "taskTriesResult",
-            )
+            );
+            json!({ "try": answer["try"], "of": answer["of"] })
         };
         // Three returns are allowed, so four tries: the fourth, sent back, escalated.
         assert_eq!(tries("CTV-1"), json!({ "try": 4, "of": 4 }));

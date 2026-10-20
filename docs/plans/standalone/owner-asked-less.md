@@ -88,7 +88,7 @@ Files: `runtime/src/cost.rs`, `runtime/src/orchestrator/rules.rs` (`budget`), `r
 Files: `docs/schemas/rpc.schema.json` (`task.tries` result), `runtime/src/daemon/gates.rs` (`task.tries`), `apps/web/src/pages/HelpNeeded.tsx` (+test), `apps/web/src/strings/en.ts`
 - `counts_the_sessions_of_a_task` (daemon/gates.rs) — `task.tries` of a task with 3 work sessions, a budget of 6 and one room grant of 6 answers `sessions: 3, max_sessions: 12`.
 - `shows_the_sessions_of_a_sessions_escalation` (HelpNeeded.test.tsx) — a `sessions` escalation shows "Sessions 6 of 6".
-- [ ] `feat(web): a sessions escalation shows the sessions`
+- [x] `feat(web): a sessions escalation shows the sessions`
 
 ### Task 8: a preview error carries no npm notices
 
