@@ -71,6 +71,7 @@ describe("settings directory", () => {
 		expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
 			[en.sectionGeneral, "/settings/general"],
 			[en.sectionAllowedActions, "/settings/allowed-actions"],
+			[en.sectionRules, "/settings/rules"],
 			[en.sectionSpending, "/settings/spending"],
 			[en.sectionWork, "/settings/work"],
 			[en.sectionYourApp, "/settings/your-app"],
@@ -78,8 +79,8 @@ describe("settings directory", () => {
 			[en.sectionComputer, "/settings/computer"],
 			[en.sectionAccount, "/settings/account"],
 		]);
-		// The team's rules have three sections of their own, not one.
-		expect(links).toHaveLength(8);
+		// The team's rules have four sections of their own, not one.
+		expect(links).toHaveLength(9);
 		expect(links.map((a) => a.textContent)).not.toContain("Your team’s rules");
 		expect(links.map((a) => a.getAttribute("aria-current"))).toEqual(
 			SECTIONS.map((s) => (s.path === "general" ? "page" : null)),
@@ -440,5 +441,76 @@ describe("settings directory", () => {
 			).toBeNull();
 			cleanup();
 		}
+	});
+
+	describe("rules", () => {
+		const rulesTeam = (policy: object = {}, rules: object = {}) => ({
+			team: {
+				name: "Corner Bakery",
+				agents: [agent("software_developer")],
+				budgets: {},
+				policy: { integration: "auto_merge", ...policy },
+				rules,
+			},
+			agents: [],
+			max_agents: 7,
+		});
+		const defaults = { budgets: {}, rules: {}, policy: {}, ui_paths: [] };
+		/** The Rules page, its team answered. */
+		async function rulesPage(team = rulesTeam()) {
+			const { s } = await open("/settings/rules", team);
+			await answerQuery(s, "settings.defaults", defaults);
+			await main().findByRole("heading", {
+				level: 3,
+				name: en.rulesFilesTitle,
+			});
+			return s;
+		}
+		/** The team the last Save sent, in wire form. */
+		const saved = async (s: FakeSocket) => {
+			const frame = await waitFor(() => {
+				const f = s.calls("team.save")[0];
+				if (!f) throw new Error("no team.save was sent");
+				return f;
+			});
+			return frame.params.team as Record<string, unknown>;
+		};
+		const row = (glob: string) =>
+			main().getByRole("group", {
+				name: new RegExp(`\\(${glob.replace(/[.*]/g, "\\$&")}\\)$`),
+			});
+
+		it("lifts_a_shipped_path_makes_it_read_only_and_adds_the_owners_own", async () => {
+			const s = await rulesPage();
+			fireEvent.click(
+				within(row(".env")).getByRole("radio", { name: en.filesReadOnly }),
+			);
+			expect(main().getByText(en.forbiddenSecretsWarn)).toBeTruthy();
+			fireEvent.change(main().getByLabelText(en.filesAdd), {
+				target: { value: "infra/**" },
+			});
+			fireEvent.click(main().getByRole("button", { name: en.filesAddButton }));
+			const save = await main().findByRole("button", { name: en.agentSave });
+			await waitFor(() => expect(save).toHaveProperty("disabled", false));
+			fireEvent.click(save);
+			expect((await saved(s)).rules).toEqual({
+				lifted_paths: [".env"],
+				read_only_paths: [".env"],
+				protected_paths: ["infra/**"],
+			});
+		});
+
+		it("keeps_catervass_own_files_unwritable", async () => {
+			await rulesPage();
+			const own = within(row(".catervas/local/**"));
+			expect(
+				own.getAllByRole("radio").map((r) => r.getAttribute("value")),
+			).toEqual(["off", "read"]);
+			expect(own.queryByRole("radio", { name: en.filesAllowed })).toBeNull();
+			// The other four offer all three answers.
+			expect(
+				within(row(".env")).getByRole("radio", { name: en.filesAllowed }),
+			).toBeTruthy();
+		});
 	});
 });

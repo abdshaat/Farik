@@ -8,6 +8,7 @@ export const en = {
 	settingsBack: "Settings",
 	sectionGeneral: "General",
 	sectionAllowedActions: "Allowed actions",
+	sectionRules: "Rules",
 	sectionSpending: "Spending",
 	sectionWork: "How work runs",
 	sectionYourApp: "Your app",
@@ -16,6 +17,7 @@ export const en = {
 	sectionAccount: "AI account",
 	sectionGeneralSummary: "Theme and language",
 	sectionAllowedActionsSummary: "What agents may do",
+	sectionRulesSummary: "What agents may touch and run",
 	sectionSpendingSummary: "The daily limit",
 	sectionWorkSummary: "How documents are written, and where finished work goes",
 	sectionYourAppSummary: "How to open your app",
@@ -1529,6 +1531,27 @@ export const en = {
 	allowApprovalCount: "{name} has made {used} of {of} {what} {period}.",
 	allowApprovalDay: "today",
 	allowApprovalOnce: "A new number does not allow it; decide it here.",
+	rulesFilesTitle: "Files agents may not touch",
+	rulesFilesLead:
+		"Agents cannot read or change these. Change an answer only if you are sure.",
+	forbiddenRowLegend: "{name} ({glob})",
+	forbiddenSecrets: "Secrets in .env files",
+	forbiddenKeys: "Certificates and keys",
+	forbiddenCatervas: "Catervas’s own files",
+	forbiddenSecretsWarn:
+		"Agents can now read your secrets, and may copy them into code, logs or messages.",
+	forbiddenKeysWarn:
+		"Agents can now read your private keys and certificates, and may copy them into code, logs or messages.",
+	forbiddenCatervasWarn:
+		"Agents can now read your private books and the procurement mail. They still cannot change Catervas’s own files.",
+	filesOffLimits: "Off limits",
+	filesReadOnly: "Read only",
+	filesAllowed: "Allowed",
+	filesOwnTitle: "Your own files",
+	filesAdd: "Add a file or folder pattern",
+	filesAddKind: "How agents may treat it",
+	filesAddButton: "Add",
+	filesRemove: "Remove",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",

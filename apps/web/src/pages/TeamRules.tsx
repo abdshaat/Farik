@@ -23,8 +23,8 @@ import {
 	useDefaults,
 } from "./setup/TeamSetup.tsx";
 
-type Checked = { errors: Refusal[]; effects: string[] };
-type Part = {
+export type Checked = { errors: Refusal[]; effects: string[] };
+export type Part = {
 	saved: Team;
 	defaults: Defaults | undefined;
 	/** The saved team's own check, which a part shows until it has a draft. */
@@ -172,7 +172,7 @@ export function useChange(
 }
 
 /** One part of a page, under its heading. */
-function Part({
+export function Part({
 	id,
 	title,
 	children,

@@ -62,6 +62,12 @@ export type Team = {
 		requireNewTests?: boolean;
 		maxTaskBudgetUsd?: number;
 		uiPaths?: string[];
+		/** Which of the five shipped protected globs no longer apply (ADR 0080). */
+		liftedPaths?: string[];
+		/** Globs an agent may read and no tool may write. */
+		readOnlyPaths?: string[];
+		/** The owner's own off-limits globs, on top of the shipped ones. */
+		protectedPaths?: string[];
 		[key: string]: unknown;
 	};
 	preview?: Preview;

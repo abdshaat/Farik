@@ -44,7 +44,7 @@ Tests (`settings.test.tsx`):
 - `lifts a shipped path, makes it read only, and adds the owner's own` — on `/settings/rules`, choosing Read only for "Secrets in .env files" (`.env`) and adding `infra/**` as Off limits saves a team whose `rules` are `{ lifted_paths: [".env"], read_only_paths: [".env"], protected_paths: ["infra/**"] }` (in wire form), and the `.env` warning is shown.
 - `keeps Catervas's own files unwritable` — the `.catervas/local/**` row offers Off limits and Read only and no Allowed.
 
-- [ ] `feat(web): the owner chooses which files agents may touch`
+- [x] `feat(web): the owner chooses which files agents may touch`
 
 ### Task 14: commands, git and remotes on the Rules page
 
