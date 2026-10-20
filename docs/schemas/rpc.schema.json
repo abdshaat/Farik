@@ -103,14 +103,27 @@
             "from_seq": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 18446744073709551615
+              "maximum": 18446744073709551615,
+              "description": "Resume after this event; without it the subscription starts after the newest event."
             }
-          },
-          "required": [
-            "from_seq"
-          ]
+          }
         }
       }
+    },
+    "subscribeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615,
+          "description": "The sequence number of the newest event when the subscription was made; 0 for an empty log or setup mode."
+        }
+      },
+      "required": [
+        "head"
+      ]
     },
     "unsubscribeRequest": {
       "title": "Unsubscribe Request",
@@ -381,10 +394,13 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 500
+            },
+            "newest_first": {
+              "type": "boolean",
+              "description": "Answer from the newest event down (the default is from the oldest up)."
             }
           },
           "required": [
-            "after_seq",
             "limit"
           ]
         }
@@ -642,7 +658,7 @@
         },
         "result": {
           "type": "object",
-          "description": "emptyResult for subscribe and unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
+          "description": "subscribeResult for subscribe, emptyResult for unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
         }
       }
     },

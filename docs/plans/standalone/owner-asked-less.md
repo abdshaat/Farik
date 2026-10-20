@@ -38,7 +38,7 @@ Files: `docs/schemas/rpc.schema.json`, `runtime/src/daemon/web.rs`, `packages/pr
 - `sends_a_long_backlog_in_rounds` (web.rs, ignored) — 450 events and `from_seq: 0`: a query sent right after is answered before the 450th event frame.
 - `subscribes_from_now_and_resumes_where_it_was` (connection.test.tsx) — the first subscribe frame has no `from_seq`; after a reconnect it carries the last seq seen.
 - `lists_the_newest_events_from_the_log` (pages.test.tsx) — the events page queries `events.since` with `newest_first: true` and shows its rows.
-- [ ] `fix(runtime): a page subscribes from now, and a backlog is sent in rounds`
+- [x] `fix(runtime): a page subscribes from now, and a backlog is sent in rounds`
 
 ### Task 2 (worktree b): the owner gives the sandbox system packages
 
