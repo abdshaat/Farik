@@ -55,4 +55,4 @@ Tests:
 Tests (`pages/team.test.tsx`):
 - `names_the_designers_own_model` — a designer on "Opus 5.5" and a developer on "Sonnet 5.5" show "Ivo works with Opus 5.5, so a day costs more." and never "the same model".
 
-- [ ] `fix(web): the Team page names the designer's own model`
+- [x] `fix(web): the Team page names the designer's own model`

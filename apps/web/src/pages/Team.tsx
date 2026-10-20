@@ -305,7 +305,10 @@ export function Team() {
 							<Bullets
 								text={t("teamCostDesigner", {
 									designer: designer.displayName,
-									developer: developer.displayName,
+									model:
+										effective.find((e) => e.id === designer.id)?.model.label ??
+										designer.model?.id ??
+										"",
 								})}
 							/>
 							<p>
