@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useConnection } from "../../app/connection.tsx";
 import { type Refusal, said, saidAll } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
+import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
 import { slug } from "./SetupProject.tsx";
 import styles from "./setup.module.css";
@@ -171,6 +172,25 @@ export function AdvancedSettings() {
 							setMaxCost(String(defaults.rules.maxTaskBudgetUsd ?? ""));
 							setAsText(undefined);
 						})
+					}
+				/>
+			</section>
+
+			<section className={styles.card} aria-labelledby="documents">
+				<h2 id="documents" className={styles.heading}>
+					{t("rulesDocuments")}
+				</h2>
+				<Switch
+					id="documents-local"
+					label={t("documentsLocal")}
+					info={<Bullets text={t("documentsLocalNote")} />}
+					checked={draft.team.policy.documentsLocal === true}
+					onChange={(on) =>
+						change(
+							withTeam({
+								policy: { ...draft.team.policy, documentsLocal: on },
+							}),
+						)
 					}
 				/>
 			</section>

@@ -9,7 +9,10 @@ use std::sync::Arc;
 use catervas_core::branch::{change_type, task_branch};
 use catervas_core::contract::{TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::is_plan_task;
-use catervas_core::forge_text::{folder_change_title, pull_request_title, without_task_ids};
+use catervas_core::forge_text::{
+    folder_change_title, pull_request_title, storage_change_body, storage_change_title,
+    without_task_ids,
+};
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Team, task_private_folder};
@@ -23,6 +26,7 @@ use catervas_store::files::FilesError;
 use catervas_store::folder_docs::{FolderChange, folder_docs};
 use catervas_store::merging::merging_allowed;
 use catervas_store::repos::{TaskRepositoryError, task_repository};
+use catervas_store::waiting::name_of;
 use catervas_store::{
     EventQuery, Git, GitError, MergeOutcome, TaskProjection, material, names_of, project_document,
     rescan_members, scan_project, seeded_library,
@@ -174,6 +178,9 @@ impl Subject {
             }
             Self::FolderChange(change) => {
                 let held = folder_change(tools, *change)?;
+                if let Some(local) = held.storage {
+                    return Ok(storage_change_title(local).to_string());
+                }
                 let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
                 Ok(folder_change_title(&paths, &plain_names(&paths)))
             }
@@ -671,7 +678,9 @@ fn through_the_forge(
         PullRequestState::Merged { sha } => merged_on_the_forge(tools, subject, target, &url, sha),
         PullRequestState::Closed if asker == Asker::Tick => {
             let detail = format!("the pull request {url} was closed without merging");
-            escalate(tools, subject, detail).map(Some)
+            let escalated = escalate(tools, subject, detail)?;
+            revert_the_switch(tools, subject)?;
+            Ok(Some(escalated))
         }
         PullRequestState::Closed => {
             closed_for_the_human(tools, subject, &url, target, &branch).map(Some)
@@ -713,7 +722,14 @@ fn merged_on_the_forge(
     } else {
         TaskIntegratedBodyIntegratedBy::Human
     };
-    record_integrated(tools, subject, &sha, into, integrated_by)?;
+    // A switch of where the documents are kept (ADR 0074) finishes against the checkout the
+    // merge reached: the local branch is brought up to it before the integration is recorded, so
+    // that git cannot remove the documents after Catervas puts them back.
+    let switches_storage = matches!(subject, Subject::FolderChange(change)
+        if folder_change(tools, *change)?.storage.is_some());
+    if !switches_storage {
+        record_integrated(tools, subject, &sha, into, integrated_by)?;
+    }
     if let Err(error) = target.git.fetch_fast_forward("origin", into) {
         let detail = format!(
             "the pull request {url} was merged as {sha}, but the local {into} could not be \
@@ -721,6 +737,9 @@ fn merged_on_the_forge(
             git_words(&error)
         );
         return escalate(tools, subject, detail).map(Some);
+    }
+    if switches_storage {
+        record_integrated(tools, subject, &sha, into, integrated_by)?;
     }
     Ok(Some(IntegrationOutcome::Merged {
         sha,
@@ -905,7 +924,19 @@ fn stopped_merging(
                 team,
             )?;
             match outcome {
-                TransitionOutcome::Moved(_) => Ok(IntegrationOutcome::SentBack { paths }),
+                TransitionOutcome::Moved(_) => {
+                    // The task's documents are a copy of the owner's folder (ADR 0074); the
+                    // worktree made again for the merge gets one for the agent to work in.
+                    if catervas_store::document_source::documents_on_disk(team, &tools.log)? {
+                        catervas_store::local_documents::copy_in(
+                            &target.git,
+                            tools.files.root(),
+                            &worktree,
+                            None,
+                        )?;
+                    }
+                    Ok(IntegrationOutcome::SentBack { paths })
+                }
                 TransitionOutcome::Refused(refusal) => {
                     let _ = target.git.remove_worktree(&worktree);
                     let detail = format!(
@@ -982,7 +1013,9 @@ fn closed_for_the_human(
                 "the pull request {url} was closed without merging, and {branch} is not in \
                  {into}: reopen it on the forge or merge the branch, then run catervas integrate"
             );
-            escalate(tools, subject, detail)
+            let escalated = escalate(tools, subject, detail)?;
+            revert_the_switch(tools, subject)?;
+            Ok(escalated)
         }
         Err(error) => {
             let detail = format!(
@@ -1110,6 +1143,9 @@ fn pull_request_body(tools: &ToolDeps, subject: &Subject) -> Result<String, Orch
         Subject::Task(task_id) => task_id,
         Subject::FolderChange(change) => {
             let held = folder_change(tools, *change)?;
+            if let Some(local) = held.storage {
+                return Ok(storage_change_body(local));
+            }
             let paths: Vec<&str> = held.paths.iter().map(String::as_str).collect();
             let documents: Vec<String> = plain_names(&paths)
                 .split(" and ")
@@ -1208,6 +1244,17 @@ fn record_integrated(
                 "change": change, "sha": sha, "into": into, "integrated_by": by,
             }))
             .map_err(|error| refused(format!("folder_change_unrecordable: {error}")))?;
+            // A change that moves the documents (ADR 0074) finishes the move before it is
+            // recorded, so that a restore that failed is tried again, and files no re-derive.
+            if let Some(local) = folder_change(tools, *change)?.storage {
+                finish_the_switch(tools, *change, local)?;
+                append_stamped(
+                    tools,
+                    tools.ids.clone(),
+                    EventBody::FolderChangeIntegrated(body),
+                )?;
+                return Ok(());
+            }
             append_stamped(
                 tools,
                 tools.ids.clone(),
@@ -1216,6 +1263,83 @@ fn record_integrated(
             file_the_rederive(tools, *change)
         }
     }
+}
+
+/// What a switch of where the documents are kept leaves to do once its change is in the integration
+/// branch (ADR 0074): taken out, git has deleted the files it removed from the checkout, so they
+/// are written back from the change's parent commit; put back, the exclude lines go.
+fn finish_the_switch(tools: &ToolDeps, change: u64, local: bool) -> Result<(), OrchestratorError> {
+    if !local {
+        return catervas_store::local_documents::include_documents(&tools.git)
+            .map_err(OrchestratorError::from);
+    }
+    let sha = tools
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::DocumentStorageChanged],
+            ..EventQuery::default()
+        })?
+        .into_iter()
+        .rev()
+        .find_map(|event| match event.body {
+            EventBody::DocumentStorageChanged(body)
+                if body
+                    .change
+                    .as_ref()
+                    .is_some_and(|held| held.get() == change) =>
+            {
+                body.sha.as_ref().map(|sha| sha.as_str().to_string())
+            }
+            _ => None,
+        })
+        .ok_or_else(|| {
+            refused(format!(
+                "folder_change_unrecordable: folder change {change} has no commit to restore from"
+            ))
+        })?;
+    catervas_store::local_documents::restore_taken_out(&tools.git, &sha)?;
+    Ok(())
+}
+
+/// A switch whose pull request was closed without merging puts the owner's choice back (ADR 0074):
+/// the policy as it was, the exclude lines removed when they were added for a take-out, and the
+/// channel told. Nothing else that goes wrong with a switch comes here.
+fn revert_the_switch(tools: &ToolDeps, subject: &Subject) -> Result<(), OrchestratorError> {
+    let Subject::FolderChange(change) = subject else {
+        return Ok(());
+    };
+    let Some(local) = folder_change(tools, *change)?.storage else {
+        return Ok(());
+    };
+    let mut team = tools.files.read_team()?;
+    team.policy.documents_local = (!local).then_some(true);
+    tools.files.write_team(&team)?;
+    append_stamped(
+        tools,
+        tools.ids.clone(),
+        EventBody::TeamUpdated(catervas_protocol::event::TeamUpdatedBody {
+            team_name: team.name.to_string(),
+            agent_ids: team
+                .agents
+                .iter()
+                .map(|agent| agent.id.to_string())
+                .collect(),
+            updated_by: "catervas".to_string(),
+            template: None,
+            plan_in_sprints: None,
+        }),
+    )?;
+    if local {
+        catervas_store::local_documents::include_documents(&tools.git)?;
+    }
+    post_system(
+        &tools.log,
+        tools.clock.as_ref(),
+        &tools.ids,
+        None,
+        "Your documents stay as they were: the pull request that moved them was closed.",
+    )?;
+    Ok(())
 }
 
 /// Files the task that brings an owner's change to a document up to date in its twin. A filing
@@ -1373,23 +1497,90 @@ pub(super) fn cleanup(
     orchestrator: &Orchestrator,
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
+    // The documents a task worked on land in the owner's folder before its worktree goes; a
+    // landing that failed keeps the worktree, and the next tick tries again (ADR 0074).
+    land_the_documents(orchestrator, row)?;
     if !remove_workspace(orchestrator, &row.task_id)? {
         return Ok(None);
     }
     // The removal already happened, so a contract that cannot be read only loses the name.
-    let branch = orchestrator
-        .deps
-        .tools
-        .files
-        .read_contract(&row.task_id)
-        .map_or_else(
-            |_| "its branch".to_string(),
-            |contract| task_branch(&contract),
-        );
+    let deps = &orchestrator.deps.tools;
+    let kept = deps.files.read_contract(&row.task_id).map_or_else(
+        |_| "its branch".to_string(),
+        |contract| {
+            let branchless = deps
+                .files
+                .read_team()
+                .ok()
+                .and_then(|team| {
+                    catervas_store::document_source::is_branchless(&team, &deps.log, &contract).ok()
+                })
+                .unwrap_or(false);
+            if branchless {
+                "its documents are in your folder".to_string()
+            } else {
+                format!("kept {}", task_branch(&contract))
+            }
+        },
+    );
     Ok(Some(TickReport::Acted {
         task_id: row.task_id.clone(),
-        what: format!("removed its worktree and its sandbox, and kept {branch}"),
+        what: format!("removed its worktree and its sandbox, and {kept}"),
     }))
+}
+
+/// Lands an accepted task's changed documents in the owner's folder, or forgets the copy a
+/// cancelled one started from, while its worktree is still there. What landed is recorded, and a
+/// document whose version was set aside is said in the channel.
+fn land_the_documents(
+    orchestrator: &Orchestrator,
+    row: &TaskProjection,
+) -> Result<(), OrchestratorError> {
+    let deps = &orchestrator.deps;
+    let tools = &deps.tools;
+    let root = tools.files.root();
+    let tree = worktree(deps, &row.task_id);
+    if !tree.is_dir() {
+        return Ok(());
+    }
+    if row.status != TaskStatus::Accepted {
+        catervas_store::local_documents::forget_start(root, &row.task_id)?;
+        return Ok(());
+    }
+    let landing = catervas_store::local_documents::land(root, &tree, &row.task_id)?;
+    if landing.written.is_empty() && landing.removed.is_empty() && landing.set_aside.is_empty() {
+        return Ok(());
+    }
+    let body = serde_json::from_value(serde_json::json!({
+        "paths": landing.written, "removed": landing.removed, "by": "task",
+        "written_by": null, "task_id": row.task_id.as_str(), "set_aside": landing.set_aside,
+    }))
+    .map_err(|error| refused(format!("local_documents_unrecordable: {error}")))?;
+    append_stamped(
+        tools,
+        tools.ids.clone(),
+        EventBody::LocalDocumentsWritten(body),
+    )?;
+    let team = tools.files.read_team()?;
+    let who = row
+        .assignee_id
+        .as_deref()
+        .map_or_else(|| "the agent".to_string(), |id| name_of(&team, id));
+    for path in &landing.set_aside {
+        post_system(
+            &tools.log,
+            tools.clock.as_ref(),
+            &tools.ids,
+            None,
+            &format!(
+                "{} changed on this computer while {who} worked on it, so {who}'s version was \
+                 not put in. It is in .catervas/local/documents/set-aside/{}/.",
+                plain_names(&[path.as_str()]),
+                row.task_id.as_str()
+            ),
+        )?;
+    }
+    Ok(())
 }
 
 /// Removes a finished task's sandbox and worktrees when either worktree is still there, and says
@@ -1569,6 +1760,342 @@ mod tests {
         let deps = &harness.project.deps;
         let team = deps.files.read_team().expect("the team");
         crate::tools::folders::integration_rows(deps, &team).expect("the log reads")
+    }
+
+    /// A harness whose team keeps its documents on this computer, with `notes.html` in the
+    /// Software Developer's folder at the root, ignored.
+    fn keeping_documents_here(name: &str) -> Harness {
+        let harness = Harness::new(name, |wire| {
+            wire["policy"]["integration"] = json!("pull_request");
+            wire["policy"]["documents_local"] = json!(true);
+        });
+        catervas_store::local_documents::exclude_documents(&harness.project.deps.git)
+            .expect("the folder is ignored");
+        let root = harness.project.repo.path.clone();
+        std::fs::create_dir_all(root.join("docs/catervas/engineering")).expect("a folder");
+        std::fs::write(
+            root.join("docs/catervas/engineering/notes.html"),
+            "notes v1",
+        )
+        .expect("v1");
+        harness
+    }
+
+    /// Asks the governor for `to` for `task`, as `actor` (and `agent`) would.
+    fn asks(
+        harness: &Harness,
+        task: &str,
+        to: catervas_core::contract::TaskStatus,
+        actor: catervas_core::governor::transition_table::TransitionActor,
+        agent: &str,
+    ) -> crate::transitions::TransitionOutcome {
+        let team = harness
+            .project
+            .deps
+            .files
+            .read_team()
+            .expect("the team reads");
+        harness
+            .project
+            .deps
+            .transitions
+            .request(
+                &catervas_core::governor::transition::TransitionRequest {
+                    task_id: task.parse().expect("a task id"),
+                    to,
+                    actor,
+                    agent_id: Some(agent.to_string()),
+                },
+                &crate::transitions::TransitionAsk::default(),
+                &team,
+            )
+            .expect("the request is judged")
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one task from its start to its landing"
+    )]
+    fn a_documents_task_lands_on_acceptance_with_no_pull_request() {
+        use catervas_core::contract::TaskStatus;
+        use catervas_core::governor::transition_table::TransitionActor;
+
+        let harness = keeping_documents_here("docs-task-lands");
+        let root = harness.project.repo.path.clone();
+        harness.assigned_with("CTV-5", "dev-a", "dev-b", |wire| {
+            wire["allowed_paths"] = json!(["docs/catervas/engineering/notes.html"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1", "text": "The notes are there.", "satisfies": ["R1"],
+                "verification": { "method": "command",
+                    "command": "test -f docs/catervas/engineering/notes.html",
+                    "expect": { "exit_code": 0 } }
+            }]);
+        });
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let what = block_on(acted(&orchestrator));
+        assert!(what.contains("started it"), "{what}");
+
+        // The task has no branch: a detached worktree holding a copy of the folder.
+        let worktree = harness.worktree("CTV-5");
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("docs/catervas/engineering/notes.html"))
+                .expect("the copy is there"),
+            "notes v1"
+        );
+        assert!(
+            git_output_in(&worktree, &["rev-parse", "--abbrev-ref", "HEAD"]) == "HEAD",
+            "detached"
+        );
+        assert!(
+            harness
+                .project
+                .deps
+                .files
+                .read_contract(&"CTV-5".parse().expect("an id"))
+                .expect("the contract")
+                .branch
+                .is_none()
+        );
+        // Its documents are never committed.
+        let refused = harness.project.call(
+            "dev-a",
+            Some("CTV-5"),
+            "catervas_git_commit",
+            json!({ "message": "add the notes", "paths": ["docs/catervas/engineering/notes.html"] }),
+        );
+        assert!(
+            matches!(&refused, Err(crate::tools::ToolError::Refused { reason })
+                if reason.starts_with("documents_stay_local: ")),
+            "{refused:?}"
+        );
+
+        // It writes its version and asks for verifying with no commit.
+        std::fs::write(
+            worktree.join("docs/catervas/engineering/notes.html"),
+            "notes v2",
+        )
+        .expect("v2");
+        harness.project.record_by(
+            Some("dev-a"),
+            crate::tools::fixtures::at(),
+            "CTV-5",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "the notes are there",
+                     "run_by": "assignee", "recorded_by": "dev-a" }),
+        );
+        harness.project.record_by(
+            Some("dev-a"),
+            crate::tools::fixtures::at(),
+            "CTV-5",
+            "note.written",
+            &json!({ "kind": "completion", "text": "Wrote the notes.", "written_by": "dev-a" }),
+        );
+        let verifying = asks(
+            &harness,
+            "CTV-5",
+            TaskStatus::Verifying,
+            TransitionActor::Assignee,
+            "dev-a",
+        );
+        assert!(
+            matches!(verifying, crate::transitions::TransitionOutcome::Moved(_)),
+            "{verifying:?}"
+        );
+
+        // Accepted, it integrates nothing, and the documents land where the owner reads them.
+        harness.project.record(
+            "CTV-5",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "at abc: exit 0",
+                     "run_by": "reviewer", "recorded_by": "governor" }),
+        );
+        harness.project.record_by(
+            Some("dev-b"),
+            crate::tools::fixtures::at(),
+            "CTV-5",
+            "note.written",
+            &json!({ "kind": "review", "text": "C1: the notes are there.", "written_by": "dev-b" }),
+        );
+        let accepted = asks(
+            &harness,
+            "CTV-5",
+            TaskStatus::Accepted,
+            TransitionActor::ProductManager,
+            "pm",
+        );
+        let crate::transitions::TransitionOutcome::Moved(decision) = accepted else {
+            panic!("the notes are in the copy: {accepted:?}");
+        };
+        assert_eq!(
+            decision.effects,
+            [catervas_core::governor::transition::TransitionEffect::NothingToIntegrate]
+        );
+        assert!(!harness.row("CTV-5").awaiting_integration);
+        harness.settle_delivery();
+        let what = block_on(acted(&orchestrator));
+        assert!(what.contains("removed its worktree"), "{what}");
+        assert_eq!(
+            std::fs::read_to_string(root.join("docs/catervas/engineering/notes.html"))
+                .expect("the owner's copy"),
+            "notes v2"
+        );
+        let written = harness.events(&[EventKind::LocalDocumentsWritten]);
+        assert_eq!(written.len(), 1);
+        assert_eq!(
+            catervas_protocol::event::event_to_value(&written[0])["body"],
+            json!({ "paths": ["docs/catervas/engineering/notes.html"], "removed": [],
+                    "by": "task", "written_by": null, "task_id": "CTV-5", "set_aside": [] })
+        );
+        assert!(!harness.worktree("CTV-5").exists());
+        assert!(!root.join(".catervas/local/documents/start/CTV-5").exists());
+        assert!(harness.events(&[EventKind::PullRequestOpened]).is_empty());
+        assert_eq!(creates(&harness), 0);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one task from its start to its pull request"
+    )]
+    fn a_code_task_lands_its_documents_and_opens_its_pull_request() {
+        use catervas_core::contract::TaskStatus;
+        use catervas_core::governor::transition_table::TransitionActor;
+
+        let harness = keeping_documents_here("docs-with-code");
+        harness.with_origin();
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", "https://github.com/o/r/pull/7\n", "", 0);
+        let root = harness.project.repo.path.clone();
+        std::fs::create_dir_all(root.join("docs/catervas/product")).expect("a folder");
+        std::fs::write(root.join("docs/catervas/product/spec.html"), "spec s1").expect("s1");
+        harness.assigned_with("CTV-5", "dev-a", "dev-b", |wire| {
+            wire["allowed_paths"] = json!(["src/**", "docs/catervas/engineering/**"]);
+            wire["exit_criteria"] = json!([{
+                "id": "C1", "text": "The code is there.", "satisfies": ["R1"],
+                "verification": { "method": "command", "command": "test -f src/a.rs",
+                    "expect": { "exit_code": 0 } }
+            }]);
+        });
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let what = block_on(acted(&orchestrator));
+        assert!(
+            what.contains("started it") && what.contains("on feat/"),
+            "{what}"
+        );
+        let worktree = harness.worktree("CTV-5");
+
+        // It commits its code, writes a document of its folder, and strays into the product's.
+        std::fs::create_dir_all(worktree.join("src")).expect("src");
+        std::fs::write(worktree.join("src/a.rs"), "fn a() {}\n").expect("code");
+        harness
+            .project
+            .deps
+            .git
+            .commit(&worktree, "add a", &["src/a.rs".to_string()])
+            .expect("committed");
+        std::fs::write(
+            worktree.join("docs/catervas/engineering/conventions.html"),
+            "conventions c1",
+        )
+        .expect("a document");
+        std::fs::write(worktree.join("docs/catervas/product/spec.html"), "spec s2")
+            .expect("strays");
+        std::fs::write(worktree.join("docs/catervas/product/other.html"), "other").expect("strays");
+        let record = |kind: &str, body: serde_json::Value, by: &str| {
+            harness
+                .project
+                .record_by(Some(by), crate::tools::fixtures::at(), "CTV-5", kind, &body);
+        };
+        record(
+            "criterion.recorded",
+            json!({ "criterion_id": "C1", "passed": true, "evidence": "src/a.rs is there",
+                    "run_by": "assignee", "recorded_by": "dev-a" }),
+            "dev-a",
+        );
+        record(
+            "note.written",
+            json!({ "kind": "completion", "text": "Added a.", "written_by": "dev-a" }),
+            "dev-a",
+        );
+        let verifying = asks(
+            &harness,
+            "CTV-5",
+            TaskStatus::Verifying,
+            TransitionActor::Assignee,
+            "dev-a",
+        );
+        assert!(
+            matches!(verifying, crate::transitions::TransitionOutcome::Moved(_)),
+            "{verifying:?}"
+        );
+        // The tidy put the strays back from the task's copy before judging.
+        assert_eq!(
+            std::fs::read_to_string(worktree.join("docs/catervas/product/spec.html"))
+                .expect("back"),
+            "spec s1"
+        );
+        assert!(!worktree.join("docs/catervas/product/other.html").exists());
+        let tidied = harness.events(&[EventKind::WorktreeTidied]);
+        assert_eq!(
+            catervas_protocol::event::event_to_value(&tidied[0])["body"],
+            json!({ "put_back": ["docs/catervas/product/spec.html"],
+                    "removed": ["docs/catervas/product/other.html"] })
+        );
+
+        harness.project.record(
+            "CTV-5",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "at abc: exit 0",
+                     "run_by": "reviewer", "recorded_by": "governor" }),
+        );
+        record(
+            "note.written",
+            json!({ "kind": "review", "text": "C1: src/a.rs is there.", "written_by": "dev-b" }),
+            "dev-b",
+        );
+        let accepted = asks(
+            &harness,
+            "CTV-5",
+            TaskStatus::Accepted,
+            TransitionActor::ProductManager,
+            "pm",
+        );
+        let crate::transitions::TransitionOutcome::Moved(decision) = accepted else {
+            panic!("the work is done: {accepted:?}");
+        };
+        assert_eq!(decision.effects, []);
+        assert!(harness.row("CTV-5").awaiting_integration);
+
+        // The documents land at acceptance; the pull request carries the code alone.
+        harness.settle_delivery();
+        block_on(acted(&orchestrator));
+        assert_eq!(
+            std::fs::read_to_string(root.join("docs/catervas/engineering/conventions.html"))
+                .expect("landed"),
+            "conventions c1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("docs/catervas/product/spec.html")).expect("kept"),
+            "spec s1"
+        );
+        block_on(acted(&orchestrator));
+        assert_eq!(creates(&harness), 1);
+        assert_eq!(
+            git_output_in(
+                &root,
+                &[
+                    "diff",
+                    "--name-only",
+                    &format!("main...{}", harness.branch("CTV-5"))
+                ]
+            ),
+            "src/a.rs"
+        );
     }
 
     #[tokio::test]

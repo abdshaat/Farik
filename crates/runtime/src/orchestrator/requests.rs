@@ -19,7 +19,7 @@ use catervas_protocol::event::{
 };
 use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
-use catervas_store::git::{GitError, held_document};
+use catervas_store::git::GitError;
 use catervas_store::product_plan::is_the_product_plan;
 use catervas_store::repos::TaskRepository;
 
@@ -583,15 +583,12 @@ fn children_of_epic(
 /// that does not exist holds no plan.
 fn plan_on(
     git: &catervas_store::Git,
-    branch: &str,
+    source: &catervas_store::document_source::DocumentSource,
     stem: &str,
     team: &Team,
 ) -> Result<Option<(String, String)>, OrchestratorError> {
-    match held_document(git, branch, stem, team.document_format()) {
-        Ok(Some(plan)) => {
-            let text = git.file_at(branch, &plan)?;
-            Ok(Some((plan, text)))
-        }
+    match source.held_document(git, stem, team.document_format()) {
+        Ok(Some(plan)) => Ok(source.text(git, &plan)?.map(|text| (plan, text))),
         Ok(None) | Err(GitError::CommandFailed { .. }) => Ok(None),
         Err(error) => Err(error.into()),
     }
@@ -612,16 +609,23 @@ fn product_managers_message(
     let unextended = plan_stem(contract.id.as_str());
     if *step == EpicStep::WriteThePlansTasks {
         let git = &deps.tools.git;
-        let branch = integration_branch(team, git)?;
-        // The plan is read in the format it was written in: on the integration branch, else on the
-        // branch of the accepted plan task that has not been integrated yet.
-        if let Some(found) = plan_on(git, &branch, &unextended, team)? {
+        let mode = catervas_store::document_source::documents_mode_of(team, &deps.tools.log)?;
+        let source = catervas_store::document_source::team_documents(team, git, mode)?;
+        // The plan is read in the format it was written in: where the team keeps its documents
+        // (on this computer, a plan task's lands there when it is accepted), else on the branch of
+        // the accepted plan task that has not been integrated yet.
+        if let Some(found) = plan_on(git, &source, &unextended, team)? {
             return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
         }
         if let Some(plan_task) = plan_task
             && let Ok(theirs) = deps.tools.files.read_contract(plan_task)
             && let Ok(repository) = task_repository_of(deps, team, &theirs)
-            && let Some(found) = plan_on(&repository.git, &task_branch(&theirs), &unextended, team)?
+            && let Some(found) = plan_on(
+                &repository.git,
+                &catervas_store::document_source::DocumentSource::Branch(task_branch(&theirs)),
+                &unextended,
+                team,
+            )?
         {
             return Ok(plan_tasks_message(contract, &found.0, &found.1, listed));
         }
@@ -989,6 +993,8 @@ async fn run_on_the_integration_branch(
     let tools = Arc::clone(&deps.tools);
     let factory = Arc::clone(&deps.sandboxes);
     let contract = contract.clone();
+    // The documents kept on this computer are not in the commit: the criteria read a copy of them.
+    let documents_on_disk = catervas_store::document_source::documents_on_disk(team, &tools.log)?;
     tokio::task::spawn_blocking(move || -> Result<EpicRan, OrchestratorError> {
         let git = &tools.git;
         let worktree = tools
@@ -1005,6 +1011,13 @@ async fn run_on_the_integration_branch(
             git.create_detached_worktree(&worktree, &sha)
                 .map_err(Into::into)
         }) {
+            return Ok(unrunnable(pending[0].id.as_str(), &error));
+        }
+        if documents_on_disk
+            && let Err(error) =
+                catervas_store::local_documents::copy_in(git, tools.files.root(), &worktree, None)
+        {
+            let _ = remove_base_worktree(git, &worktree);
             return Ok(unrunnable(pending[0].id.as_str(), &error));
         }
         let sandbox = match factory.create_base(&tools.ids.project_id, &contract.id, &worktree) {

@@ -600,11 +600,23 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             .files
             .read_contract(&row.task_id)
             .map_err(|e| internal(&e))?;
-        let branch = task_branch(&contract);
+        // The plan task of a team that keeps its documents on this computer has no branch: its
+        // draft is in its worktree's copy of the folder.
+        let source = if catervas_store::document_source::is_branchless(team, &deps.log, &contract)
+            .map_err(|e| internal(&e))?
+        {
+            catervas_store::document_source::DocumentSource::Disk(
+                deps.files
+                    .root()
+                    .join(".catervas/local/worktrees")
+                    .join(contract.id.as_str()),
+            )
+        } else {
+            catervas_store::document_source::DocumentSource::Branch(task_branch(&contract))
+        };
         for stem in PRODUCT_PLAN_STEMS {
-            if let Ok(Some(path)) =
-                catervas_store::git::held_document(&deps.git, &branch, stem, team.document_format())
-                && let Ok(text) = deps.git.file_at(&branch, &path)
+            if let Ok(Some(path)) = source.held_document(&deps.git, stem, team.document_format())
+                && let Ok(Some(text)) = source.text(&deps.git, &path)
             {
                 documents.push(json!({ "path": path, "text": text }));
             }

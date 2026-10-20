@@ -24,7 +24,11 @@ export function Work() {
 					{!membersPresent && (
 						<IntegrationBranch key={key("branch")} {...part("branch")} />
 					)}
-					<Documents key={key("documents")} {...part("documents")} />
+					<Documents
+						key={key("documents")}
+						{...part("documents")}
+						membersPresent={membersPresent}
+					/>
 					<ShowAdvanced
 						open={advanced}
 						onToggle={() => setAdvanced(!advanced)}

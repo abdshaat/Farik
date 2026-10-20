@@ -22,10 +22,11 @@ pub use crate::generated::event::{
     ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
     CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
     DeliveryClosedBody, DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody,
-    DocumentRewriteStartedBody, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
-    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind, Heard,
-    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, MarketingBudgetReachedBody,
-    MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
+    DocumentRewriteStartedBody, DocumentStorageChangedBody, DriftDetectedBody,
+    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventKind, Heard, HumanAcceptedBody, HumanAcceptedBodySubject,
+    JudgmentAnswer, LocalDocumentsWrittenBody, LocalDocumentsWrittenBodyBy,
+    MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
     MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
     MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
     MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
@@ -274,6 +275,8 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::WorktreeTidied => "worktreeTidiedBody",
         EventKind::PullRequestConflicted => "pullRequestConflictedBody",
         EventKind::PullRequestRefreshed => "pullRequestRefreshedBody",
+        EventKind::DocumentStorageChanged => "documentStorageChangedBody",
+        EventKind::LocalDocumentsWritten => "localDocumentsWrittenBody",
         EventKind::MergePermissionGranted | EventKind::MergePermissionWithdrawn => {
             "mergePermissionBody"
         }
@@ -501,13 +504,15 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::WorktreeTidied(_)
         | EventBody::PullRequestConflicted(_)
         | EventBody::PullRequestRefreshed(_)
+        | EventBody::DocumentStorageChanged(_)
+        | EventBody::LocalDocumentsWritten(_)
         | EventBody::PullRequestMerged(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 125] = [
+pub const EVERY_KIND: [EventKind; 127] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -630,6 +635,8 @@ pub const EVERY_KIND: [EventKind; 125] = [
     EventKind::WorktreeTidied,
     EventKind::PullRequestConflicted,
     EventKind::PullRequestRefreshed,
+    EventKind::DocumentStorageChanged,
+    EventKind::LocalDocumentsWritten,
     EventKind::MergePermissionGranted,
     EventKind::MergePermissionWithdrawn,
     EventKind::PullRequestMerged,
@@ -1040,6 +1047,12 @@ pub enum EventBody {
     /// An accepted task's pull request stopped merging and Catervas brought it up to date (ADR 0069).
     #[serde(rename = "pull_request.refreshed")]
     PullRequestRefreshed(PullRequestRefreshedBody),
+    /// The owner chose to keep the team's documents on this computer, or to put them back (ADR 0074).
+    #[serde(rename = "document_storage.changed")]
+    DocumentStorageChanged(DocumentStorageChangedBody),
+    /// Documents kept on this computer were written (ADR 0074).
+    #[serde(rename = "local_documents.written")]
+    LocalDocumentsWritten(LocalDocumentsWrittenBody),
     /// `merge_permission.granted`: the owner confirmed the warning on this computer (ADR 0073).
     #[serde(rename = "merge_permission.granted")]
     MergePermissionGranted(MergePermissionBody),
@@ -1179,6 +1192,8 @@ impl EventBody {
             Self::WorktreeTidied(_) => EventKind::WorktreeTidied,
             Self::PullRequestConflicted(_) => EventKind::PullRequestConflicted,
             Self::PullRequestRefreshed(_) => EventKind::PullRequestRefreshed,
+            Self::DocumentStorageChanged(_) => EventKind::DocumentStorageChanged,
+            Self::LocalDocumentsWritten(_) => EventKind::LocalDocumentsWritten,
             Self::MergePermissionGranted(_) => EventKind::MergePermissionGranted,
             Self::MergePermissionWithdrawn(_) => EventKind::MergePermissionWithdrawn,
             Self::PullRequestMerged(_) => EventKind::PullRequestMerged,
@@ -2206,7 +2221,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 125);
+        assert_eq!(EVERY_KIND.len(), 127);
     }
 
     #[test]
@@ -2235,7 +2250,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 125);
+        assert_eq!(EVERY_KIND.len(), 127);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2659,7 +2674,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 125);
+        assert_eq!(EVERY_KIND.len(), 127);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2800,7 +2815,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 125);
+        assert_eq!(EVERY_KIND.len(), 127);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3115,7 +3130,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 125);
+        assert_eq!(EVERY_KIND.len(), 127);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

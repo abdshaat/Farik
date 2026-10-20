@@ -3,7 +3,9 @@
 
 use catervas_core::contract::{Role, TaskContract};
 use catervas_core::criteria::CriteriaLibrary;
-use catervas_core::folders::{DocumentFormat, folders_line, format_line, stale_line};
+use catervas_core::folders::{
+    DocumentFormat, folders_line, format_line, local_documents_line, stale_line,
+};
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
 use catervas_core::team::{Agent, TeamPermissions};
@@ -66,6 +68,9 @@ pub struct PromptInput<'a> {
     pub own_repo: Option<OwnRepo>,
     /// The format the team writes new documents in, for the Team rules' line about it.
     pub document_format: DocumentFormat,
+    /// Whether the team's documents are read from this computer's folder (ADR 0074), for the Team
+    /// rules' line about finding them.
+    pub documents_local: bool,
 }
 
 /// One repository of the project, as the Team rules' line says it.
@@ -239,6 +244,7 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
                 input.own_repo.as_ref(),
             ),
             input.document_format,
+            input.documents_local,
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -468,6 +474,7 @@ fn rules_section(
         Option<&OwnRepo>,
     ),
     format: DocumentFormat,
+    documents_local: bool,
 ) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
@@ -496,6 +503,7 @@ fn rules_section(
         }),
         Some(folders_line(role, active_roles, &[])),
         Some(format_line(format)),
+        documents_local.then(|| local_documents_line().to_string()),
         stale_line(stale_twins),
         repositories_line(members, own_repo),
     ]
@@ -630,7 +638,7 @@ mod tests {
         a_criteria_library_wire, an_empty_criteria_library_wire,
     };
     use catervas_core::criteria::{CriteriaLibrary, validate_criteria};
-    use catervas_core::folders::{DocumentFormat, format_line};
+    use catervas_core::folders::{DocumentFormat, format_line, local_documents_line};
     use catervas_core::governor::permissions::{PermissionTier, default_tiers};
     use catervas_core::governor::team_rules::TeamRules;
     use catervas_core::team::fixtures::an_agent_wire;
@@ -735,6 +743,7 @@ mod tests {
                 members: &[],
                 own_repo: None,
                 document_format: DocumentFormat::Html,
+                documents_local: false,
             }
         }
     }
@@ -1295,6 +1304,30 @@ mod tests {
                 .position(|line| line.starts_with("- folders:"))
                 .expect("the folders line");
             assert_eq!(lines[folders + 1], format_line(format), "{rules}");
+        }
+    }
+
+    #[test]
+    fn every_session_is_told_the_documents_stay_on_this_computer() {
+        let inputs = Inputs::new(Role::Architect, "architect");
+        for purpose in [SessionPurpose::Implement, SessionPurpose::Chat] {
+            let kept = assembled(&PromptInput {
+                documents_local: true,
+                ..inputs.full(purpose)
+            });
+            let rules = section(&kept, "Team rules");
+            let lines: Vec<&str> = rules.lines().collect();
+            let documents = lines
+                .iter()
+                .position(|line| *line == format_line(DocumentFormat::Html))
+                .expect("the documents line");
+            assert_eq!(lines[documents + 1], local_documents_line(), "{rules}");
+
+            let committed = assembled(&inputs.full(purpose));
+            assert!(
+                !section(&committed, "Team rules").contains(local_documents_line()),
+                "{committed}"
+            );
         }
     }
 

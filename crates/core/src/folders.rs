@@ -660,6 +660,96 @@ pub fn twin_is_stale(human_last: &str, twin_last: &str, human_commits_not_in_twi
     human_last != twin_last && human_commits_not_in_twin > 0
 }
 
+/// Where the team's documents live under the repository (ADR 0074).
+const DOCUMENTS_ROOT: &str = "docs/catervas";
+
+/// How the team's documents are kept right now (`docs/SPEC.md` 5.17, ADR 0074): in the repository,
+/// on their way out of it, on this computer, or on their way back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocumentsMode {
+    /// In the repository, as before.
+    Committed,
+    /// Kept on this computer, the pull request that takes them out not merged yet.
+    TakingOut,
+    /// Kept on this computer, out of the repository.
+    Local,
+    /// Back in the repository, the pull request that puts them back not merged yet.
+    PuttingBack,
+}
+
+impl DocumentsMode {
+    /// The mode as the wire says it.
+    #[must_use]
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Committed => "committed",
+            Self::TakingOut => "taking_out",
+            Self::Local => "local",
+            Self::PuttingBack => "putting_back",
+        }
+    }
+
+    /// Whether the documents are read from the root checkout's disk.
+    #[must_use]
+    pub fn reads_disk(self) -> bool {
+        matches!(self, Self::Local | Self::PuttingBack)
+    }
+
+    /// Whether a document may be written: not while they move.
+    #[must_use]
+    pub fn writes_open(self) -> bool {
+        matches!(self, Self::Committed | Self::Local)
+    }
+}
+
+/// The newest switch of where the documents are kept, as the log tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SwitchState {
+    /// Whether the switch chose to keep them on this computer.
+    pub local: bool,
+    /// Whether its folder change is neither integrated nor escalated yet.
+    pub waiting: bool,
+}
+
+/// The mode, from the owner's policy and the newest switch.
+#[must_use]
+pub fn documents_mode(policy_local: bool, newest: Option<SwitchState>) -> DocumentsMode {
+    match newest {
+        Some(SwitchState { waiting: true, .. }) if policy_local => DocumentsMode::TakingOut,
+        Some(SwitchState { waiting: true, .. }) => DocumentsMode::PuttingBack,
+        _ if policy_local => DocumentsMode::Local,
+        _ => DocumentsMode::Committed,
+    }
+}
+
+/// Whether the task changes documents only: a task whose `allowed_paths` are all within
+/// `docs/catervas/`. Such a task has no branch to commit to when the documents stay local.
+#[must_use]
+pub fn is_documents_only(contract: &crate::contract::TaskContract) -> bool {
+    contract.kind == crate::contract::TaskKind::Task
+        && !contract.allowed_paths.is_empty()
+        && contract.allowed_paths.iter().all(|path| {
+            crate::governor::readiness::is_within_any(path, &[format!("{DOCUMENTS_ROOT}/**")])
+        })
+}
+
+/// The Team rules' line about documents kept on this computer (ADR 0074).
+#[must_use]
+pub fn local_documents_line() -> &'static str {
+    "- documents kept on this computer: docs/catervas/ is not in git. Grep and Glob skip it: find its files with LS and read them with Read. Never commit them; catervas_git_commit refuses them. Your changes to them reach the team when your task is accepted."
+}
+
+/// Whether a twin is behind its document by the log of local writes: the document was written
+/// after the twin, or the twin was never written. A pair written together is one event.
+#[must_use]
+pub fn twin_is_stale_by_log(human_seq: Option<i64>, twin_seq: Option<i64>) -> bool {
+    match (human_seq, twin_seq) {
+        (Some(_), None) => true,
+        (Some(human), Some(twin)) => human > twin,
+        _ => false,
+    }
+}
+
 /// The Team rules' line about stale twins, or nothing when none is.
 #[must_use]
 pub fn stale_line(stale_twins: &[String]) -> Option<String> {

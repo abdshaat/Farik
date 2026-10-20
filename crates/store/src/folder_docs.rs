@@ -4,8 +4,10 @@
 //! envelope that names no agent and no session, so that no agent can make any of them happen by
 //! recording it.
 
-use catervas_core::folders::agent_twin;
-use catervas_protocol::event::{CatervasEvent, EventBody, EventKind};
+use std::collections::BTreeMap;
+
+use catervas_core::folders::{SwitchState, agent_twin, twin_is_stale_by_log};
+use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, LocalDocumentsWrittenBodyBy};
 use chrono::{DateTime, Utc};
 
 use crate::{EventLog, EventQuery, StoreError};
@@ -84,6 +86,9 @@ pub struct FolderChange {
     pub escalated: bool,
     /// Whether the owner made it, by saving a document on the Files page.
     pub edited: bool,
+    /// Whether it moves the team's documents (ADR 0074): `Some(true)` out of the repository,
+    /// `Some(false)` back into it, `None` for any other change.
+    pub storage: Option<bool>,
 }
 
 /// Everything the log holds of folder documents.
@@ -134,6 +139,7 @@ fn add_change(
             integrated: false,
             escalated: false,
             edited: false,
+            storage: None,
         });
     }
 }
@@ -158,6 +164,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
             EventKind::FolderDocApproved,
             EventKind::FolderDocReturned,
             EventKind::FolderDocEdited,
+            EventKind::DocumentStorageChanged,
             EventKind::FolderChangeIntegrated,
             EventKind::FolderChangeEscalated,
         ],
@@ -211,7 +218,30 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
                         integrated: false,
                         escalated: false,
                         edited: true,
+                        storage: None,
                     });
+                }
+            }
+            EventBody::DocumentStorageChanged(body) if is_unattended(event) => {
+                if let Some(change) = &body.change {
+                    let change = change.get();
+                    if change_of(&mut docs, change).is_none() {
+                        docs.changes.push(FolderChange {
+                            change,
+                            branch: body.branch.as_ref().map_or_else(
+                                || format!("docs/folder-{change}"),
+                                |branch| branch.as_str().to_string(),
+                            ),
+                            paths: Vec::new(),
+                            approved: false,
+                            proposals: Vec::new(),
+                            written_by: None,
+                            integrated: false,
+                            escalated: false,
+                            edited: false,
+                            storage: Some(body.local),
+                        });
+                    }
                 }
             }
             EventBody::FolderDocApproved(body) if is_unattended(event) => {
@@ -275,6 +305,120 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
         }
     }
     Ok(docs)
+}
+
+/// The newest switch of where the documents are kept, as the log tells it (ADR 0074): `None` when
+/// the owner never switched. It is waiting while its folder change is neither integrated nor
+/// escalated; a switch with no change (nothing to move) never waits.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn switch_state(docs: &FolderDocs, log: &EventLog) -> Result<Option<SwitchState>, StoreError> {
+    let newest = log.read(&EventQuery {
+        kinds: vec![EventKind::DocumentStorageChanged],
+        newest_first: true,
+        ..EventQuery::default()
+    })?;
+    Ok(newest
+        .iter()
+        .find(|event| is_unattended(event))
+        .and_then(|event| match &event.body {
+            EventBody::DocumentStorageChanged(body) => Some(SwitchState {
+                local: body.local,
+                waiting: body.change.as_ref().is_some_and(|change| {
+                    docs.changes.iter().any(|held| {
+                        held.change == change.get() && !held.integrated && !held.escalated
+                    })
+                }),
+            }),
+            _ => None,
+        }))
+}
+
+/// Who wrote a document kept on this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalWriter {
+    /// The owner, by saving it on the Files page.
+    Owner,
+    /// An agent, through `catervas_write_folder_doc`.
+    Agent,
+    /// A task, whose documents landed when it was accepted.
+    Task,
+}
+
+/// The newest write of a document kept on this computer, as the log tells it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalWrite {
+    /// The seq of its event.
+    pub seq: i64,
+    /// When it was written.
+    pub at: DateTime<Utc>,
+    /// Who wrote it.
+    pub by: LocalWriter,
+    /// The agent that wrote it, for `Agent`.
+    pub written_by: Option<String>,
+    /// The task whose landing wrote it, for `Task`.
+    pub task_id: Option<String>,
+}
+
+/// Each path a `local_documents.written` names, written or removed, with the newest write of it.
+///
+/// # Errors
+///
+/// What the log refused.
+pub fn local_writes(log: &EventLog) -> Result<BTreeMap<String, LocalWrite>, StoreError> {
+    let events = log.read(&EventQuery {
+        kinds: vec![EventKind::LocalDocumentsWritten],
+        ..EventQuery::default()
+    })?;
+    let mut writes = BTreeMap::new();
+    for event in &events {
+        if let EventBody::LocalDocumentsWritten(body) = &event.body {
+            let by = match body.by {
+                LocalDocumentsWrittenBodyBy::Owner => LocalWriter::Owner,
+                LocalDocumentsWrittenBodyBy::Agent => LocalWriter::Agent,
+                LocalDocumentsWrittenBodyBy::Task => LocalWriter::Task,
+            };
+            for path in body.paths.iter().chain(body.removed.iter()) {
+                writes.insert(
+                    path.to_string(),
+                    LocalWrite {
+                        seq: i64::try_from(event.envelope.seq).unwrap_or(i64::MAX),
+                        at: event.envelope.recorded_at,
+                        by,
+                        written_by: body.written_by.as_ref().map(|id| id.as_str().to_string()),
+                        task_id: body.task_id.as_ref().map(|id| id.as_str().to_string()),
+                    },
+                );
+            }
+        }
+    }
+    Ok(writes)
+}
+
+/// The agent versions that are behind the document for people beside them, by the log of local
+/// writes: the document was written after the twin did (`twin_is_stale_by_log`). A pair needs both
+/// files on disk.
+///
+/// # Errors
+///
+/// What the log or the folder refuses.
+pub fn local_stale_twins(
+    log: &EventLog,
+    root: &std::path::Path,
+) -> Result<Vec<String>, StoreError> {
+    let writes = local_writes(log)?;
+    let on_disk = crate::local_documents::document_paths(root)?;
+    let seq = |path: &str| writes.get(path).map(|write| write.seq);
+    Ok(on_disk
+        .iter()
+        .filter(|path| catervas_core::folders::is_human_document(path))
+        .filter_map(|path| {
+            let twin = agent_twin(path).filter(|twin| on_disk.contains(twin))?;
+            twin_is_stale_by_log(seq(path), seq(&twin)).then_some(twin)
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -512,6 +656,7 @@ mod tests {
                 integrated: false,
                 escalated: false,
                 edited: true,
+                storage: None,
             }
         );
         assert!(!docs.changes[1].edited);
@@ -539,5 +684,96 @@ mod tests {
         let projections = crate::open_projections(std::sync::Arc::clone(&board.log))
             .expect("the projections open");
         projections.board().expect("the board projects");
+    }
+
+    #[test]
+    fn folds_the_switch_into_a_folder_change_and_the_local_writes_by_path() {
+        use catervas_core::folders::SwitchState;
+
+        use super::{LocalWriter, local_writes, switch_state};
+
+        let board = Board::new("folds-the-switch");
+        let docs = folder_docs(&board.log).expect("folds");
+        assert_eq!(switch_state(&docs, &board.log).expect("reads"), None);
+        board.put(
+            at(10, 1),
+            None,
+            None,
+            "document_storage.changed",
+            json!({ "local": true, "change": 4,
+                    "branch": "docs/keep-documents-on-this-computer", "sha": "abc" }),
+        );
+        let docs = folder_docs(&board.log).expect("folds");
+        assert_eq!(docs.changes.len(), 1);
+        let change = &docs.changes[0];
+        assert_eq!(change.change, 4);
+        assert_eq!(change.branch, "docs/keep-documents-on-this-computer");
+        assert_eq!(change.storage, Some(true));
+        assert!(!change.approved && !change.edited && change.written_by.is_none());
+        assert_eq!(
+            switch_state(&docs, &board.log).expect("reads"),
+            Some(SwitchState {
+                local: true,
+                waiting: true
+            })
+        );
+        board.put(
+            at(10, 2),
+            None,
+            None,
+            "folder_change.integrated",
+            json!({ "change": 4, "sha": "x", "into": "main", "integrated_by": "human" }),
+        );
+        let docs = folder_docs(&board.log).expect("folds");
+        assert_eq!(
+            switch_state(&docs, &board.log).expect("reads"),
+            Some(SwitchState {
+                local: true,
+                waiting: false
+            })
+        );
+        // A switch an agent recorded counts for nothing.
+        board.put(
+            at(10, 3),
+            None,
+            Some("pm"),
+            "document_storage.changed",
+            json!({ "local": false, "change": null, "branch": null, "sha": null }),
+        );
+        let docs = folder_docs(&board.log).expect("folds");
+        assert_eq!(docs.changes.len(), 1);
+        assert!(
+            switch_state(&docs, &board.log)
+                .expect("reads")
+                .expect("a switch")
+                .local
+        );
+
+        board.put(
+            at(10, 4),
+            None,
+            None,
+            "local_documents.written",
+            json!({ "paths": [SPEC], "removed": [], "by": "owner", "written_by": null,
+                    "task_id": null, "set_aside": [] }),
+        );
+        board.put(
+            at(10, 5),
+            None,
+            None,
+            "local_documents.written",
+            json!({ "paths": [SPEC, "docs/catervas/product/spec.agent.md"], "removed": [ROADMAP],
+                    "by": "task", "written_by": null, "task_id": "CTV-3", "set_aside": [] }),
+        );
+        let writes = local_writes(&board.log).expect("reads");
+        let spec = &writes[SPEC];
+        assert_eq!(
+            (spec.by, spec.task_id.as_deref()),
+            (LocalWriter::Task, Some("CTV-3"))
+        );
+        assert_eq!(spec.at, at(10, 5));
+        assert!(spec.seq > 0);
+        assert_eq!(writes[ROADMAP].by, LocalWriter::Task);
+        assert_eq!(writes.len(), 3);
     }
 }

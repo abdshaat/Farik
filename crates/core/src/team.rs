@@ -1287,6 +1287,13 @@ impl Team {
             .filter(|agent| agent.status == AgentStatus::Active)
     }
 
+    /// Whether the team's documents are kept on this computer (`policy.documents_local`, ADR 0074),
+    /// as the file says: the mode Catervas acts on also reads the log of the switch.
+    #[must_use]
+    pub fn keeps_documents_local(&self) -> bool {
+        self.policy.documents_local == Some(true)
+    }
+
     /// Whether this is one agent alone (`policy.solo`, ADR 0071), as the file says: never worked
     /// out from how many agents there are.
     #[must_use]

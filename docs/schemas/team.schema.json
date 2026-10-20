@@ -500,6 +500,10 @@
           "enum": ["html", "markdown"],
           "description": "The format the team writes new documents under docs/catervas/ in: html or markdown. A document that exists keeps its format when changed. Left out, html, so every team, an existing one included, writes new documents as HTML."
         },
+        "documents_local": {
+          "type": "boolean",
+          "description": "Whether the team's documents under docs/catervas/ are kept on this computer, out of the repository (ADR 0074). Set only by the documents.set_local command; absent means false."
+        },
         "judgment": {
           "$ref": "#/$defs/judgment"
         },

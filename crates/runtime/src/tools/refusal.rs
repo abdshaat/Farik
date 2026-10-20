@@ -120,6 +120,8 @@ pub(crate) enum Refusal {
     ConflictMarkers { path: String },
     /// A commit message that names a task, whose id stays inside Catervas (ADR 0066).
     CommitMessageNamesATask { id: String },
+    /// A commit of a document kept on this computer, which is never committed (ADR 0074).
+    DocumentsStayLocal { path: String },
     /// A marketing plan refused as a whole, under the code it names: asked outside the
     /// Marketing Specialist's implement session of a task, while the task has a plan waiting, or
     /// over a file that is there already (ADR 0042).
@@ -226,6 +228,7 @@ impl Refusal {
             Self::PathIsADirectory { .. }
             | Self::ConflictMarkers { .. }
             | Self::CommitMessageNamesATask { .. }
+            | Self::DocumentsStayLocal { .. }
             | Self::OutsideWorkspace { .. } => self.workspace(),
             Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
             Self::RetroRefused { detail } => ("retro_refused", detail.clone()),
@@ -324,6 +327,12 @@ impl Refusal {
                 "commit_message_names_a_task",
                 format!(
                     "{id} is a task id, which stays inside Catervas; describe the change instead"
+                ),
+            ),
+            Self::DocumentsStayLocal { path } => (
+                "documents_stay_local",
+                format!(
+                    "{path} is kept on this computer and never committed; it reaches your team when the task is accepted"
                 ),
             ),
             Self::OutsideWorkspace { cwd } => (

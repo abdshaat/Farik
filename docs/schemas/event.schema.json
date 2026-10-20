@@ -179,6 +179,8 @@
         "worktree.tidied",
         "pull_request.conflicted",
         "pull_request.refreshed",
+        "document_storage.changed",
+        "local_documents.written",
         "merge_permission.granted",
         "merge_permission.withdrawn",
         "pull_request.merged"
@@ -300,6 +302,8 @@
         { "$ref": "#/$defs/worktreeTidiedBody" },
         { "$ref": "#/$defs/pullRequestConflictedBody" },
         { "$ref": "#/$defs/pullRequestRefreshedBody" },
+        { "$ref": "#/$defs/documentStorageChangedBody" },
+        { "$ref": "#/$defs/localDocumentsWrittenBody" },
         { "$ref": "#/$defs/mergePermissionBody" },
         { "$ref": "#/$defs/pullRequestMergedBody" }
       ]
@@ -1791,6 +1795,10 @@
       "description": "The numbers of the proposals one decision covers; a proposal's number is its event's seq."
     },
     "folderChangeNumber": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+    "folderDocSha": { "type": "string", "minLength": 1 },
+    "localDocumentPath": { "type": "string", "minLength": 1, "maxLength": 512 },
+    "localWriterId": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "localTaskId": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
     "folderChangeBranch": {
       "type": "string",
       "maxLength": 64,
@@ -2039,6 +2047,34 @@
       "properties": {
         "url": { "type": "string" },
         "sha": { "type": "string" }
+      }
+    },
+    "documentStorageChangedBody": {
+      "title": "Document Storage Changed Body",
+      "description": "The owner chose where the team's documents are kept (ADR 0074, docs/SPEC.md 5.17): local is true to keep them on this computer, out of the repository, and false to put them back. change, branch and sha name the folder change that moves them (docs/SPEC.md 5.14), all null when there was nothing to move. It is the owner's: the envelope names no agent, no session and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local", "change", "branch", "sha"],
+      "properties": {
+        "local": { "type": "boolean" },
+        "change": { "oneOf": [{ "$ref": "#/$defs/folderChangeNumber" }, { "type": "null" }] },
+        "branch": { "oneOf": [{ "$ref": "#/$defs/folderChangeBranch" }, { "type": "null" }] },
+        "sha": { "oneOf": [{ "$ref": "#/$defs/folderDocSha" }, { "type": "null" }] }
+      }
+    },
+    "localDocumentsWrittenBody": {
+      "title": "Local Documents Written Body",
+      "description": "Documents kept on this computer were written (ADR 0074, docs/SPEC.md 5.17): paths are the files written and removed the files deleted, repository paths under docs/catervas. by is owner for a save on the Files page, agent for catervas_write_folder_doc (written_by names the agent and the envelope names it and its session) and task for a task's documents landing when it was accepted (task_id names it). set_aside lists the documents of a task whose version was not put in because the file changed meanwhile. It is about no contract.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths", "removed", "by", "written_by", "task_id", "set_aside"],
+      "properties": {
+        "paths": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } },
+        "removed": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } },
+        "by": { "type": "string", "enum": ["owner", "agent", "task"] },
+        "written_by": { "oneOf": [{ "$ref": "#/$defs/localWriterId" }, { "type": "null" }] },
+        "task_id": { "oneOf": [{ "$ref": "#/$defs/localTaskId" }, { "type": "null" }] },
+        "set_aside": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/localDocumentPath" } }
       }
     },
     "mergePermissionBody": {

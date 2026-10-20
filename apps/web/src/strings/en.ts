@@ -927,6 +927,35 @@ export const en = {
 	documentsRewriteNote:
 		"Each role rewrites its own documents as HTML.\nMarketing plans stay as they were approved.",
 	documentsRewriteStarted: "Your team will rewrite its documents as HTML.",
+	documentsLocal: "Keep documents on this computer",
+	documentsLocalNote:
+		"Your team's documents stay in docs/catervas in this folder.\nThey are not added to your repository or pushed to GitHub.\nNo history of changes is kept, and pull requests don't show them.",
+	keepHereTitle: "Keep documents on this computer?",
+	keepHereLines:
+		"Documents already in your repository are taken out in one pull request.\nThe files stay in your folder.\nUntil you merge it, documents can't be changed.",
+	keepHereYes: "Keep them here",
+	keepHereCancel: "Cancel",
+	putBackTitle: "Put documents back in your repository?",
+	putBackLines:
+		"Your documents go into one pull request.\nUntil you merge it, documents can't be changed.",
+	putBackYes: "Put them back",
+	putBackCancel: "Cancel",
+	documentsTakingOut:
+		"Taking your documents out of the repository. Merge the pull request to finish.",
+	documentsPuttingBack:
+		"Putting your documents back in the repository. Merge the pull request to finish.",
+	filesSaveLocal: "Saving changes the document on this computer.",
+	filesSavedLocal: "Saved.",
+	filesMoving:
+		"Documents can't be changed until you merge the pull request that moves them.",
+	refuseProjectFolder:
+		"Your documents already stay on this computer: a project folder is never pushed.",
+	refuseDocumentsSwitching:
+		"Your documents are being moved. Merge the pull request that moves them first.",
+	refuseDocumentsInFlight:
+		"Finish or merge the work that changes documents first.",
+	refuseDocumentsBusy:
+		"Some documents have changes on your computer that aren't committed. Commit or undo them first.",
 	refuseNotHtml: "Turn on Write documents as HTML first.",
 	refuseRewriteOpen: "Your team is still rewriting its documents.",
 	refuseNothingToRewrite:

@@ -124,6 +124,10 @@ pub struct TransitionContext {
     /// Whether the team is one agent alone (ADR 0071): nobody reviews a task, and Catervas verifies
     /// it alone.
     pub solo: bool,
+    /// Whether the task's documents stay on this computer, so that it has no pull request for them
+    /// (ADR 0074): the runtime sets it for a task that changes documents only, in a mode that
+    /// reads the disk.
+    pub documents_stay_local: bool,
 }
 
 /// What the runtime must record along with the move.
@@ -646,7 +650,9 @@ fn effects(gate: GateId, to: TaskStatus, context: &TransitionContext) -> Vec<Tra
     if to == TaskStatus::Blocked {
         effects.push(TransitionEffect::StampBlockedAt);
     }
-    if to == TaskStatus::Accepted && task_private_folder(&context.contract).is_some() {
+    if to == TaskStatus::Accepted
+        && (task_private_folder(&context.contract).is_some() || context.documents_stay_local)
+    {
         effects.push(TransitionEffect::NothingToIntegrate);
     }
     effects
@@ -783,6 +789,7 @@ mod tests {
                 commits: 1,
                 worktree_clean: true,
                 folder: None,
+                documents: None,
             },
             blocker: Some(Blocker {
                 description: "The staging database refuses the migration.".to_string(),
@@ -818,6 +825,7 @@ mod tests {
             design_plan_returns: 0,
             design_reviewer: None,
             solo: false,
+            documents_stay_local: false,
         }
     }
 
@@ -1505,6 +1513,100 @@ mod tests {
                 "the reviewer wrote no review note mapping each criterion to its evidence"
                     .to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn a_task_whose_documents_stay_local_needs_no_commit_and_integrates_nothing() {
+        use crate::folders::{DocumentsMode, SwitchState, documents_mode, is_documents_only};
+        use crate::governor::gates::{DocumentWork, check_criteria_recorded};
+
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Verifying;
+        context.contract.assignee_role = Role::ProductManager;
+        context.contract.allowed_paths = vec!["docs/catervas/product/spec.*".to_string()];
+        context.done.changed_paths = vec![
+            "docs/catervas/product/spec.html".to_string(),
+            "docs/catervas/product/spec.agent.html".to_string(),
+        ];
+        assert!(is_documents_only(&context.contract));
+        let mut mixed = context.contract.clone();
+        mixed.allowed_paths.push("src/**".to_string());
+        assert!(!is_documents_only(&mixed));
+
+        let documents_only = |changed: &[&str]| WorkState {
+            commits: 0,
+            worktree_clean: true,
+            folder: None,
+            documents: Some(DocumentWork {
+                only: true,
+                changed: changed.iter().map(ToString::to_string).collect(),
+            }),
+        };
+        let results = context.assignee_results.clone();
+        assert_eq!(
+            check_criteria_recorded(
+                &context.contract,
+                &results,
+                &documents_only(&["docs/catervas/product/spec.html"])
+            ),
+            Ok(())
+        );
+        let refused = check_criteria_recorded(&context.contract, &results, &documents_only(&[]))
+            .expect_err("no document changed");
+        assert!(
+            refused
+                .iter()
+                .any(|reason| reason.contains("changed no document"))
+        );
+
+        let accepted = ask(TaskStatus::Accepted, A::ProductManager, Some("pm-1"));
+        context.documents_stay_local = true;
+        assert_eq!(
+            effects(&accepted, &context),
+            [TransitionEffect::NothingToIntegrate]
+        );
+        context.documents_stay_local = false;
+        assert_eq!(effects(&accepted, &context), []);
+
+        let waiting = |local| {
+            Some(SwitchState {
+                local,
+                waiting: true,
+            })
+        };
+        assert_eq!(
+            documents_mode(true, waiting(true)),
+            DocumentsMode::TakingOut
+        );
+        assert_eq!(
+            documents_mode(false, waiting(false)),
+            DocumentsMode::PuttingBack
+        );
+        assert_eq!(documents_mode(true, None), DocumentsMode::Local);
+        assert_eq!(
+            documents_mode(
+                true,
+                Some(SwitchState {
+                    local: true,
+                    waiting: false
+                })
+            ),
+            DocumentsMode::Local
+        );
+        assert_eq!(documents_mode(false, None), DocumentsMode::Committed);
+        assert!(DocumentsMode::Local.reads_disk() && DocumentsMode::PuttingBack.reads_disk());
+        assert!(!DocumentsMode::Committed.reads_disk() && !DocumentsMode::TakingOut.reads_disk());
+        assert!(DocumentsMode::Committed.writes_open() && DocumentsMode::Local.writes_open());
+        assert!(!DocumentsMode::TakingOut.writes_open());
+        assert_eq!(DocumentsMode::PuttingBack.wire(), "putting_back");
+        assert!(crate::folders::twin_is_stale_by_log(Some(5), None));
+        assert!(crate::folders::twin_is_stale_by_log(Some(5), Some(4)));
+        assert!(!crate::folders::twin_is_stale_by_log(Some(4), Some(5)));
+        assert!(!crate::folders::twin_is_stale_by_log(None, Some(5)));
+        assert_eq!(
+            crate::forge_text::storage_change_title(true),
+            "Docs: Keep the team's documents on this computer"
         );
     }
 
