@@ -51,6 +51,11 @@ The build ran on the founder's project from 06:05 UTC. The plan's pull request o
 - The help page names the agent who raised the block in its heading and explanation, not only in the note's label.
 - The owner's answers stay with the task for its whole try: an answer reached only the next session, so the reviewer lost the plan text the owner had pasted after one rework.
 
+A second build ran from 06:22. The reviewer found the plan in her up-to-date worktree and passed CTV-22, which was accepted and merged at 06:24, and CTV-12 started at once. Three more gaps then held the parallel work, closed by plan 6:
+- A task with no branch could not be opened: its page waited on a diff that cannot exist yet.
+- The owner had no way to send a `ready` task back to its plan; only blocked and escalated tasks offered one.
+- The Product Manager's epic session could not change the epic's waiting tasks, so a re-plan (ADR 0078) ended in a question to the owner, four times. Its tools now take a waiting child's id.
+
 ## Alternatives rejected
 
 - **Redesign the governor around fewer gates.** Every refusal in the run had one specific cause; removing gates would give up guarantees (protected paths, the review, lanes) that did not cause it.
