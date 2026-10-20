@@ -112,7 +112,7 @@ Tests:
 - `gives_an_unaddressed_message_to_the_product_manager` — the human posts "Recreate CTV-11"; the `message.posted` event's `mentions` is `["mira"]` (the team's PM).
 - `answers_a_block_from_the_channel` — CTV-3 `blocked`, waiting on the human, assignee `theo`; the human posts "@theo For CTV-3: use the text below"; CTV-3 moves out of `blocked` to `in_progress`, and an `escalation.resolved` with that message is recorded. The same post naming no task id leaves CTV-3 blocked.
 
-- [ ] `feat(runtime): the owner's channel message reaches the Product Manager and can answer a block`
+- [x] `feat(runtime): the owner's channel message reaches the Product Manager and can answer a block`
 
 ### Task 8: the Product Manager does not ask for ready, and nobody says "C3" to the owner
 
