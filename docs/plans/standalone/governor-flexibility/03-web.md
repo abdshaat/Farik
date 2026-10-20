@@ -31,7 +31,7 @@ Tests (`pages/HelpNeeded.test.tsx`):
 - `wants_a_note_before_answering` — "Answer and carry on" and "Ask Mira to change the plan" are disabled with an empty note and enabled after typing; "Cancel the task" is enabled throughout; answering sends the typed note as `message`.
 - `names_the_reviewer_who_raised_the_block` — a history whose last move into `blocked` was requested by `ada` while the assignee is `theo` labels the note "Add a note for Ada".
 
-- [ ] `fix(web): an answer to a block must say something, to the agent who asked`
+- [x] `fix(web): an answer to a block must say something, to the agent who asked`
 
 ### Task 17: channel words
 

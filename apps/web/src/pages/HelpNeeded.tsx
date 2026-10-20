@@ -89,6 +89,17 @@ export function HelpNeeded() {
 			e.seq > since && e.kind === "note.written" && e.body.kind === "progress",
 	);
 	const choices = offered.choices;
+	// The agent who raised the block answers it: a reviewer's block goes back to the reviewer.
+	const raisedBy = events.findLast(
+		(e) => e.kind === "task.transitioned" && e.body.to === "blocked",
+	)?.body.requestedBy;
+	const asker =
+		agents.find((a) => a.id === raisedBy && a.status !== "retired")
+			?.displayName ?? name;
+	const noteless = note.trim() === "";
+	const cancels = (c: EscalationChoice) => c.body?.body.to === "cancelled";
+	const wantsNote = (c: EscalationChoice) =>
+		c.kind === "command" && noteless && !cancels(c);
 
 	const resolve = async (choice: EscalationChoice) => {
 		if (!client || !choice.body) return;
@@ -100,7 +111,7 @@ export function HelpNeeded() {
 				command,
 				body:
 					command === "escalation_resolve"
-						? { ...body, message: note.trim() || choice.label }
+						? { ...body, message: note.trim() || t("helpCancelled") }
 						: body,
 			} as never);
 			if ("error" in reply) setRefusal(sentence(reply.error.detail));
@@ -160,7 +171,10 @@ export function HelpNeeded() {
 				<>
 					<TextArea
 						id="help-note"
-						label={t("helpNote", { name })}
+						label={t("helpNote", { name: asker })}
+						{...(choices.some(wantsNote) && {
+							hint: t("helpNoteNeeded", { name: asker }),
+						})}
 						value={note}
 						onChange={setNote}
 					/>
@@ -181,6 +195,7 @@ export function HelpNeeded() {
 										<Button
 											kind={c.suggested ? "primary" : "secondary"}
 											busy={busy}
+											disabled={wantsNote(c)}
 											aria-describedby={`next-${n}`}
 											onClick={() => resolve(c)}
 										>
