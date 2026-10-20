@@ -66,7 +66,7 @@ Tests (`settings.test.tsx`):
 - `turns_autopilot_on_only_from_the_dialog_and_with_a_daily_limit` — on `/settings/allowed-actions` with `dailyUsd` absent the switch is disabled and the Spending link shows; with `dailyUsd: 5`, pressing the switch sends nothing and opens the dialog listing the eight bullets of `autopilotWarn` with "$5" and "30 paid tool calls"; Cancel sends nothing; Turn on sends `autopilot.set` with `{ on: true, confirmed: true }`; a refusal `daily_limit_required` shows its words in an alert; with `autopilot: true` the switch is on and pressing it sends `{ on: false }` with no dialog.
 - `sets_when_work_stops_and_how_long_a_session_runs` (extended) — typing 12 in "Paid tool calls per agent per hour" saves `policy.paid_calls_per_hour: 12`; typing 1001 instead shows "Use a whole number from 1 to 1000." under the field.
 
-- [ ] `feat(web): the autopilot switch with its confirmation and the paid-call rate`
+- [x] `feat(web): the autopilot switch with its confirmation and the paid-call rate`
 
 ### Task 20: Today's flagged by the team and done on its own
 

@@ -48,6 +48,7 @@ export type MethodName =
 	| "files.rewrite"
 	| "documents.set_local"
 	| "merging.set"
+	| "autopilot.set"
 	| "team.save"
 	| "agent.replace"
 	| "team.start"

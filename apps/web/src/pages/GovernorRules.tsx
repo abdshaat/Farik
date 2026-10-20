@@ -511,8 +511,9 @@ type LimitKey =
 	| "maxIterations"
 	| "blockedLimitHours"
 	| "escalationAgeHours"
-	| "wipLimitPerAgent";
-/** The five limits: their words, range, and the number a team file without them runs on. */
+	| "wipLimitPerAgent"
+	| "paidCallsPerHour";
+/** The six limits: their words, range, and the number a team file without them runs on. */
 const LIMITS: {
 	key: LimitKey;
 	label:
@@ -520,7 +521,8 @@ const LIMITS: {
 		| "limitsIterations"
 		| "limitsBlocked"
 		| "limitsEscalation"
-		| "limitsWip";
+		| "limitsWip"
+		| "limitsPaidCalls";
 	min: number;
 	max: number;
 	usually: number;
@@ -554,9 +556,16 @@ const LIMITS: {
 		usually: 24,
 	},
 	{ key: "wipLimitPerAgent", label: "limitsWip", min: 0, max: 100, usually: 1 },
+	{
+		key: "paidCallsPerHour",
+		label: "limitsPaidCalls",
+		min: 1,
+		max: 1000,
+		usually: 30,
+	},
 ];
 
-/** "When work stops and asks you": five whole numbers, each saved into `policy`. */
+/** "When work stops and asks you": six whole numbers, each saved into `policy`. */
 export function Limits(part: RulePart) {
 	const { saved } = part;
 	const defaults = useDefaults();
@@ -576,7 +585,11 @@ export function Limits(part: RulePart) {
 		for (const l of LIMITS) {
 			const was = defaults?.policy[l.key];
 			if (typeof was === "number") policy[l.key] = was;
-			else if (l.key === "readinessAttempts" || l.key === "escalationAgeHours")
+			else if (
+				l.key === "readinessAttempts" ||
+				l.key === "escalationAgeHours" ||
+				l.key === "paidCallsPerHour"
+			)
 				delete policy[l.key];
 		}
 	const next = { ...saved, policy };

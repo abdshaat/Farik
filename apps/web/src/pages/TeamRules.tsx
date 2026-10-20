@@ -43,6 +43,8 @@ export type Part = {
 	documentsMode?: string;
 	/** Whether Catervas may merge its pull requests on this computer (ADR 0073). */
 	mergingAllowed?: boolean;
+	/** Whether the team runs the product on its own on this computer (ADR 0082). */
+	autopilot?: boolean;
 };
 
 /**
@@ -57,6 +59,7 @@ export function useRuleParts() {
 		online?: boolean;
 		documentsMode?: string;
 		mergingAllowed?: boolean;
+		autopilot?: boolean;
 	}>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
@@ -74,6 +77,7 @@ export function useRuleParts() {
 		online: Boolean(data?.online),
 		...(data?.documentsMode && { documentsMode: data.documentsMode }),
 		mergingAllowed: Boolean(data?.mergingAllowed),
+		autopilot: Boolean(data?.autopilot),
 		done: () => {
 			setRounds((r) => ({ ...r, [name]: (r[name] ?? 0) + 1 }));
 			again();

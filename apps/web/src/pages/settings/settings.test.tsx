@@ -345,6 +345,111 @@ describe("settings directory", () => {
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
+	it("turns_autopilot_on_only_from_the_dialog_and_with_a_daily_limit", async () => {
+		const defaults = { budgets: {}, rules: {}, policy: {}, ui_paths: [] };
+		const rules = (budgets: object, autopilot = false) => ({
+			team: {
+				name: "Corner Bakery",
+				agents: [agent("software_developer")],
+				budgets,
+				policy: { integration: "pull_request" },
+				rules: {},
+			},
+			agents: [],
+			max_agents: 7,
+			autopilot,
+		});
+		const calls = (s: FakeSocket) => s.calls("autopilot.set");
+		const path = "/settings/allowed-actions";
+
+		// 1. With no daily limit the switch is off limits, and the Spending link says why.
+		const none = await open(path, rules({}));
+		await answerQuery(none.s, "settings.defaults", defaults);
+		const locked = await main().findByRole("switch", {
+			name: en.autopilotSwitch,
+		});
+		expect(locked).toHaveProperty("disabled", true);
+		expect(
+			main()
+				.getByRole("link", { name: en.autopilotNeedsLimitLink })
+				.getAttribute("href"),
+		).toBe("/settings/spending");
+		cleanup();
+
+		// 2. With a limit, pressing the switch sends nothing and opens the dialog.
+		const { s } = await open(path, rules({ daily_usd: 5 }));
+		await answerQuery(s, "settings.defaults", defaults);
+		const toggle = await main().findByRole("switch", {
+			name: en.autopilotSwitch,
+		});
+		expect(toggle).toHaveProperty("disabled", false);
+		fireEvent.click(toggle);
+		const dialog = await screen.findByRole("dialog", {
+			name: en.autopilotWarnTitle,
+		});
+		const lines = en.autopilotWarn.split("\n");
+		expect(lines).toHaveLength(8);
+		for (const line of lines)
+			expect(
+				within(dialog).getByText(
+					line.replace("{limit}", "5").replace("{perHour}", "30"),
+				),
+			).toBeTruthy();
+		expect(within(dialog).getByText(/daily limit of \$5 a day/)).toBeTruthy();
+		expect(within(dialog).getByText(/30 paid tool calls/)).toBeTruthy();
+		expect(calls(s)).toHaveLength(0);
+
+		// 3. Cancel closes it, still with nothing sent.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.autopilotCancel }),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(calls(s)).toHaveLength(0);
+
+		// 4. Turn on sends the confirmation; a refusal is said in the alert.
+		fireEvent.click(toggle);
+		fireEvent.click(
+			within(
+				await screen.findByRole("dialog", { name: en.autopilotWarnTitle }),
+			).getByRole("button", { name: en.autopilotTurnOn }),
+		);
+		const frame = await waitFor(() => {
+			const f = calls(s)[0];
+			if (!f) throw new Error("no autopilot.set was sent");
+			return f;
+		});
+		expect(frame.params).toEqual({ on: true, confirmed: true });
+		await s.fail(frame, -32005, "refused", {
+			errors: [
+				{
+					path: "/budgets/daily_usd",
+					message: "Autopilot needs a daily spending limit.",
+					code: "daily_limit_required",
+				},
+			],
+		});
+		expect((await screen.findByRole("alert")).textContent).toContain(
+			en.refuseDailyLimitRequired,
+		);
+		cleanup();
+
+		// 5. Turning it off needs no dialog.
+		const on = await open(path, rules({ daily_usd: 5 }, true));
+		await answerQuery(on.s, "settings.defaults", defaults);
+		const live = await main().findByRole("switch", {
+			name: en.autopilotSwitch,
+		});
+		expect(live.getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(live);
+		const off = await waitFor(() => {
+			const f = calls(on.s)[0];
+			if (!f) throw new Error("no autopilot.set was sent");
+			return f;
+		});
+		expect(off.params).toEqual({ on: false });
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
 	it("opens_work's_advanced_settings_under_its_button", async () => {
 		const defaults = {
 			budgets: {},
@@ -643,6 +748,26 @@ describe("settings directory", () => {
 			expect(
 				((await saved(s)).policy as Record<string, unknown>).readiness_attempts,
 			).toBe(5);
+			cleanup();
+
+			const rate = await rulesPage();
+			const paid = partOf(en.rulesLimitsTitle);
+			typeInto(paid, en.limitsPaidCalls, "1001");
+			expect(
+				within(
+					main()
+						.getByLabelText(en.limitsPaidCalls)
+						.closest("div") as HTMLElement,
+				).getByText(
+					en.limitsWrong.replace("{min}", "1").replace("{max}", "1000"),
+				),
+			).toBeTruthy();
+			typeInto(paid, en.limitsPaidCalls, "12");
+			await saveOf(paid);
+			expect(
+				((await saved(rate)).policy as Record<string, unknown>)
+					.paid_calls_per_hour,
+			).toBe(12);
 			cleanup();
 
 			const again = await rulesPage();
