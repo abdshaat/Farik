@@ -220,6 +220,7 @@ fn path_fault(path: &str, notes: bool) -> Option<String> {
 /// Every error `validate_team` reports for the carried team.
 pub fn carried_team(team: &Team) -> Result<Team, Vec<ValidationError>> {
     let mut carried = team.clone();
+    carried.policy.merge_when_checks_pass = None;
     carried
         .agents
         .retain(|agent| agent.status != AgentStatus::Retired);
@@ -332,7 +333,7 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             });
         }
     }
-    // Catervas never merges (ADR 0061): `auto_merge` and `manual` still load, and read as a pull
+    // Catervas merges only as ADR 0073 allows, by its own key (ADR 0061): `auto_merge` and `manual` still load, and read as a pull
     // request.
     team.policy.integration = Integration::PullRequest;
     if errors.is_empty() {
@@ -1291,6 +1292,14 @@ impl Team {
     #[must_use]
     pub fn is_solo(&self) -> bool {
         self.policy.solo == Some(true)
+    }
+
+    /// Whether the file lets Catervas merge its pull requests once GitHub's checks pass
+    /// (`policy.merge_when_checks_pass`, ADR 0073). Only what the file says: this computer's
+    /// permission is the log's, so `catervas_store::merging::merging_allowed` is what decides.
+    #[must_use]
+    pub fn merge_when_checks_pass(&self) -> bool {
+        self.policy.merge_when_checks_pass == Some(true)
     }
 
     /// Whether an active agent holds this role.
@@ -3784,6 +3793,25 @@ mod tests {
                 paths(&wire)
             );
         }
+    }
+
+    #[test]
+    fn merging_is_off_unless_written_and_never_carried() {
+        assert!(
+            !team(&a_team_wire()).merge_when_checks_pass(),
+            "absent means off"
+        );
+        let mut on = a_team_wire();
+        on["policy"]["merge_when_checks_pass"] = json!(true);
+        assert!(team(&on).merge_when_checks_pass(), "the key turns it on");
+        let mut old = a_team_wire();
+        old["policy"]["integration"] = json!("auto_merge");
+        assert!(
+            !team(&old).merge_when_checks_pass(),
+            "auto_merge is not the key"
+        );
+        let carried = carried_team(&team(&on)).expect("the carried team is a team");
+        assert!(!carried.merge_when_checks_pass(), "a carried team drops it");
     }
 
     #[test]

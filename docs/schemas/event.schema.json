@@ -178,7 +178,10 @@
         "connection.requested",
         "worktree.tidied",
         "pull_request.conflicted",
-        "pull_request.refreshed"
+        "pull_request.refreshed",
+        "merge_permission.granted",
+        "merge_permission.withdrawn",
+        "pull_request.merged"
       ]
     },
     "eventBodyWire": {
@@ -296,7 +299,9 @@
         { "$ref": "#/$defs/connectionRequestedBody" },
         { "$ref": "#/$defs/worktreeTidiedBody" },
         { "$ref": "#/$defs/pullRequestConflictedBody" },
-        { "$ref": "#/$defs/pullRequestRefreshedBody" }
+        { "$ref": "#/$defs/pullRequestRefreshedBody" },
+        { "$ref": "#/$defs/mergePermissionBody" },
+        { "$ref": "#/$defs/pullRequestMergedBody" }
       ]
     },
     "contractSummary": {
@@ -661,7 +666,7 @@
     },
     "taskIntegratedBody": {
       "title": "Task Integrated Body",
-      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Catervas's own merge and human for the human's integrate or a pull request the human merged on the forge.",
+      "description": "An accepted task's branch reached the integration branch (docs/SPEC.md section 5.14): sha is the integration branch's commit that holds it, into is that branch, and integrated_by is governor for Catervas's own merge, also when Catervas merged the pull request itself (ADR 0073), and human for the human's integrate or a pull request the human merged on the forge.",
       "type": "object",
       "additionalProperties": false,
       "required": ["sha", "into", "integrated_by"],
@@ -2034,6 +2039,28 @@
       "properties": {
         "url": { "type": "string" },
         "sha": { "type": "string" }
+      }
+    },
+    "mergePermissionBody": {
+      "title": "Merge Permission Body",
+      "description": "The body of both merge_permission.granted and merge_permission.withdrawn (ADR 0073). The two share one shape, so the one branch of the body choice serves both and the event's kind says which it is: a team.paused body is also a by alone, so this one carries into as well. granted: the owner confirmed the warning on this computer, and Catervas may merge its pull requests once GitHub's checks pass. withdrawn: the owner turned merging off. by is who did, into the resolved integration branch. It is about no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by", "into"],
+      "properties": {
+        "by": { "type": "string" },
+        "into": { "type": "string" }
+      }
+    },
+    "pullRequestMergedBody": {
+      "title": "Pull Request Merged Body",
+      "description": "Catervas merged a pull request itself, once GitHub's checks passed (ADR 0073): url is the pull request and method the one used. It is about no task, even for a task's pull request, and names no actor; the integrated event that follows ties it to the work.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "method"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "method": { "type": "string", "enum": ["merge", "squash", "rebase"] }
       }
     },
     "connectorTag": {

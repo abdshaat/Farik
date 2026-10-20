@@ -7,6 +7,7 @@ export function Switch({
 	label,
 	checked,
 	onChange,
+	disabled,
 	description,
 	info,
 	icon,
@@ -15,6 +16,8 @@ export function Switch({
 	label: string;
 	checked: boolean;
 	onChange: (checked: boolean) => void;
+	/** Shown off and not clickable, with the reason beside it. */
+	disabled?: boolean;
 	description?: string;
 	/** A longer note, kept behind an info button after the label. */
 	info?: ReactNode;
@@ -27,6 +30,7 @@ export function Switch({
 				type="button"
 				id={id}
 				role="switch"
+				disabled={disabled}
 				aria-checked={checked}
 				aria-labelledby={`${id}-label`}
 				aria-describedby={description ? `${id}-description` : undefined}

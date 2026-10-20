@@ -469,8 +469,10 @@ pub fn waiting(
         };
         waiting.push(item(row, WaitingKind::Acceptance, assignee, line));
     }
-    // Catervas never merges (ADR 0061): every accepted task awaiting integration waits for the
-    // human, with its pull request when one was opened since it was accepted.
+    // Catervas merges only as ADR 0073 allows: every accepted task awaiting integration waits
+    // for the human, or for its checks when merging is on, with its pull request when one was
+    // opened since it was accepted.
+    let merging = crate::merging::merging_allowed(log, team)?;
     for row in board.iter().filter(|row| row.awaiting_integration) {
         // A plan task has no pull request of its own: its tasks carry the plan, so there is
         // nothing of it for the human to merge.
@@ -490,7 +492,9 @@ pub fn waiting(
         let opened = events.iter().any(|event| {
             event.envelope.seq > accepted && matches!(event.body, EventBody::PullRequestOpened(_))
         });
-        let line = if opened {
+        let line = if opened && merging {
+            "Accepted: Catervas merges its pull request when GitHub's checks pass".to_string()
+        } else if opened {
             "Accepted: its pull request waits for you to merge it".to_string()
         } else {
             let branch = files
@@ -1253,6 +1257,51 @@ mod tests {
         );
         assert_eq!(listed[0].question_id, Some(asked.envelope.seq));
         assert_eq!(listed[2].reason.as_deref(), Some("iterations"));
+    }
+
+    #[test]
+    fn says_catervas_merges_the_pull_request_while_merging_is_allowed() {
+        let board = Board::new("waiting-merging");
+        let people = (Some("linus"), Some("grace"));
+        board.file("CTV-5", "Done work", |_| {});
+        board.moved(at(9, 5), "CTV-5", ("draft", "accepted"), "linus", people);
+        board.put(
+            at(9, 6),
+            Some("CTV-5"),
+            None,
+            "pull_request.opened",
+            json!({ "url": "https://github.com/o/r/pull/7", "number": 7, "branch": "catervas/CTV-5" }),
+        );
+        let line = |team: &catervas_core::team::Team| {
+            waiting(&board.projections, &board.log, &board.files, team)
+                .expect("the store reads")
+                .remove(0)
+                .line
+        };
+        assert_eq!(
+            line(&a_team()),
+            "Accepted: its pull request waits for you to merge it"
+        );
+
+        let mut wire = serde_json::to_value(a_team()).expect("a team is JSON");
+        wire["policy"]["merge_when_checks_pass"] = json!(true);
+        let on = catervas_core::team::validate_team(&wire).expect("a team");
+        assert_eq!(
+            line(&on),
+            "Accepted: its pull request waits for you to merge it",
+            "the file alone permits nothing"
+        );
+        board.put(
+            at(9, 7),
+            None,
+            None,
+            "merge_permission.granted",
+            json!({ "by": "human", "into": "main" }),
+        );
+        assert_eq!(
+            line(&on),
+            "Accepted: Catervas merges its pull request when GitHub's checks pass"
+        );
     }
 
     /// Ada, Linus and Kai, the Marketing Specialist.
