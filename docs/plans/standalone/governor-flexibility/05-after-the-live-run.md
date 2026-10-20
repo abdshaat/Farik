@@ -37,7 +37,7 @@ Files: `crates/runtime/src/orchestrator/rules.rs`, `messages.rs` (verify prompt)
 
 Files: `crates/runtime/src/orchestrator/messages.rs`
 - `keeps_the_owners_answers_for_the_whole_try` — history: task enters in_progress; owner answers a block ("plan text: X"); a session starts and ends; the task is rejected and back in progress; a new session's `human_message` contains "plan text: X" under "The owner's answers on this task:".
-- [ ] `fix(runtime): the owner's answers reach every session of the task's try`
+- [x] `fix(runtime): the owner's answers reach every session of the task's try`
 
 ### Task 25: the spec and the ADR say it
 

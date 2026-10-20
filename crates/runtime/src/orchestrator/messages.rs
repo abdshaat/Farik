@@ -467,7 +467,46 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
             _ => None,
         })
         .collect();
-    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+    let answers = owners_earlier_answers(history, since);
+    let mut told = Vec::new();
+    if !answers.is_empty() {
+        told.push(format!(
+            "The owner's answers on this task:\n{}",
+            answers.join("\n")
+        ));
+    }
+    told.extend(blocks);
+    (!told.is_empty()).then(|| told.join("\n\n"))
+}
+
+/// The owner's answers to this task's blocks and escalations that came before `since`, the start of
+/// the last session, and still belong to the task's try (from its last start out of `assigned` or
+/// `ready`): the newest three, oldest first. Those after `since` the caller tells already.
+fn owners_earlier_answers(history: &[CatervasEvent], since: u64) -> Vec<String> {
+    let try_start = history
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(&event.body, EventBody::TaskTransitioned(body)
+                if body.to.to_string() == "in_progress"
+                    && matches!(body.from.to_string().as_str(), "assigned" | "ready"))
+        })
+        .map_or(0, |event| event.envelope.seq);
+    let mut answers: Vec<String> = history
+        .iter()
+        .rev()
+        .filter(|event| event.envelope.seq > try_start && event.envelope.seq <= since)
+        .filter_map(|event| match &event.body {
+            EventBody::EscalationResolved(body) if body.resolved_by == "human" => Some(format!(
+                "The human, moving this to {}: {}",
+                body.to, body.message
+            )),
+            _ => None,
+        })
+        .take(3)
+        .collect();
+    answers.reverse();
+    answers
 }
 
 /// Whether `event` was recorded by the owner or by Catervas, not in an agent's session.
@@ -2141,6 +2180,43 @@ mod tests {
             human_message(&history, "pm").as_deref(),
             Some("The human, approving the contract: Keep it to one file.")
         );
+    }
+
+    #[test]
+    fn keeps_the_owners_answers_for_the_whole_try() {
+        let started = json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" });
+        let moved = |from: &str, to: &str| {
+            json!({
+                "from": from, "to": to, "actor": "governor", "requested_by": "governor",
+                "gate": "none", "effects": [], "iteration": 0
+            })
+        };
+        let answer =
+            |text: &str| json!({ "to": "in_progress", "message": text, "resolved_by": "human" });
+        let history = [
+            event(1, "task.transitioned", &moved("assigned", "in_progress")),
+            event(2, "escalation.resolved", &answer("plan text: X")),
+            event(3, "session.started", &started),
+            event(4, "task.transitioned", &moved("verifying", "rejected")),
+            event(5, "task.transitioned", &moved("rejected", "in_progress")),
+            event(6, "session.started", &started),
+        ];
+
+        let told = human_message(&history, "dev-a").expect("told");
+
+        assert!(
+            told.starts_with("The owner's answers on this task:"),
+            "{told}"
+        );
+        assert!(told.contains("plan text: X"), "{told}");
+        // An answer from an earlier try is not carried into the next.
+        let retried = [
+            event(0, "escalation.resolved", &answer("an old try")),
+            history[0].clone(),
+            event(7, "task.transitioned", &moved("ready", "in_progress")),
+            event(8, "session.started", &started),
+        ];
+        assert_eq!(human_message(&retried, "dev-a"), None);
     }
 
     /// An event of CTV-1 at `seq`, of `kind`, with `body`, in `agent`'s session `session`.
