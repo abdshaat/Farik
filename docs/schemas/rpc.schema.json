@@ -5974,10 +5974,11 @@
       "enum": [
         "network",
         "paid",
+        "ask",
         "external_effect",
         "denied"
       ],
-      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox and runs without asking; paid, costs money and asks (ADR 0061); denied, never offered."
+      "description": "A connector tool's label (docs/SPEC.md 5.6): network, only reads; external_effect, changes something outside the sandbox and runs without asking; paid, costs money and asks (ADR 0061); ask, costs nothing and the owner chose to be asked first (ADR 0080); denied, never offered."
     },
     "connectorDisconnectRequest": {
       "title": "Connector Disconnect Request",

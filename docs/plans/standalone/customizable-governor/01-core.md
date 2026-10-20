@@ -116,7 +116,7 @@ Produces: `ConnectorTag::Ask`
 Tests (`permissions.rs` `mod tests`):
 - `an_ask_tool_waits_for_the_owner_as_a_paid_one_does` — asserts that an `ask` tool with no grant and no allowance is `ApprovalNeeded`, with a grant passes with `approval: Some(id)`, and with an allowance of 2 and `used: 1` passes with `allowance: Some(2)`.
 
-- [ ] `feat(core): a connector tool may ask the owner first`
+- [x] `feat(core): a connector tool may ask the owner first`
 
 ## Verification
 

@@ -2215,7 +2215,7 @@
     },
     "connectorTag": {
       "type": "string",
-      "enum": ["network", "paid", "external_effect", "denied"],
+      "enum": ["network", "paid", "ask", "external_effect", "denied"],
       "description": "A connector tool's tag (docs/SPEC.md section 5.6)."
     },
     "questionAskedBody": {

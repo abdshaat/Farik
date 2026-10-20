@@ -640,14 +640,18 @@ fn judge_connector(
     let mut used = 0;
     let mut plan = None;
     let tag = connector.and_then(|connector| connector.tools.get(tool).copied());
-    if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::ExternalEffect)) {
+    if matches!(
+        tag,
+        Some(ConnectorTag::Paid | ConnectorTag::Ask | ConnectorTag::ExternalEffect)
+    ) {
         plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
         if connector.is_some_and(|connector| connector.plan_tools.contains(tool)) {
             // The owner's plan approves it or nothing does: no grant is looked up and no allowance
             // counted, and the log is read for the active plan only for such a tool.
             plan = active_marketing_plan(deps)?;
-        } else if tag == Some(ConnectorTag::Paid) {
-            // Only a call that costs money asks (ADR 0061): an `external_effect` call runs.
+        } else if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::Ask)) {
+            // Only a call that costs money, or one the owner chose to be asked about, asks (ADR
+            // 0061, ADR 0080): an `external_effect` call runs.
             granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
             // Zero asks every time, and a grant is used before an allowance: neither needs the
             // count.
@@ -967,6 +971,7 @@ fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
         ConnectorTag::Network => ConnectorTagWire::Network,
         ConnectorTag::ExternalEffect => ConnectorTagWire::ExternalEffect,
         ConnectorTag::Paid => ConnectorTagWire::Paid,
+        ConnectorTag::Ask => ConnectorTagWire::Ask,
         ConnectorTag::Denied => ConnectorTagWire::Denied,
     }
 }

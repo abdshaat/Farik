@@ -625,7 +625,7 @@ fn allowance_errors(server: &McpServerWire) -> Vec<(String, String)> {
                     .iter()
                     .find(|(name, _)| name.as_str() == tool)
                     .map(|(_, tag)| connector_tag(*tag)),
-                Some(ConnectorTag::Paid | ConnectorTag::ExternalEffect)
+                Some(ConnectorTag::Paid | ConnectorTag::Ask | ConnectorTag::ExternalEffect)
             ) {
                 format!(
                     "allowance_not_paid: {tool} is not a tool that costs money, so it has no \
@@ -974,6 +974,7 @@ fn connector_tag(tag: ConnectorTagWire) -> ConnectorTag {
         ConnectorTagWire::Network => ConnectorTag::Network,
         ConnectorTagWire::ExternalEffect => ConnectorTag::ExternalEffect,
         ConnectorTagWire::Paid => ConnectorTag::Paid,
+        ConnectorTagWire::Ask => ConnectorTag::Ask,
         ConnectorTagWire::Denied => ConnectorTag::Denied,
     }
 }

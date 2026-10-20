@@ -167,6 +167,9 @@ pub enum ConnectorTag {
     ExternalEffect,
     /// Costs money at the service; runs once for each call the human allows (ADR 0061).
     Paid,
+    /// Asks the owner, or uses an allowance, as a `paid` tool does, and costs nothing: the owner
+    /// chose to be asked before this tool runs (ADR 0080 decision 10).
+    Ask,
     /// Never offered and always refused.
     Denied,
 }
@@ -262,7 +265,7 @@ pub enum ConnectorRefusal {
 /// connector, the tool must be tagged `network`, `external_effect` or `paid`, and, for a connector
 /// with an origin, every field named `url`, at any depth of the input, must be a string naming the
 /// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call then
-/// runs without asking (ADR 0061); a `paid` call also needs `granted`, the seq of the human's open grant for exactly this call, which the caller
+/// runs without asking (ADR 0061); a `paid` or `ask` call also needs `granted`, the seq of the human's open grant for exactly this call, which the caller
 /// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
 /// Failing that, a tool with an allowance runs while `used`, the agent's calls to it this period
 /// before this one, is under it (ADR 0037): the grant is for exactly this call, so it comes
@@ -847,6 +850,48 @@ mod tests {
                 false
             ),
             Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn an_ask_tool_waits_for_the_owner_as_a_paid_one_does() {
+        let connector = SessionConnector {
+            tools: [("post_note".to_string(), ConnectorTag::Ask)].into(),
+            allowances: [("post_note".to_string(), 2)].into(),
+            ..github()
+        };
+        let call = |granted, used| {
+            evaluate_connector_call(
+                "post_note",
+                &json!({ "text": "x" }),
+                Some(&connector),
+                granted,
+                used,
+                false,
+            )
+        };
+        assert_eq!(call(None, 2), Err(Refused::ApprovalNeeded));
+        assert_eq!(
+            call(Some(7), 2),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Ask,
+                approval: Some(7),
+                allowance: None,
+                plan_approved: false
+            })
+        );
+        assert_eq!(
+            call(None, 1),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Ask,
+                approval: None,
+                allowance: Some(2),
+                plan_approved: false
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(ConnectorTag::Ask).unwrap(),
+            json!("ask")
         );
     }
 
