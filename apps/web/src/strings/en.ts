@@ -1293,6 +1293,7 @@ export const en = {
 		"{name} asks you before each use, and you see exactly what {name} wants to send.",
 	tagExternal: "Changes things",
 	tagExternalNote: "{name} may use it without asking; each use is recorded.",
+	tagAsk: "Asks first",
 	tagDenied: "Never",
 	tagDeniedNote: "{name} is not given it.",
 	addTitle: "Add a custom connector to {name}",
@@ -1611,6 +1612,12 @@ export const en = {
 	agentRulesSession: "How long one of {name}’s sessions may run",
 	agentRulesOff: "Off limits",
 	agentRulesRead: "Read only",
+	toolsSummary: "What each tool does",
+	toolsLead:
+		"Choose whether {name} runs a tool, asks you first, or never uses it.",
+	toolRuns: "Runs",
+	toolAsks: "Asks first",
+	toolNever: "Never",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",

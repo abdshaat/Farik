@@ -1,5 +1,6 @@
-import { Button } from "@catervas/ui";
+import { Button, Segmented } from "@catervas/ui";
 import { t } from "../strings/t.ts";
+import type { Tag } from "./ConnectorAdd.tsx";
 import {
 	CommandList,
 	GitList,
@@ -141,5 +142,101 @@ export function AgentRules({
 				}}
 			/>
 		</section>
+	);
+}
+
+type Answer = "runs" | "ask" | "never";
+
+/** What a tool does, as the owner chooses it: "Runs", "Asks first" or "Never" (ADR 0080, decision 10). */
+export function ToolChoice({
+	tool,
+	words,
+	label,
+	asAdded,
+	onChange,
+}: {
+	tool: string;
+	/** The tool in the user's words; the tool's name when the service gave none. */
+	words: string;
+	/** What the team file holds now. */
+	label: Tag;
+	/** The label it had when the page was read; "Runs" and "Asks first" go back to it. */
+	asAdded: Tag;
+	onChange: (label: Tag) => void;
+}) {
+	// A paid tool never runs without the owner (ADR 0041): it asks first or it never runs.
+	const paid = asAdded === "paid";
+	const now: Answer =
+		label === "denied"
+			? "never"
+			: label === "ask" || label === "paid"
+				? "ask"
+				: "runs";
+	const options: { value: Answer; label: string }[] = [
+		...(paid ? [] : [{ value: "runs" as const, label: t("toolRuns") }]),
+		{ value: "ask", label: t("toolAsks") },
+		{ value: "never", label: t("toolNever") },
+	];
+	return (
+		<Segmented
+			name={`tool-${tool}`}
+			legend={words}
+			options={options}
+			value={now}
+			onChange={(to) =>
+				onChange(
+					to === "never"
+						? "denied"
+						: to === "ask"
+							? paid
+								? "paid"
+								: "ask"
+							: asAdded === "network"
+								? "network"
+								: "external_effect",
+				)
+			}
+		/>
+	);
+}
+
+/**
+ * A connector's tools, each with its choice, behind "What each tool does". A tool the owner's plan
+ * marks (ADR 0042) is the plan's to run and shows no choice.
+ */
+export function ConnectorTools({
+	name,
+	tools,
+	savedTools,
+	words,
+	planMarked,
+	onChange,
+}: {
+	name: string;
+	tools: Record<string, Tag> | undefined;
+	savedTools: Record<string, Tag> | undefined;
+	words: Record<string, string>;
+	planMarked: string[];
+	onChange: (tools: Record<string, Tag>) => void;
+}) {
+	const shown = Object.entries(tools ?? {}).filter(
+		([tool]) => !planMarked.includes(tool),
+	);
+	if (shown.length === 0) return null;
+	return (
+		<details className={styles.toolChoices}>
+			<summary>{t("toolsSummary")}</summary>
+			<p className={styles.muted}>{t("toolsLead", { name })}</p>
+			{shown.map(([tool, label]) => (
+				<ToolChoice
+					key={tool}
+					tool={tool}
+					words={words[tool] ?? tool}
+					label={label}
+					asAdded={savedTools?.[tool] ?? label}
+					onChange={(next) => onChange({ ...tools, [tool]: next })}
+				/>
+			))}
+		</details>
 	);
 }

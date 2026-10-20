@@ -73,7 +73,7 @@ Tests (`team.test.tsx`):
 Tests (`connectors.test.tsx`):
 - `sets a tool to run, ask first, or never` — an `external_effect` tool set to Asks first saves `ask`, then Never saves `denied`, then Runs saves `external_effect`; a `paid` tool offers Asks first and Never only; a plan-marked tool shows no choice.
 
-- [ ] `feat(web): the owner sets what each connector tool does`
+- [x] `feat(web): the owner sets what each connector tool does`
 
 ## Verification
 
