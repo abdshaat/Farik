@@ -158,6 +158,11 @@ const WORDS: Record<string, keyof typeof en> = {
 	goal_already_paused: "refuseGoalAlreadyPaused",
 	goal_not_measured: "refuseGoalNotMeasured",
 	goal_value: "refuseGoalValue",
+	// Where the team's documents are kept (ADR 0074).
+	project_folder: "refuseProjectFolder",
+	documents_switching: "refuseDocumentsSwitching",
+	documents_in_flight: "refuseDocumentsInFlight",
+	documents_busy: "refuseDocumentsBusy",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

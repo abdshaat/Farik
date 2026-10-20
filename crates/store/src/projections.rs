@@ -712,6 +712,9 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::GoalEnded(_)
         | EventBody::GoalMeasured(_)
         | EventBody::GoalPlanned(_)
+        | EventBody::MergePermissionGranted(_)
+        | EventBody::MergePermissionWithdrawn(_)
+        | EventBody::PullRequestMerged(_)
         | EventBody::AgentUpdated(_)
         | EventBody::SprintStarted(_)
         | EventBody::SprintPlanned(_)
@@ -796,6 +799,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::FolderChangeOpened(_)
         | EventBody::FolderChangeIntegrated(_)
         | EventBody::FolderChangeEscalated(_)
+        | EventBody::DocumentStorageChanged(_)
+        | EventBody::LocalDocumentsWritten(_)
         | EventBody::ProjectStarted(_)
         // A project folder's members are read from `.catervas/repos.yaml`; nothing on the board
         // changes when one joins, leaves or is found elsewhere.

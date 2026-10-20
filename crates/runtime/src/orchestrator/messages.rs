@@ -113,6 +113,9 @@ pub(super) struct Resume {
     /// the task's pull request stopped merging and no move into `verifying` has followed
     /// (ADR 0069).
     pub(super) conflicts: Option<(String, Vec<String>)>,
+    /// Whether the team's documents are kept on this computer (ADR 0074), and when they are,
+    /// whether the task has no branch because it changes documents only.
+    pub(super) local_documents: Option<bool>,
 }
 
 /// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
@@ -1036,12 +1039,23 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
             "Do the work of {task} under its contract, in your private folder, `{folder}`, where \
              nothing is committed."
         )
+    } else if resume.local_documents == Some(true) {
+        format!(
+            "Do the work of {task} under its contract, in this worktree. This task has no branch \
+             and needs no commit."
+        )
     } else {
         format!(
             "Do the work of {task} under its contract, in this worktree, on the branch {}.",
             task_branch(contract)
         )
     };
+    if resume.local_documents.is_some() {
+        message = format!(
+            "{message}\n\nYour documents in docs/catervas/ are kept on this computer and never \
+             committed: write them, record your criteria, then ask for verifying."
+        );
+    }
     if let Some((failed, reasons)) = &resume.rejection {
         let words = format!("failed criteria: {}\nreasons: {reasons}", listed(failed));
         message = format!(
@@ -1670,6 +1684,7 @@ mod tests {
             rejection: None,
             posts: Vec::new(),
             conflicts: None,
+            local_documents: None,
         }
     }
 

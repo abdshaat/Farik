@@ -5,7 +5,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use catervas_core::branch::task_branch;
 use catervas_core::budget::{
     BudgetScope, BudgetState, CHAT_SESSION_LIMITS, SessionLedger, SessionLimits, add_usage, tighter,
 };
@@ -28,7 +27,6 @@ use catervas_protocol::event::{
 use catervas_roles::{ConnectorDefinition, builtin_connector, load_role};
 use catervas_store::EventQuery;
 use catervas_store::files::ProjectFiles;
-use catervas_store::git::{integration_branch, stale_twins};
 use catervas_store::product_plan::is_the_product_plan;
 use catervas_store::repos::{TaskRepositoryError, repo_present};
 use chrono::{DateTime, Utc};
@@ -651,7 +649,7 @@ async fn open_preview(
         }
         Err(error) => return Err(repository_refused(&contract.id, &error)),
     };
-    let tree = repository.git.tree(&task_branch(contract))?;
+    let tree = repository.git.tree(&super::rev_of(tools, team, contract))?;
     let cache = tools
         .files
         .root()
@@ -1285,9 +1283,10 @@ fn stale_twins_of(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) ->
     if ask.purpose == SessionPurpose::Chat {
         return Vec::new();
     }
-    integration_branch(team, &deps.tools.git)
-        .and_then(|branch| stale_twins(&deps.tools.git, &branch))
-        .unwrap_or_default()
+    let Ok(mode) = catervas_store::document_source::documents_mode_of(team, &deps.tools.log) else {
+        return Vec::new();
+    };
+    catervas_store::document_source::stale_twins_now(&deps.tools.git, &deps.tools.log, team, mode)
 }
 
 /// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
@@ -1380,6 +1379,7 @@ fn session_spec_without(
         members: &members,
         own_repo,
         document_format: team.document_format(),
+        documents_local: catervas_store::document_source::documents_on_disk(team, &deps.tools.log)?,
     })?;
     let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {

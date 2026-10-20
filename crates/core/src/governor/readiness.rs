@@ -653,7 +653,7 @@ fn split_glob(pattern: &str) -> (&str, &str) {
 /// so that a file filter is never widened and a stray entry never opens the ceiling. A path
 /// with a `..` segment anywhere, before or after a wildcard, is within nothing. Paths are compared as written: `./src/**`
 /// is not `src/**`.
-fn is_within_any(path: &str, ceilings: &[String]) -> bool {
+pub(crate) fn is_within_any(path: &str, ceilings: &[String]) -> bool {
     if path.split('/').any(|segment| segment == "..") {
         return false;
     }

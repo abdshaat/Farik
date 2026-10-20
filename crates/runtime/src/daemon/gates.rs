@@ -601,11 +601,23 @@ fn product_plan_state(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             .files
             .read_contract(&row.task_id)
             .map_err(|e| internal(&e))?;
-        let branch = task_branch(&contract);
+        // The plan task of a team that keeps its documents on this computer has no branch: its
+        // draft is in its worktree's copy of the folder.
+        let source = if catervas_store::document_source::is_branchless(team, &deps.log, &contract)
+            .map_err(|e| internal(&e))?
+        {
+            catervas_store::document_source::DocumentSource::Disk(
+                deps.files
+                    .root()
+                    .join(".catervas/local/worktrees")
+                    .join(contract.id.as_str()),
+            )
+        } else {
+            catervas_store::document_source::DocumentSource::Branch(task_branch(&contract))
+        };
         for stem in PRODUCT_PLAN_STEMS {
-            if let Ok(Some(path)) =
-                catervas_store::git::held_document(&deps.git, &branch, stem, team.document_format())
-                && let Ok(text) = deps.git.file_at(&branch, &path)
+            if let Ok(Some(path)) = source.held_document(&deps.git, stem, team.document_format())
+                && let Ok(Some(text)) = source.text(&deps.git, &path)
             {
                 documents.push(json!({ "path": path, "text": text }));
             }
@@ -3233,6 +3245,47 @@ pub(super) mod tests {
                 "title": "Delivery rhythm by Sol",
                 "line": "Its pull request waits for you to merge it"
             })]
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_catervas_merges_a_folder_change_while_merging_is_allowed() {
+        let harness = Harness::new("gates-folder-change-merging", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
+            }));
+            wire["policy"]["merge_when_checks_pass"] = json!(true);
+        });
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 1, "sha": "def"
+            }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 1, "url": "https://github.com/o/r/pull/7", "number": 7 }),
+        );
+        harness.project.record(
+            "",
+            "merge_permission.granted",
+            &json!({ "by": "human", "into": "main" }),
+        );
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult"
+            )["waiting"][0]["line"],
+            "Catervas merges its pull request when GitHub's checks pass"
         );
     }
 

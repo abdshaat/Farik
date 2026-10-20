@@ -47,6 +47,30 @@ pub fn folder_change_title(paths: &[&str], names: &str) -> String {
     }
 }
 
+/// The title of the pull request that moves the team's documents out of the repository (`local`)
+/// or back into it (ADR 0074).
+#[must_use]
+pub fn storage_change_title(local: bool) -> &'static str {
+    if local {
+        "Docs: Keep the team's documents on this computer"
+    } else {
+        "Docs: Put the team's documents back in the repository"
+    }
+}
+
+/// The body of that pull request.
+#[must_use]
+pub fn storage_change_body(local: bool) -> String {
+    let changed = if local {
+        "The team's documents in docs/catervas/ leave the repository and stay on this computer."
+    } else {
+        "The team's documents in docs/catervas/ come back into the repository."
+    };
+    format!(
+        "## What changed\n\n{changed}\n\n## How it was verified\n\nChosen by the owner in Settings."
+    )
+}
+
 /// The most a pull request's body holds, in characters (ADR 0069).
 pub const PULL_REQUEST_BODY_CAP: usize = 1500;
 

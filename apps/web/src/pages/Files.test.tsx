@@ -135,14 +135,22 @@ const read = (more: Record<string, unknown> = {}) => ({
 /** The Files page at `path`, with the team, the tree and the document answered. */
 async function files(
 	path: string,
-	fields: { read?: unknown; tree?: unknown; catervafication?: unknown } = {},
+	fields: {
+		read?: unknown;
+		tree?: unknown;
+		catervafication?: unknown;
+		mode?: string;
+	} = {},
 ) {
 	vi.useFakeTimers({ toFake: ["Date"] });
 	vi.setSystemTime(NOW);
 	const { container, socket } = await renderApp(path);
 	const s = socket as FakeSocket;
 	await answerStatus(s, false);
-	await answerQuery(s, "team.get", { team: TEAM });
+	await answerQuery(s, "team.get", {
+		team: TEAM,
+		...(fields.mode && { documents_mode: fields.mode }),
+	});
 	await answerQuery(s, "files.tree", fields.tree ?? tree());
 	if (fields.catervafication)
 		await answerQuery(s, "catervafication.get", fields.catervafication);
@@ -496,6 +504,36 @@ describe("Files", () => {
 			expect(screen.getByRole("button", { name: en.filesEdit })).toBeTruthy();
 			expect(queries(s, "files.read").length).toBeGreaterThan(before[0] ?? 0);
 			expect(queries(s, "files.tree").length).toBeGreaterThan(before[1] ?? 0);
+		});
+
+		it("saves_on_this_computer", async () => {
+			media.set(WIDE, true);
+			const { s } = await files("/files/product/roadmap.md", {
+				mode: "local",
+			});
+			await screen.findByRole("heading", { name: "Roadmap" });
+			press(en.filesEdit);
+			expect(screen.getByText(en.filesSaveLocal)).toBeTruthy();
+			expect(document.body.textContent).not.toContain("pull request");
+			fireEvent.change(box(), { target: { value: draftText } });
+			press(en.filesSave);
+			const [frame] = s.calls("files.save");
+			await s.reply(frame as never, { change: null, branch: null });
+			expect(await screen.findByText(en.filesSavedLocal)).toBeTruthy();
+			expect(screen.queryByText(en.filesEditing)).toBeNull();
+			cleanup();
+
+			// While the documents move out of the repository or back, none can be changed.
+			await files("/files/product/roadmap.md", {
+				mode: "putting_back",
+				read: read({ editable: false, askable: false }),
+			});
+			await screen.findByRole("heading", { name: "Roadmap" });
+			expect(screen.getByText(en.filesMoving)).toBeTruthy();
+			expect(screen.queryByRole("button", { name: en.filesEdit })).toBeNull();
+			expect(
+				screen.queryByRole("textbox", { name: en.docAskLabel }),
+			).toBeNull();
 		});
 
 		it("says what saving does", async () => {

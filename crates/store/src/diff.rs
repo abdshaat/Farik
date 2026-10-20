@@ -76,6 +76,28 @@ pub fn diff_of(
             branch: None,
         });
     }
+    // A task that changes only documents kept on this computer has no branch and commits nothing
+    // (ADR 0074): which documents it changed is what its page can say.
+    if catervas_core::folders::is_documents_only(contract) && team.keeps_documents_local() {
+        let worktree = files
+            .root()
+            .join(".catervas/local/worktrees")
+            .join(contract.id.as_str());
+        let changed = if worktree.is_dir() {
+            crate::local_documents::document_changes(files.root(), &worktree, &contract.id)
+                .map_err(|error| error.to_string())?
+        } else {
+            Vec::new()
+        };
+        return Ok(TaskDiff {
+            diff: String::new(),
+            files: changed,
+            added: 0,
+            removed: 0,
+            private_folder: false,
+            branch: None,
+        });
+    }
     if contract.kind != TaskKind::Epic {
         let mut diff = counted(branch_diff(files, project, team, contract, history)?);
         diff.branch = Some(task_branch(contract));

@@ -430,6 +430,19 @@ pub struct WorkState {
     /// What the task did in its private folder, for a task that works in one; the runtime reads
     /// it, and a task in a folder with none read counts as having named nothing.
     pub folder: Option<FolderWork>,
+    /// What the task did to the documents kept on this computer, when they are (ADR 0074): read
+    /// by the runtime only for a task that changes documents in that mode.
+    pub documents: Option<DocumentWork>,
+}
+
+/// A task's work on the documents kept on this computer: whether it changes documents only (so
+/// it has no commit to make), and which it changed, as repository paths.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct DocumentWork {
+    /// Whether every path the task may change is a document.
+    pub only: bool,
+    /// The documents that differ from, are new to, or are gone from the task's start copy.
+    pub changed: Vec<String>,
 }
 
 /// The `CriteriaRecorded` gate of `in_progress -> verifying` for a task (`docs/SPEC.md` section
@@ -475,7 +488,12 @@ pub fn check_criteria_recorded(
     if task_private_folder(contract).is_some() {
         reasons.extend(unnamed_workbooks(work.folder.as_ref()));
     } else {
-        if work.commits == 0 {
+        let documents_only = work.documents.as_ref().filter(|documents| documents.only);
+        if let Some(documents) = documents_only {
+            if documents.changed.is_empty() {
+                reasons.push("the task changed no document in docs/catervas/".to_string());
+            }
+        } else if work.commits == 0 {
             reasons.push("the task branch has no commit on it".to_string());
         }
         if !work.worktree_clean {
@@ -1720,6 +1738,7 @@ mod tests {
             commits: 1,
             worktree_clean: true,
             folder: None,
+            documents: None,
         };
         assert_eq!(
             check_criteria_recorded(&a_contract(), &[an_assignee_result("C1")], &work),
@@ -1750,6 +1769,7 @@ mod tests {
                 missing: paths(missing),
                 changed: paths(named),
             }),
+            documents: None,
         }
     }
 
@@ -1826,6 +1846,7 @@ mod tests {
             commits: 1,
             worktree_clean: true,
             folder: None,
+            documents: None,
         };
         assert_eq!(
             reasons(check_criteria_recorded(&a_contract(), &[], &work)),
@@ -1868,6 +1889,7 @@ mod tests {
             commits: 1,
             worktree_clean: true,
             folder: None,
+            documents: None,
         };
         let mut failed = an_assignee_result("C1");
         failed.passed = false;
@@ -1888,6 +1910,7 @@ mod tests {
             commits: 1,
             worktree_clean: true,
             folder: None,
+            documents: None,
         };
         assert_eq!(check_criteria_recorded(&contract, &[], &work), Ok(()));
     }
@@ -1904,6 +1927,7 @@ mod tests {
             commits: 1,
             worktree_clean: true,
             folder: None,
+            documents: None,
         };
         assert_eq!(check_criteria_recorded(&contract, &[], &work), Ok(()));
         // Only those two are exempt: a command is the assignee's to run, as a test is.
@@ -1951,6 +1975,7 @@ mod tests {
                     commits: 0,
                     worktree_clean: true,
                     folder: None,
+                    documents: None,
                 }
             )),
             ["the task branch has no commit on it"]
@@ -1963,6 +1988,7 @@ mod tests {
                     commits: 2,
                     worktree_clean: false,
                     folder: None,
+                    documents: None,
                 }
             )),
             ["the worktree has changes that are not committed"]
@@ -1976,6 +2002,7 @@ mod tests {
                     commits: 0,
                     worktree_clean: false,
                     folder: None,
+                    documents: None,
                 }
             )),
             [
