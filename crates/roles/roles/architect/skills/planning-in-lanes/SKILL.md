@@ -21,6 +21,8 @@ A lane is the tasks one builder does, in order. Tasks in different lanes run sid
   (`lanes_overlap`), and the Product Manager has to send the plan back.
 - A task that needs another task's result says so under "depends on", and sits later in its lane
   or after the other lane's task is accepted.
+- Use every builder: a task depends on another only when it needs that task's result, not because
+  it comes later in the plan. A plan that is one chain keeps every builder but one waiting.
 
 ## 2. The outline
 

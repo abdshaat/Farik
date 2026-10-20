@@ -1859,11 +1859,27 @@ mod tests {
     }
 
     #[test]
-    fn forbids_application_code_to_every_role_but_the_developer() {
+    fn forbids_application_code_to_every_role_but_the_builders() {
+        // The Architect builds a Developer's task when no Developer has room (ADR 0077).
+        let architect = loaded(Role::Architect);
+        assert!(
+            !architect
+                .forbidden
+                .iter()
+                .any(|item| item == "write application code"),
+            "{:?}",
+            architect.forbidden
+        );
+        assert!(
+            architect
+                .system_prompt
+                .contains("a Software Developer's task when no Developer has room"),
+            "{}",
+            architect.system_prompt
+        );
         for role in [
             Role::ProductManager,
             Role::ScrumMaster,
-            Role::Architect,
             Role::MarketingSpecialist,
             Role::FinanceSpecialist,
             Role::ProcurementSpecialist,
