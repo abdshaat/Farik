@@ -105,7 +105,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 30] = {
+pub static TRANSITION_TABLE: [TransitionRow; 31] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -251,6 +251,8 @@ pub static TRANSITION_TABLE: [TransitionRow; 30] = {
         row(Any, Is(S::Escalated), A::Human, G::None),
         row(Any, Is(S::Cancelled), A::Human, G::None),
         row(Is(S::Escalated), Any, A::Human, G::None),
+        // A ready task no one holds goes back to be re-planned for idle builders (ADR 0078).
+        row(Is(S::Ready), Is(S::Refining), A::ProductManager, G::None),
     ]
 };
 
@@ -305,29 +307,29 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_thirty_distinct_rows() {
+    fn has_exactly_thirty_one_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 30);
-        assert_eq!(distinct.len(), 30);
+        assert_eq!(TRANSITION_TABLE.len(), 31);
+        assert_eq!(distinct.len(), 31);
     }
 
     #[test]
-    fn has_twenty_six_specific_rows_and_four_any_rows() {
+    fn has_twenty_seven_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 26);
+        assert_eq!(specific, 27);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
     #[allow(clippy::too_many_lines)] // reason: the spec table, one line each
     #[test]
     fn matches_every_line_of_the_spec_table() {
-        let lines: [Line; 19] = [
+        let lines: [Line; 20] = [
             (S::Draft, S::Refining, &[(A::ProductManager, G::Triaged)]),
             (
                 S::Refining,
@@ -350,6 +352,8 @@ mod tests {
                     (A::ProductManager, G::Assignment),
                 ],
             ),
+            // A task no one holds yet goes back to be re-planned (ADR 0078).
+            (S::Ready, S::Refining, &[(A::ProductManager, G::None)]),
             (S::Assigned, S::InProgress, &[(A::Assignee, G::None)]),
             (
                 S::InProgress,

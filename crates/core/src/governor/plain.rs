@@ -53,6 +53,9 @@ pub const fn plain_readiness(rule: ReadinessRule) -> &'static str {
             "Only a folder's owner changes the documents in it, and this plan lets someone else."
         }
         ReadinessRule::NoCatervasPaths => "The plan reaches into Catervas's own files.",
+        ReadinessRule::ProtectedPathAllowed => {
+            "The plan asks to change a file your team keeps secret, which no agent may touch."
+        }
         ReadinessRule::PrivateFolderTask => {
             "A task in a private folder works only there: no commands, no tests, no text searched in a workbook or a note, and no parent epic."
         }
@@ -89,7 +92,7 @@ mod tests {
     use super::super::readiness::ReadinessRule::{self, *};
     use super::plain_readiness;
 
-    const EVERY_RULE: [ReadinessRule; 29] = [
+    const EVERY_RULE: [ReadinessRule; 30] = [
         IntentPresent,
         CriteriaPresent,
         CriteriaMethodsValid,
@@ -109,6 +112,7 @@ mod tests {
         DocumentPathsOnly,
         FolderOwned,
         NoCatervasPaths,
+        ProtectedPathAllowed,
         PrivateFolderTask,
         PrivateFolderReviewer,
         BudgetWithinTeamMax,
@@ -143,6 +147,7 @@ mod tests {
             | DocumentPathsOnly
             | FolderOwned
             | NoCatervasPaths
+            | ProtectedPathAllowed
             | PrivateFolderTask
             | PrivateFolderReviewer
             | BudgetWithinTeamMax

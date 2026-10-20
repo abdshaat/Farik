@@ -26,7 +26,7 @@ use catervas_store::repos::TaskRepository;
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
     given_task_message, goal_task_message, plan_task_message, plan_tasks_message, refine_message,
-    triage_message,
+    replan_message, triage_message,
 };
 use super::rules::{Waiting, acted, active, has_room, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
@@ -40,6 +40,7 @@ use crate::catervafication::{FileDue, catervafication_of, file_due};
 use crate::criteria::{CriterionOutcome, remove_base_worktree, run_criteria};
 use crate::session::SessionPurpose;
 use crate::tools::ToolDeps;
+use crate::transitions::open_tasks;
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, integration_branch, last_move_into, refining_began,
     refusal_details, result_accepted, the_human_reviews_the_epic,
@@ -808,6 +809,95 @@ pub(super) fn epic_assignee<'a>(
     let parent = row.parent.as_ref()?;
     let epic = board.iter().find(|other| &other.task_id == parent)?;
     active(team, epic.assignee_id.as_deref())
+}
+
+/// After rule 8 (ADR 0078): when a builder, a Software Developer or a UI/UX Designer, has nothing
+/// to do while two or more `ready` tasks of its role wait in the lanes of an epic in progress, the
+/// Product Manager is given one plan session about the epic to re-plan them, so that the tasks
+/// that need no unfinished task's result go to a lane of their own. Asked once per epic, role and
+/// set of idle builders in a process.
+pub(super) async fn replan_for_idle(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(pm) = product_manager(team) else {
+        return Ok(None);
+    };
+    let builders = u32::try_from(
+        team.active_agents()
+            .filter(|agent| changes_code(Role::from(agent.role)))
+            .count(),
+    )
+    .unwrap_or(u32::MAX);
+    for role in [Role::SoftwareDeveloper, Role::UiUxDesigner] {
+        let mut idle = Vec::new();
+        for agent in team
+            .active_agents()
+            .filter(|agent| Role::from(agent.role) == role)
+        {
+            if open_tasks(board, agent.id.as_str(), None) == 0
+                && !unavailable(deps, agent, &mut waiting.slept)?
+            {
+                idle.push(agent.id.to_string());
+            }
+        }
+        if idle.is_empty() {
+            continue;
+        }
+        for epic in board
+            .iter()
+            .filter(|row| is_epic(row) && row.status == TaskStatus::InProgress)
+        {
+            let mut stuck = Vec::new();
+            for row in board.iter().filter(|row| {
+                row.parent.as_ref() == Some(&epic.task_id)
+                    && row.status == TaskStatus::Ready
+                    && row.assignee_id.is_none()
+            }) {
+                let contract = match deps.tools.files.read_contract(&row.task_id) {
+                    Ok(contract) => contract,
+                    Err(FilesError::NotFound { .. }) => continue,
+                    Err(error) => return Err(error.into()),
+                };
+                if contract.assignee_role == role && contract.lane.is_some() {
+                    stuck.push(contract);
+                }
+            }
+            if stuck.len() < 2
+                || unavailable(deps, pm, &mut waiting.slept)?
+                || !deps.work.first_replan(format!(
+                    "{}|{role}|{}",
+                    epic.task_id.as_str(),
+                    idle.join(",")
+                ))
+            {
+                continue;
+            }
+            let contract = deps.tools.files.read_contract(&epic.task_id)?;
+            let end = run_session(
+                deps,
+                team,
+                SessionAsk {
+                    agent: pm,
+                    contract: Some(&contract),
+                    purpose: SessionPurpose::Plan,
+                    cwd: deps.tools.files.root().to_path_buf(),
+                    executor: None,
+                    read_only: false,
+                    only_tool: None,
+                    tools: None,
+                    in_reply_to: None,
+                    thread: None,
+                    initial_prompt: replan_message(&contract, role, &idle, &stuck, builders),
+                },
+            )
+            .await?;
+            return Ok(Some(acted(epic, pm, "re-plan", &end)));
+        }
+    }
+    Ok(None)
 }
 
 /// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Catervas
@@ -3510,6 +3600,57 @@ mod tests {
             "{message}"
         );
         assert!(message.contains("first of lane 1"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn replans_an_epic_whose_waiting_tasks_leave_a_builder_idle() {
+        let harness = Harness::new("epic-replan", |_| {});
+        an_epic_in_progress(&harness, |_| {});
+        // dev-a's CTV-2 waits on a block; CTV-3 and CTV-4 wait behind it in lane 1, one after
+        // the other, and dev-b has nothing to do.
+        harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
+            wire["lane"] = json!(1);
+        });
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness.project.moved("CTV-2", "ready", "assigned", &people);
+        harness
+            .project
+            .moved("CTV-2", "assigned", "in_progress", &people);
+        let mut blocking = people.clone();
+        blocking["blocker"] = json!({ "description": "the API is down", "needed": "the API" });
+        harness
+            .project
+            .moved("CTV-2", "in_progress", "blocked", &blocking);
+        for (task, after) in [("CTV-3", "CTV-2"), ("CTV-4", "CTV-3")] {
+            harness.file_under(task, "ready", Some("CTV-1"), |wire| {
+                wire["lane"] = json!(1);
+                wire["dependencies"] = json!([after]);
+            });
+        }
+        let adapter = harness.recorded(vec![replays_catervas_read_board()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+
+        // One re-plan, the Product Manager's, about the epic; not asked again for the same idle
+        // builders.
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        let spec = &started[0];
+        assert_eq!(
+            (spec.purpose, spec.agent_id.as_str(), spec.task_id.clone()),
+            (SessionPurpose::Plan, "pm", Some(task("CTV-1")))
+        );
+        let message = &spec.initial_prompt;
+        assert!(
+            message.starts_with("Re-plan the waiting tasks of CTV-1"),
+            "{message}"
+        );
+        assert!(message.contains("dev-b"), "{message}");
+        assert!(message.contains("CTV-3 (lane 1, after CTV-2)"), "{message}");
+        assert!(message.contains("CTV-4 (lane 1, after CTV-3)"), "{message}");
     }
 
     /// `with_a_scrum_master`, and an Architect, `ada`.
