@@ -15,7 +15,7 @@ use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::team::{Agent, AgentStatus, Team, changes_code, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
-    EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody,
+    EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionStartedBodyPurpose,
 };
 use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
@@ -26,7 +26,7 @@ use catervas_store::repos::TaskRepository;
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
     given_task_message, goal_task_message, plan_task_message, plan_tasks_message, refine_message,
-    triage_message,
+    triage_message, with_the_owners_words,
 };
 use super::rules::{Waiting, acted, active, has_room, refused_since_entering, spent, unavailable};
 use super::session::{SessionAsk, TRIAGE_TOOL, run_session};
@@ -207,6 +207,10 @@ pub(super) async fn refining(
         }
         (None, _) => refine_message(&contract, !asked, &failures, stuck.as_ref()),
     };
+    let initial_prompt = match owner_words(&history) {
+        Some(words) => with_the_owners_words(&initial_prompt, &words),
+        None => initial_prompt,
+    };
     let end = run_session(
         deps,
         team,
@@ -331,7 +335,42 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
         || catervafication_of(history).is_some();
     match written {
         Some(written) => !refused_after(written),
-        None => filed_whole && !refused_after(began),
+        None => filed_whole && !refused_after(began) && !sent_back_unheard(history),
+    }
+}
+
+/// The owner's words when they moved the task into `refining` and no refine session has run
+/// since (ADR 0079): the Product Manager hears them before the contract is judged. An empty note
+/// is no words, and the task is still heard.
+fn sent_back_unheard(history: &[CatervasEvent]) -> bool {
+    let Some(back) = last_move_into(history, TaskStatus::Refining) else {
+        return false;
+    };
+    let EventBody::TaskTransitioned(body) = &back.body else {
+        return false;
+    };
+    body.requested_by == "human"
+        && !history.iter().any(|event| {
+            event.envelope.seq > back.envelope.seq
+                && matches!(&event.body, EventBody::SessionStarted(session)
+                    if session.purpose == SessionStartedBodyPurpose::Refine)
+        })
+}
+
+/// What the owner wrote when they last sent the task back into `refining`, when they did and no
+/// refine session has run since.
+fn owner_words(history: &[CatervasEvent]) -> Option<String> {
+    if !sent_back_unheard(history) {
+        return None;
+    }
+    match &last_move_into(history, TaskStatus::Refining)?.body {
+        EventBody::TaskTransitioned(body) => body
+            .reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|words| !words.is_empty())
+            .map(str::to_string),
+        _ => None,
     }
 }
 
@@ -2959,6 +2998,54 @@ mod tests {
         assert_eq!(child.status, TaskStatus::Assigned);
         assert_eq!(child.assignee_id.as_deref(), Some("dev-a"));
         assert_eq!(child.reviewer_id.as_deref(), Some("dev-b"));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn refines_a_task_the_owner_sent_back_before_judging_it() {
+        let harness = Harness::new("epic-owner-sends-back", |_| {});
+        an_epic_in_progress(&harness, |_| {});
+        a_child(&harness, "in_progress");
+        harness.project.moved(
+            "CTV-2",
+            "in_progress",
+            "blocked",
+            &json!({
+                "actor": "assignee",
+                "requested_by": "dev-a",
+                "blocker": { "description": "The env check fails.", "needed": "A way round it." }
+            }),
+        );
+        harness.project.moved(
+            "CTV-2",
+            "blocked",
+            "refining",
+            &json!({ "actor": "human", "requested_by": "human", "reason": "Drop the env check" }),
+        );
+        let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert!(
+            matches!(&report, TickReport::Acted { task_id, .. } if task_id.as_str() == "CTV-2"),
+            "{report:?}"
+        );
+        let [spec] = adapter.started().try_into().expect("one session");
+        assert_eq!(spec.agent_id, "pm");
+        assert_eq!(spec.purpose, SessionPurpose::Refine);
+        assert_eq!(spec.task_id, Some(task("CTV-2")));
+        assert!(
+            spec.initial_prompt.contains("Drop the env check"),
+            "{}",
+            spec.initial_prompt
+        );
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Refining);
+
+        // The session wrote nothing, so the next tick judges the contract as it stands.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Ready);
     }
 
     #[tokio::test]

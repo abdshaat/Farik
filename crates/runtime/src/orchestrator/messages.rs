@@ -1191,6 +1191,15 @@ pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {
     )
 }
 
+/// `message`, then what the owner wrote when they sent the task back to its plan (ADR 0079): their
+/// words, untrusted.
+pub(super) fn with_the_owners_words(message: &str, words: &str) -> String {
+    format!(
+        "{message}\n\nThe owner sent this back to its plan: {}",
+        untrusted_block("owner", words, NOTE_CAP_BYTES)
+    )
+}
+
 /// How the reviewer reads the files a task changed in its private folder, `files` being the list
 /// of lines `path: how it changed, its size`: with the sheet tool, a workbook; with `Read`, in the
 /// working directory that is the folder, a note (6.10), when the list holds one. The sentence names

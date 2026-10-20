@@ -85,7 +85,7 @@ Files: `runtime/src/orchestrator/requests.rs`, `runtime/src/orchestrator/message
 Tests (requests.rs):
 - `refines_a_task_the_owner_sent_back_before_judging_it` — an epic's child, blocked, moved to refining by the human with reason "Drop the env check"; after one tick a `refine` session started for the PM (no governor move to `ready`), and its initial prompt contains "Drop the env check". A second tick after that session ended with no contract write judges it (the governor asks `ready`).
 
-- [ ] `fix(runtime): a send-back to refining reaches the Product Manager with the owner's words`
+- [x] `fix(runtime): a send-back to refining reaches the Product Manager with the owner's words`
 
 ### Task 5: the session budget counts work
 
