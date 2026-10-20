@@ -31,6 +31,11 @@ Since ADR 0061 the owner is asked only about money, and ADRs 0079 and 0081 cut t
     - A repository with no checks at all is merged once Catervas's own Definition of Done has passed (5.4); a failed check is never merged over and a pending one is waited for.
     - The Product Manager may take the owner's "Carry on" (`carry_on`) after a permission, explicit-request or preview escalation, and retry a folder change whose integration failed (`retry_folder_change`). "Fix how your app opens" is a Settings change and is flagged.
 
+12. **Paid calls are rate limited.** The founder, after the plans: "add a rate limiting of using paid tools just in case the agent get stuck and keeps calling the loop". Under autopilot a `paid` or `ask` connector call that decision 5 lets run is refused `rate_limited` when:
+    - the same agent has made 10 calls of that tool in the past hour, or 30 paid or asking calls of any tool in the past hour (`policy.paid_calls_per_hour`, default 30, 1 to 1000, on the Rules page beside the limits; the per-tool figure is a third of it, at least 1); or
+    - the same agent has made a call of that tool with the same input (its canonical JSON's hash) 3 times in the past hour: a loop, not work.
+    The refusal tells the agent which and when the hour frees up. An agent refused `rate_limited` 3 times in one session ends the session, and its task is flagged by Catervas (`flagged_by: catervas`, needs "<agent> kept calling <tool>"), so a stuck loop stops spending and reaches the owner while the team works on. Calls are counted from `tool.approved { by: autopilot }` in the log, so the count survives a restart. The daily limit stays the hard stop above it.
+
 ## Consequences
 
 - With autopilot on, the team spends what its work costs, up to the daily limit; with nothing ready it stops. The switch's confirmation says so.
