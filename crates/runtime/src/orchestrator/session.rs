@@ -1452,8 +1452,9 @@ fn session_spec_without(
         && role_id == Role::ProductManager
         && deps.tools.transitions.awaits_the_product_plan()?;
     let human = human_of(deps, ask, interviewing)?;
-    let rules = team.rules();
+    let rules = team.rules_for(ask.agent.id.as_str());
     let permissions = team.permissions();
+    let push_remotes = team.push_remotes();
     let custom = custom_connectors(deps, ask, left_out);
     let connectors = connector_names(deps, team, ask, &custom);
     let active_roles: Vec<Role> = team
@@ -1493,6 +1494,7 @@ fn session_spec_without(
         document_format: team.document_format(),
         attached: attached.as_deref(),
         documents_local: catervas_store::document_source::documents_on_disk(team, &deps.tools.log)?,
+        push_remotes: &push_remotes,
     })?;
     let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {

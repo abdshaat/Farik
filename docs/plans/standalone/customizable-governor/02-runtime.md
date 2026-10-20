@@ -91,7 +91,7 @@ Tests:
 - `prompt.rs`: the two existing rules-section tests gain `read_only_paths` and `git_subcommands` and assert their lines; a third, `says_the_remotes_to_an_agent_that_pushes`, asserts the `push_remotes` line with `git_remote` and its absence without.
 - `doctor.rs`: `names_a_read_only_glob_that_does_not_compile` — a team with `read_only_paths: ["a/[b"]` gets the same message shape as `protected_paths`, naming `read_only_paths`; agents' globs are checked the same, naming `agents[<id>].rules`.
 
-- [ ] `feat(runtime): agents are told their own rules`
+- [x] `feat(runtime): agents are told their own rules`
 
 ### Task 11: the team's readiness attempts are used
 

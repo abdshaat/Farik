@@ -26,6 +26,7 @@ pub fn rules(project: &Project) -> Result<Report, String> {
     };
     let lines = vec![
         listed("protected paths", &rules.protected_paths),
+        listed("read only paths", &rules.read_only_paths),
         listed("allowed paths ceiling", &rules.allowed_paths_ceiling),
         listed("required criteria", &rules.required_criteria),
         format!(
@@ -37,6 +38,7 @@ pub fn rules(project: &Project) -> Result<Report, String> {
             None => "most a contract may cost: no cap".to_string(),
         },
         listed("forbidden commands", &rules.forbidden_commands),
+        listed("git subcommands", &rules.git_subcommands),
         listed("document paths", &rules.document_paths),
     ];
     Ok(Report {
