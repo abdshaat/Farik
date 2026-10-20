@@ -60,7 +60,7 @@ Tests (rules.rs `mod tests`, `#[ignore = "needs the git program: cargo xtask che
 - `brings_a_task_up_to_date_with_main_before_its_session` — a task in progress whose worktree exists; main gains a commit touching another file; after one tick the implement session ran and the worktree's HEAD has main's commit as an ancestor, with a merge commit whose subject is `chore: bring up to date with main`.
 - `leaves_a_branch_that_conflicts_with_main_and_says_so` — main and the task branch change the same line; after one tick the worktree has no merge in progress, its HEAD is unchanged, and the implement prompt contains "merging it conflicts in".
 
-- [ ] `fix(runtime): a task's branch is brought up to date before each build session`
+- [x] `fix(runtime): a task's branch is brought up to date before each build session`
 
 ### Task 2: the Product Manager repoints a task that has not started
 

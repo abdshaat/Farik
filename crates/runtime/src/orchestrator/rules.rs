@@ -1541,6 +1541,11 @@ async fn in_progress(
     let Some(resume) = resume(deps, team, &contract, assignee)? else {
         return Ok(None);
     };
+    // The branch sees what the integration branch gained since the last session (ADR 0079).
+    let resume = Resume {
+        behind: bring_up_to_date(deps, team, &contract),
+        ..resume
+    };
     // What a tool changed outside the task's paths is put back before the agent works (ADR 0069).
     deps.tools.transitions.tidy(&row.task_id, team, None)?;
     // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
@@ -1662,7 +1667,39 @@ fn resume(
         conflicts,
         posts: posts_heard_by(deps, agent)?,
         local_documents,
+        behind: None,
     }))
+}
+
+/// Merges the integration branch into the task's worktree before a build session, when the branch
+/// lacks commits of it (ADR 0079): an agent cannot run git, so nothing else brings in what landed
+/// on `main` while it worked. The merge commit is the record. A merge that conflicts is aborted
+/// and answers the branch and the files, for the prompt to say; a merge in progress, a worktree
+/// that is not there, or a refusal for another reason leaves the branch as it is.
+fn bring_up_to_date(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    contract: &TaskContract,
+) -> Option<(String, Vec<String>)> {
+    let worktree = worktree(deps, &contract.id);
+    if !worktree.is_dir() || task_private_folder(contract).is_some() {
+        return None;
+    }
+    let repository = task_repository_of(deps, team, contract).ok()?;
+    let into = repository.integration_branch.clone();
+    if repository.git.has_remote("origin").ok()? {
+        // Offline, the local branch is what there is.
+        let _ = repository.git.fetch_fast_forward("origin", &into);
+    }
+    let here = Git::open(worktree.clone());
+    if here.is_merging(&worktree).ok()? || here.commit_count("HEAD", &into).ok()? == 0 {
+        return None;
+    }
+    let message = format!("chore: bring up to date with {into}");
+    match repository.git.merge_in(&worktree, &into, &message).ok()? {
+        catervas_store::MergeOutcome::Merged { .. } => None,
+        catervas_store::MergeOutcome::Conflicts(paths) => Some((into, paths)),
+    }
 }
 
 /// What `agent` hears of its social posts that settled since its previous implement session
@@ -3938,6 +3975,55 @@ mod tests {
             prompt.contains("done.txt committed; C1 not run yet."),
             "{prompt}"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn brings_a_task_up_to_date_with_main_before_its_session() {
+        let harness = Harness::new("orch-up-to-date", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let repo = harness.project.repo.path.clone();
+        std::fs::write(repo.join("from_main.txt"), "main moved\n").expect("written");
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-m", "main gains a file"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        let worktree = harness.worktree("CTV-1");
+        assert_eq!(adapter.started().len(), 1);
+        git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
+        assert!(worktree.join("from_main.txt").is_file());
+        let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
+        assert_eq!(merges, "chore: bring up to date with main");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_branch_that_conflicts_with_main_and_says_so() {
+        let harness = Harness::new("orch-up-to-date-conflict", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let repo = harness.project.repo.path.clone();
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("README.md"), "the task's line\n").expect("written");
+        git_in(&worktree, &["commit", "-am", "the task"]);
+        std::fs::write(repo.join("README.md"), "main's line\n").expect("written");
+        git_in(&repo, &["commit", "-am", "main's line"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        assert!(
+            !catervas_store::Git::open(worktree.clone())
+                .is_merging(&worktree)
+                .expect("the worktree is read")
+        );
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(prompt.contains("merging it conflicts in"), "{prompt}");
+        assert!(prompt.contains("README.md"), "{prompt}");
     }
 
     /// `text` without its `<untrusted ...>` blocks.

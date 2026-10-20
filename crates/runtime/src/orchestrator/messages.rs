@@ -116,6 +116,9 @@ pub(super) struct Resume {
     /// Whether the team's documents are kept on this computer (ADR 0074), and when they are,
     /// whether the task has no branch because it changes documents only.
     pub(super) local_documents: Option<bool>,
+    /// The integration branch and the files its merge into the branch would conflict in, when
+    /// the branch is behind it and merging it was undone (ADR 0079).
+    pub(super) behind: Option<(String, Vec<String>)>,
 }
 
 /// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
@@ -1117,6 +1120,13 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
             untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
         );
     }
+    if let Some((into, paths)) = &resume.behind {
+        message = format!(
+            "{message}\n\nThe branch is behind {into} and merging it conflicts in {}; work from \
+             the branch as it is.",
+            untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
+        );
+    }
     // What happened to the agent's posts comes last, after the rest.
     for heard in &resume.posts {
         message = format!("{message}\n\n{heard}");
@@ -1706,6 +1716,7 @@ mod tests {
             posts: Vec::new(),
             conflicts: None,
             local_documents: None,
+            behind: None,
         }
     }
 
