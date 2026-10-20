@@ -7,6 +7,7 @@ import { type ServeStatus, useQuery } from "../../app/store.ts";
 import type { Effort } from "../../components/ModelFields.tsx";
 import { t } from "../../strings/t.ts";
 import type { Template } from "../SavedTeams.tsx";
+import type { Tier } from "../Team.tsx";
 import {
 	formOf,
 	type Preview,
@@ -26,6 +27,8 @@ export type Agent = {
 	model?: { id?: string; effort?: Effort } | undefined;
 	/** The connectors its sessions get (spec 5.6). */
 	mcpServers?: McpServer[];
+	/** The permission tiers its role lacks and the team gives it. */
+	grants?: Tier[] | undefined;
 };
 /** An agent's connector as `team.yaml` holds it: a built-in by name, or the user's own (ADR 0030). */
 export type McpServer = {
@@ -56,6 +59,8 @@ export type Team = {
 		solo?: boolean;
 		/** Whether the team's documents are kept on this computer, out of git (ADR 0074). */
 		documentsLocal?: boolean;
+		/** The remotes a task branch may be pushed to; absent means `origin`. */
+		pushRemotes?: string[];
 		[key: string]: unknown;
 	};
 	rules: {
@@ -68,6 +73,10 @@ export type Team = {
 		readOnlyPaths?: string[];
 		/** The owner's own off-limits globs, on top of the shipped ones. */
 		protectedPaths?: string[];
+		/** Patterns a command must not match. */
+		forbiddenCommands?: string[];
+		/** Git subcommands a command may run on top of the read-only eight. */
+		gitSubcommands?: string[];
 		[key: string]: unknown;
 	};
 	preview?: Preview;

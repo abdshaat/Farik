@@ -1,5 +1,5 @@
 import { t } from "../../strings/t.ts";
-import { ForbiddenFiles } from "../GovernorRules.tsx";
+import { Commands, ForbiddenFiles, Git, Remotes } from "../GovernorRules.tsx";
 import styles from "../pages.module.css";
 import { RulesTitle, useRuleParts } from "../TeamRules.tsx";
 
@@ -10,6 +10,9 @@ export function Rules() {
 		<div className={styles.page}>
 			<RulesTitle name={t("sectionRules")} />
 			{ready && <ForbiddenFiles key={key("files")} {...part("files")} />}
+			{ready && <Commands key={key("commands")} {...part("commands")} />}
+			{ready && <Git key={key("git")} {...part("git")} />}
+			{ready && <Remotes key={key("remotes")} {...part("remotes")} />}
 		</div>
 	);
 }

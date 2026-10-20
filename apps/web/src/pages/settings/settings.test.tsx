@@ -489,15 +489,111 @@ describe("settings directory", () => {
 			fireEvent.change(main().getByLabelText(en.filesAdd), {
 				target: { value: "infra/**" },
 			});
-			fireEvent.click(main().getByRole("button", { name: en.filesAddButton }));
-			const save = await main().findByRole("button", { name: en.agentSave });
-			await waitFor(() => expect(save).toHaveProperty("disabled", false));
-			fireEvent.click(save);
+			fireEvent.click(
+				partOf(en.rulesFilesTitle).getByRole("button", {
+					name: en.filesAddButton,
+				}),
+			);
+			await saveOf(partOf(en.rulesFilesTitle));
 			expect((await saved(s)).rules).toEqual({
 				lifted_paths: [".env"],
 				read_only_paths: [".env"],
 				protected_paths: ["infra/**"],
 			});
+		});
+
+		/** The part under `title`, its Save button and the words typed into it. */
+		const partOf = (title: string) =>
+			within(main().getByRole("region", { name: title }));
+		const typeInto = (
+			part: ReturnType<typeof partOf>,
+			label: string,
+			v: string,
+		) => fireEvent.change(part.getByLabelText(label), { target: { value: v } });
+		const saveOf = async (part: ReturnType<typeof partOf>) => {
+			const save = await part.findByRole("button", { name: en.agentSave });
+			await waitFor(() => expect(save).toHaveProperty("disabled", false));
+			fireEvent.click(save);
+		};
+
+		it("adds_a_forbidden_command_in_plain_words_and_git_the_owner_allows", async () => {
+			const s = await rulesPage();
+			const commands = partOf(en.rulesCommandsTitle);
+			typeInto(commands, en.commandsAdd, "rm -rf");
+			fireEvent.click(
+				commands.getByRole("button", { name: en.commandsAddButton }),
+			);
+			expect(
+				commands.getByRole("button", { name: `${en.commandsRemove} rm -rf` }),
+			).toBeTruthy();
+			await saveOf(commands);
+			expect((await saved(s)).rules).toEqual({
+				forbidden_commands: ["^rm -rf"],
+			});
+			cleanup();
+
+			const again = await rulesPage();
+			const git = partOf(en.rulesGitTitle);
+			// The read-only eight are always allowed, and cannot be taken away.
+			for (const word of [
+				"status",
+				"diff",
+				"log",
+				"show",
+				"ls-files",
+				"grep",
+				"rev-parse",
+				"blame",
+			]) {
+				expect(git.getByText(word)).toBeTruthy();
+				expect(
+					git.queryByRole("button", { name: `${en.gitRemove} ${word}` }),
+				).toBeNull();
+			}
+			typeInto(git, en.gitAdd, "Fetch");
+			expect(git.getByRole("button", { name: en.gitAddButton })).toHaveProperty(
+				"disabled",
+				true,
+			);
+			expect(git.getByText(en.gitAddWrong)).toBeTruthy();
+			typeInto(git, en.gitAdd, "fetch");
+			fireEvent.click(git.getByRole("button", { name: en.gitAddButton }));
+			await saveOf(git);
+			expect((await saved(again)).rules).toEqual({
+				git_subcommands: ["fetch"],
+			});
+		});
+
+		it("lists_the_remotes_agents_may_push_to", async () => {
+			const s = await rulesPage(
+				rulesTeam({ permissions: { run_commands: false, push: true } }),
+			);
+			const remotes = partOf(en.rulesRemotesTitle);
+			// The last remote cannot be removed.
+			expect(
+				remotes.getByRole("button", {
+					name: new RegExp(`^${en.remotesRemove} origin`),
+				}),
+			).toHaveProperty("disabled", true);
+			typeInto(remotes, en.remotesAdd, "fork");
+			fireEvent.click(
+				remotes.getByRole("button", { name: en.remotesAddButton }),
+			);
+			await saveOf(remotes);
+			expect(
+				((await saved(s)).policy as Record<string, unknown>).push_remotes,
+			).toEqual(["origin", "fork"]);
+			cleanup();
+
+			// With no agent able to push, the part is one line pointing to Allowed actions.
+			await rulesPage();
+			const none = main().getByRole("region", { name: en.rulesRemotesTitle });
+			expect(within(none).queryByLabelText(en.remotesAdd)).toBeNull();
+			expect(
+				within(none)
+					.getByRole("link", { name: en.sectionAllowedActions })
+					.getAttribute("href"),
+			).toBe("/settings/allowed-actions");
 		});
 
 		it("keeps_catervass_own_files_unwritable", async () => {

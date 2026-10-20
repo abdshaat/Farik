@@ -52,7 +52,7 @@ Tests (`settings.test.tsx`):
 - `adds a forbidden command in plain words and git the owner allows` — adding "rm -rf" saves `forbidden_commands: ["^rm -rf"]`; adding `fetch` saves `git_subcommands: ["fetch"]`; `Fetch` cannot be added; the eight read-only subcommands show without Remove.
 - `lists the remotes agents may push to` — with `push: true`, the page shows `origin`, adding `fork` saves `push_remotes: ["origin", "fork"]`, and the last remote cannot be removed; with no agent able to push, the part is one line linking to Allowed actions.
 
-- [ ] `feat(web): commands, git and remotes on the Rules page`
+- [x] `feat(web): commands, git and remotes on the Rules page`
 
 ### Task 15: limits and session budgets on the Rules page
 

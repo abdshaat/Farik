@@ -1552,6 +1552,35 @@ export const en = {
 	filesAddKind: "How agents may treat it",
 	filesAddButton: "Add",
 	filesRemove: "Remove",
+	rulesCommandsTitle: "Commands agents may not run",
+	commandsLead:
+		"A command that contains these words is refused, whatever else it says.",
+	commandsAdd: "Add words to forbid",
+	commandsAddButton: "Add",
+	commandsRemove: "Remove",
+	commandsRawAdd: "Add a pattern",
+	commandsRawHint:
+		"A regular expression. A command that matches it is refused.",
+	rulesGitTitle: "Git in agents’ commands",
+	gitLead:
+		"These git commands only read, so they are always allowed. Add others you want agents’ commands to run.",
+	gitAlways: "always allowed",
+	gitAdd: "Add a git command",
+	gitAddButton: "Add",
+	gitAddWrong:
+		"Use lower-case letters, digits and dashes, starting with a letter, like fetch.",
+	gitRemove: "Remove",
+	gitPushNote: "A push from a command is not held to the remotes below.",
+	rulesRemotesTitle: "Where agents may push",
+	remotesLead:
+		"A task’s branch is pushed to the first remote listed, or to another one listed.",
+	remotesAdd: "Add a remote",
+	remotesAddButton: "Add",
+	remotesAddWrong:
+		"A remote’s name uses letters, digits, dots, dashes and underscores.",
+	remotesRemove: "Remove",
+	remotesLast: "The last remote cannot be removed.",
+	remotesNone: "Agents cannot push yet. You can allow it in",
 	uiPathsTitle: "Which files are screens",
 	uiPathsLead:
 		"When a Developer’s change touches a file like these, the UI/UX Designer checks its screens before the Architect reviews the code.",
