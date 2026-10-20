@@ -33,7 +33,7 @@ Found live at 07:10: decision 1 merged main into CTV-14's branch before its impl
 
 Files: `crates/store/src/git.rs` (a `commit_count_no_merges` or a flag on `commit_count`), `crates/runtime/src/orchestrator/session.rs`
 - `a_merge_from_main_is_not_the_first_commit` (session.rs, beside `builds_without_a_preview_before_the_first_commit`) — a designer task whose branch holds only a merge commit from main and a failing preview start: the session runs without escalating; the same branch with one ordinary commit escalates.
-- [ ] `fix(runtime): a merge from main is not a designer's first commit`
+- [x] `fix(runtime): a merge from main is not a designer's first commit`
 
 ### Task 32: the spec says it
 

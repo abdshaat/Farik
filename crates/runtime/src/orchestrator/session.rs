@@ -639,7 +639,8 @@ struct Prepared {
 }
 
 /// Whether a designer's explore or implement session may go on without its preview: it failed to
-/// prepare or start, and the task branch has no commit of its own, so the app may not exist yet.
+/// prepare or start, and the task branch has no commit of its own (a merge from the integration
+/// branch is not one), so the app may not exist yet.
 /// Every later failure escalates.
 fn first_try_of_a_designer(
     deps: &OrchestratorDeps,
@@ -670,7 +671,7 @@ fn first_try_of_a_designer(
     );
     repository
         .git
-        .commit_count(&base, &catervas_core::branch::task_branch(contract))
+        .commit_count_no_merges(&base, &catervas_core::branch::task_branch(contract))
         == Ok(0)
 }
 
@@ -2534,6 +2535,70 @@ mod tests {
                     harness.row("CTV-1").status,
                     catervas_core::contract::TaskStatus::Escalated
                 );
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_merge_from_main_is_not_the_first_commit() {
+        use catervas_store::git::fixtures::git_in;
+
+        use crate::preview::PreviewError;
+        use crate::preview::fixtures::FakePreviews;
+
+        for (name, committed) in [
+            ("preview-merge-only", false),
+            ("preview-merge-and-own", true),
+        ] {
+            let mut harness = Harness::new(name, browsing);
+            harness.previews = Arc::new(FakePreviews::failing(PreviewError::Prepare {
+                tail: "npm error The `npm ci` command needs a package-lock.json".to_string(),
+            }));
+            harness.in_progress("CTV-1", "iris", "ada");
+            // Main moves on, and the task's branch is brought up to date with it by a merge.
+            let repo = harness.project.repo.path.clone();
+            std::fs::write(repo.join("from_main.txt"), "main moved\n").expect("written");
+            git_in(&repo, &["add", "-A"]);
+            git_in(&repo, &["commit", "-m", "main gains a file"]);
+            let worktree = harness.worktree("CTV-1");
+            git_in(
+                &worktree,
+                &[
+                    "merge",
+                    "--no-ff",
+                    "-m",
+                    "chore: bring up to date with main",
+                    "main",
+                ],
+            );
+            if committed {
+                with_a_commit(&harness);
+            }
+            let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"CTV-1".parse().expect("an id"))
+                .expect("the contract");
+
+            run_session(deps, &team, exploring(&harness, &team, &contract))
+                .await
+                .expect("a preview that fails is an answer");
+
+            let raised = harness.events(&[EventKind::EscalationRaised]);
+            if committed {
+                assert_eq!(raised.len(), 1, "an ordinary commit makes it a later try");
+                assert!(adapter.started().is_empty(), "no session starts");
+            } else {
+                assert!(
+                    raised.is_empty(),
+                    "a merge from main is no commit: {raised:?}"
+                );
+                assert_eq!(adapter.started().len(), 1, "the session runs");
             }
         }
     }

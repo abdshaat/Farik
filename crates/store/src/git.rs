@@ -653,6 +653,22 @@ impl Git {
         })
     }
 
+    /// As `commit_count`, without merge commits: the commits `head` has of its own, not the
+    /// merges that brought another branch into it.
+    ///
+    /// # Errors
+    ///
+    /// As `commit_count`.
+    pub fn commit_count_no_merges(&self, base: &str, head: &str) -> Result<u32, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}..{head}");
+        let counted = self.at_root(&["rev-list", "--count", "--no-merges", &range])?;
+        counted.parse().map_err(|_| GitError::CommandFailed {
+            command: format!("rev-list --count --no-merges {range}"),
+            stderr: format!("answered {counted:?}, which is not a number of commits"),
+        })
+    }
+
     /// Every entry under `dir` as `rev` has it, at any depth, in git's order; a directory `rev`
     /// does not hold gives none.
     ///
