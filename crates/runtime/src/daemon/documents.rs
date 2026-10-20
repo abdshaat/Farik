@@ -137,16 +137,7 @@ fn save(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         .find(|folder| path.starts_with(&format!("{folder}/")))
         .ok_or_else(|| edit_refusal(OwnerEditRefusal::OutsideFolders))?;
     let _lock = integration_lock(deps.files.root()).map_err(|e| internal(&e))?;
-    if !documents_mode_of(&team, &deps.log)
-        .map_err(|e| internal(&e))?
-        .writes_open()
-    {
-        return Err(refusal(
-            "documents_switching",
-            "/path",
-            "Documents can't be changed until you merge the pull request that moves them.",
-        ));
-    }
+    refuse_while_switching(deps, &team, "/path")?;
     if documents_on_disk(&team, &deps.log).map_err(|e| internal(&e))? {
         return save_on_disk(
             deps,
@@ -226,6 +217,21 @@ fn attach_words(code: &str) -> &'static str {
     }
 }
 
+/// Refuses at `at` while the documents are being moved (ADR 0074), when nothing may change them.
+fn refuse_while_switching(deps: &ToolDeps, team: &Team, at: &str) -> Result<(), Failure> {
+    if documents_mode_of(team, &deps.log)
+        .map_err(|e| internal(&e))?
+        .writes_open()
+    {
+        return Ok(());
+    }
+    Err(refusal(
+        "documents_switching",
+        at,
+        "Documents can't be changed until you merge the pull request that moves them.",
+    ))
+}
+
 /// `document.attach { name, kind, data_base64 }`: the file turned into Markdown and committed, as
 /// the owner's own change (as `files.save` does), at a free `attached/<slug>.md` of the kind's
 /// folder; recorded as `folder_doc.edited` then `document.attached`. Its integration files the task
@@ -253,18 +259,9 @@ fn attach(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let converted = crate::attach::to_markdown(name, &bytes)
         .map_err(|why| refusal(why.code(), "/data_base64", attach_words(why.code())))?;
     let _lock = integration_lock(deps.files.root()).map_err(|e| internal(&e))?;
-    if !documents_mode_of(&team, &deps.log)
-        .map_err(|e| internal(&e))?
-        .writes_open()
-    {
-        return Err(refusal(
-            "documents_switching",
-            "/name",
-            "Documents can't be changed until you merge the pull request that moves them.",
-        ));
-    }
+    refuse_while_switching(deps, &team, "/name")?;
     if documents_on_disk(&team, &deps.log).map_err(|e| internal(&e))? {
-        return attach_on_disk(deps, &team, kind, name, converted);
+        return attach_on_disk(deps, &team, kind, name, &converted);
     }
     let branch = integration_branch(&team, &deps.git).map_err(|e| internal(&e))?;
     // A path is taken when the integration branch holds it or its agent version, or a folder
@@ -346,7 +343,7 @@ fn attach_on_disk(
     team: &Team,
     kind: AttachKind,
     name: &str,
-    converted: crate::attach::Converted,
+    converted: &crate::attach::Converted,
 ) -> Result<Value, Failure> {
     let source = DocumentSource::Disk(deps.files.root().to_path_buf());
     let held: Vec<String> = source
