@@ -226,6 +226,46 @@ describe("help page", () => {
 		expect(await screen.findByLabelText("Add a note for Ada")).toBeTruthy();
 	});
 
+	it("names_the_reviewer_in_the_heading", async () => {
+		await openedGate(
+			"/tasks/CTV-1/help",
+			HELP,
+			{ ...TASK, status: "blocked" },
+			undefined,
+			{
+				"task.history": {
+					events: [
+						note(2, "progress", "Read the plan.", "theo"),
+						event(
+							3,
+							"task.transitioned",
+							{
+								from: "verifying",
+								to: "blocked",
+								requested_by: "ada",
+								blocker: { description: "The plan is missing." },
+							},
+							"2026-09-25T07:00:00Z",
+						),
+					],
+				},
+			},
+		);
+		expect(
+			await screen.findByRole("heading", {
+				name: "Ada needs your help with “Gift cards”",
+			}),
+		).toBeTruthy();
+		expect(
+			screen.getByRole("region", {
+				name: "Ada, your Architect, explains what happened",
+			}),
+		).toBeTruthy();
+		expect(screen.getByRole("list", { name: "What Ada tried" })).toBeTruthy();
+		expect(screen.queryByRole("heading", { name: /Theo/ })).toBeNull();
+		expect(screen.queryByRole("list", { name: "What Theo tried" })).toBeNull();
+	});
+
 	it("signs_the_agents_own_words_and_lists_what_it_tried_since", async () => {
 		await openedGate("/tasks/CTV-1/help", HELP, ESCALATED, undefined, {
 			"task.history": {

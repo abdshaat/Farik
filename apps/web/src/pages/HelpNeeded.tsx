@@ -93,9 +93,10 @@ export function HelpNeeded() {
 	const raisedBy = events.findLast(
 		(e) => e.kind === "task.transitioned" && e.body.to === "blocked",
 	)?.body.requestedBy;
-	const asker =
-		agents.find((a) => a.id === raisedBy && a.status !== "retired")
-			?.displayName ?? name;
+	const askerAgent = agents.find(
+		(a) => a.id === raisedBy && a.status !== "retired",
+	);
+	const asker = askerAgent?.displayName ?? name;
 	const noteless = note.trim() === "";
 	const cancels = (c: EscalationChoice) => c.body?.body.to === "cancelled";
 	// Only a choice that answers needs words; room, tries and cancelling need none (ADR 0079).
@@ -136,15 +137,15 @@ export function HelpNeeded() {
 			<Link to="/">{t("backToToday")}</Link>
 			<div className={styles.section}>
 				<h1 className={styles.title}>
-					{t("helpTitle", { name, title: contract.title })}
+					{t("helpTitle", { name: asker, title: contract.title })}
 				</h1>
 				<p className={styles.muted}>{id}</p>
 			</div>
 			{blocked && (
 				<section className={own.letter} aria-labelledby="explains">
 					<p id="explains" className={styles.muted}>
-						{builder
-							? signed("helpExplains", builder)
+						{(askerAgent ?? builder)
+							? signed("helpExplains", (askerAgent ?? builder) as never)
 							: t("helpCatervasExplains")}
 					</p>
 					<p>{blocked.body.blocker?.description ?? t("helpBlockedNoWords")}</p>
@@ -167,7 +168,7 @@ export function HelpNeeded() {
 			)}
 			{tried.length > 0 && (
 				<section className={styles.section}>
-					<h2 id="tried">{t("helpTried", { name })}</h2>
+					<h2 id="tried">{t("helpTried", { name: asker })}</h2>
 					<ul aria-labelledby="tried">
 						{tried.map((e) => (
 							<li key={e.seq}>{e.body.text}</li>

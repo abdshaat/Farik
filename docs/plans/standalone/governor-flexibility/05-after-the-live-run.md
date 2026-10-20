@@ -25,7 +25,7 @@ Files: `apps/web/src/pages/HelpNeeded.tsx`, `HelpNeeded.test.tsx`
 
 Files: `apps/web/src/pages/HelpNeeded.tsx`, `HelpNeeded.test.tsx`
 - `names_the_reviewer_in_the_heading` — the reviewer-block history of Task 16 shows "Ada needs your help", "Ada, your Architect, explains what happened" and "What Ada tried", and no "Theo".
-- [ ] `fix(web): the help page names the agent who raised the block`
+- [x] `fix(web): the help page names the agent who raised the block`
 
 ### Task 23: a review starts from an up-to-date branch
 
