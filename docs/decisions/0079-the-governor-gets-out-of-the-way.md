@@ -43,6 +43,14 @@ The governor keeps every guarantee it gives (protected paths, budgets, the revie
 13. **A failed integration of a task is said in the channel**, as a folder change's already is.
 14. **`catervas open` prints a new start link** from the running driver; the "already used" page tells the owner to run it.
 
+### Amended after the live run (2026-10-20)
+
+The build ran on the founder's project from 06:05 UTC. The plan's pull request opened and merged in four seconds, CTV-12 and CTV-14 went back to refining with "CTV-11 was cancelled", and `doctor` found the old log readable. It also showed four gaps, closed by plan 5:
+- Decision 2 asks words only of a choice that answers; giving room or tries needs none.
+- Decision 1 also runs before a review session: the reviewer of CTV-22 blocked three times on a plan its branch did not have.
+- The help page names the agent who raised the block in its heading and explanation, not only in the note's label.
+- The owner's answers stay with the task for its whole try: an answer reached only the next session, so the reviewer lost the plan text the owner had pasted after one rework.
+
 ## Alternatives rejected
 
 - **Redesign the governor around fewer gates.** Every refusal in the run had one specific cause; removing gates would give up guarantees (protected paths, the review, lanes) that did not cause it.
