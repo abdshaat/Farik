@@ -747,6 +747,7 @@ fn kits_of(
                     entry,
                     copy,
                     allowances,
+                    plan_approved,
                     ..
                 } => {
                     let mut row = json!({
@@ -765,6 +766,9 @@ fn kits_of(
                     }
                     if at_launch(entry, apps) {
                         row["at_launch"] = json!(true);
+                    }
+                    if !plan_approved.is_empty() {
+                        row["plan_approved"] = json!(plan_approved);
                     }
                     if !allowances.is_empty() {
                         row["allowances"] = allowances
@@ -5993,6 +5997,45 @@ pub(super) mod tests {
                 .get("at_launch")
                 .is_none()
         );
+    }
+
+    /// The web app hides the choice for a tool the owner's marketing plan marks (ADR 0080, decision
+    /// 10): its kit row carries those tools, sorted, and a connector with none carries no key.
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_kit_row_names_the_tools_the_owners_plan_approves() {
+        let team = crate::tools::fixtures::a_team_of_three(|wire| {
+            wire["agents"].as_array_mut().expect("agents").push(
+                catervas_core::team::fixtures::an_agent_wire("kai", "marketing_specialist"),
+            );
+        });
+        let project = crate::tools::fixtures::TestProject::new("kit-plan-approved", &team);
+        let deps = &project.deps;
+        let kits = super::kits_of(deps, &team, &[]).expect("the kits");
+        let kit = kits
+            .iter()
+            .find(|kit| kit["role"] == "marketing_specialist")
+            .expect("the Marketing Specialist's kit");
+        let row = |name: &str| -> Value {
+            kit["connectors"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["name"] == name))
+                .cloned()
+                .unwrap_or_else(|| panic!("no {name}"))
+        };
+        assert_eq!(
+            row("google-ads")["plan_approved"],
+            json!([
+                "add_ad_group",
+                "add_keywords",
+                "add_negative_keywords",
+                "add_responsive_search_ad",
+                "create_search_campaign",
+                "set_campaign_budget",
+                "set_campaign_status"
+            ])
+        );
+        assert!(row("higgsfield").get("plan_approved").is_none());
     }
 
     /// A guard: each of the Marketing Specialist's five services connects by name, carrying the

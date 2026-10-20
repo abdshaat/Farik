@@ -44,7 +44,16 @@ pub(crate) struct TestDaemon {
 impl TestDaemon {
     /// The daemon, with `before` run on the repository before the worktree is made from it.
     pub(crate) fn new(name: &str, before: impl FnOnce(&TempRepo)) -> Self {
-        let project = TestProject::new(name, &a_team_of_three(|_| {}));
+        Self::on_team(name, |_| {}, before)
+    }
+
+    /// The daemon on a team whose wire `change` has edited.
+    pub(crate) fn on_team(
+        name: &str,
+        change: impl FnOnce(&mut Value),
+        before: impl FnOnce(&TempRepo),
+    ) -> Self {
+        let project = TestProject::new(name, &a_team_of_three(change));
         project.filed_with("CTV-1", "in_progress", "task", None, |wire| {
             wire["allowed_paths"] = json!(["src/**"]);
             wire["assignee"] = json!("dev-a");

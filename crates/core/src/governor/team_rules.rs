@@ -13,6 +13,14 @@ pub const DEFAULT_PROTECTED_PATHS: [&str; 5] = [
     ".catervas/local/**",
 ];
 
+/// Catervas's own state (ADR 0080 decision 4): no `write_workspace` call writes a path under it,
+/// whatever the owner lifts. It is a constant, never read from the team file.
+pub const CATERVAS_STATE: &str = ".catervas/local/**";
+
+/// The daemon's keys (ADR 0080 decision 4): no call reads these, whatever its tier and whatever
+/// the owner lifts, because reading the token is writing everything.
+pub const CATERVAS_KEYS: [&str; 2] = [".catervas/local/daemon.json", ".catervas/local/sessions/**"];
+
 /// The document paths every team starts with (`docs/SPEC.md` section 5.12): where a task for any
 /// role but the Software Developer may make changes. `team.schema.json` holds the same three as
 /// its default; `team.rs` reads that one, and this one serves `TeamRules::default()` alone.
@@ -38,6 +46,10 @@ pub const DEFAULT_UI_PATHS: [&str; 7] = [
 pub struct TeamRules {
     /// Globs no tool may read or write, whatever its tier.
     pub protected_paths: Vec<String>,
+    /// Globs an agent may read and no tool may write (ADR 0080 decision 3).
+    pub read_only_paths: Vec<String>,
+    /// Git subcommands `catervas_exec` runs on top of the read-only ones (ADR 0080 decision 6).
+    pub git_subcommands: Vec<String>,
     /// Globs a contract's `allowed_paths` must fall within; empty means no ceiling.
     pub allowed_paths_ceiling: Vec<String>,
     /// Verification methods every contract must have at least one criterion of.
@@ -63,6 +75,8 @@ impl Default for TeamRules {
                 .iter()
                 .map(|path| (*path).to_string())
                 .collect(),
+            read_only_paths: Vec::new(),
+            git_subcommands: Vec::new(),
             allowed_paths_ceiling: Vec::new(),
             required_criteria: Vec::new(),
             require_new_tests: false,
@@ -77,6 +91,21 @@ impl Default for TeamRules {
                 .map(|path| (*path).to_string())
                 .collect(),
         }
+    }
+}
+
+impl TeamRules {
+    /// The globs no tool may write: the protected paths, then the read-only ones, without
+    /// repeats.
+    #[must_use]
+    pub fn unwritable(&self) -> Vec<String> {
+        let mut globs = self.protected_paths.clone();
+        for glob in &self.read_only_paths {
+            if !globs.contains(glob) {
+                globs.push(glob.clone());
+            }
+        }
+        globs
     }
 }
 

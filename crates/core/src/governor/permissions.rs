@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::paths::{GlobError, PathRefusal, check_allowed_paths, check_protected_paths};
-use super::team_rules::TeamRules;
+use super::team_rules::{CATERVAS_KEYS, CATERVAS_STATE, TeamRules};
 use crate::contract::{Role, TaskId};
 use crate::team::canonical_json;
 
@@ -101,12 +101,15 @@ pub struct ToolCallContext {
     pub allowed_paths: Vec<String>,
     /// The team's `protected_paths` (spec 5.12).
     pub protected_paths: Vec<String>,
+    /// The paths no `write_workspace` call may change though a read may see them (ADR 0080
+    /// decision 3).
+    pub read_only_paths: Vec<String>,
     /// The external-effect calls the human has approved.
     pub approved_calls: Vec<ApprovedCall>,
 }
 
 /// Why a tool call is refused. The first reason found, in the order tier, protected paths,
-/// allowed paths, approval.
+/// read-only paths, allowed paths, approval.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolRefusal {
     /// The agent does not hold the tool's tier.
@@ -122,6 +125,12 @@ pub enum ToolRefusal {
     /// The call touches a protected path, whatever its tier; an absolute, empty, or climbing
     /// path is refused under this reason too, because the path check refuses it outright.
     PathProtected {
+        /// The first such path.
+        path: String,
+    },
+    /// A `write_workspace` call touches a read-only path, or Catervas's own state, which no rule
+    /// lifts (ADR 0080 decisions 3 and 4).
+    PathReadOnly {
         /// The first such path.
         path: String,
     },
@@ -158,6 +167,9 @@ pub enum ConnectorTag {
     ExternalEffect,
     /// Costs money at the service; runs once for each call the human allows (ADR 0061).
     Paid,
+    /// Asks the owner, or uses an allowance, as a `paid` tool does, and costs nothing: the owner
+    /// chose to be asked before this tool runs (ADR 0080 decision 10).
+    Ask,
     /// Never offered and always refused.
     Denied,
 }
@@ -253,7 +265,7 @@ pub enum ConnectorRefusal {
 /// connector, the tool must be tagged `network`, `external_effect` or `paid`, and, for a connector
 /// with an origin, every field named `url`, at any depth of the input, must be a string naming the
 /// preview: its origin exactly, or followed by `/`, `?` or `#`. An `external_effect` call then
-/// runs without asking (ADR 0061); a `paid` call also needs `granted`, the seq of the human's open grant for exactly this call, which the caller
+/// runs without asking (ADR 0061); a `paid` or `ask` call also needs `granted`, the seq of the human's open grant for exactly this call, which the caller
 /// looks up by `ApprovalKey`; it is returned beside the tag, so the call's record can use it up.
 /// Failing that, a tool with an allowance runs while `used`, the agent's calls to it this period
 /// before this one, is under it (ADR 0037): the grant is for exactly this call, so it comes
@@ -381,8 +393,8 @@ pub fn check_design_plan(
 }
 
 /// Decides one tool call (`docs/SPEC.md` section 5.6): the agent must hold the tool's tier;
-/// no path may be protected, even for a `read` tool; a `write_workspace` call names at least one
-/// path and stays within the contract's allowed paths; an `external_effect` call needs the tool
+/// no path may be protected or one of Catervas's keys, even for a `read` tool; a `write_workspace`
+/// call names at least one path, none read only or under Catervas's state, and stays within the contract's allowed paths; an `external_effect` call needs the tool
 /// to be pre-authorised or this exact input approved by the human.
 ///
 /// # Errors
@@ -397,12 +409,19 @@ pub fn evaluate_tool_call(
     if !grants.tiers.contains(&tier) {
         return Err(ToolRefusal::TierNotGranted { tier });
     }
+    let keys: Vec<String> = CATERVAS_KEYS.iter().map(|key| (*key).to_string()).collect();
+    check_protected_paths(&request.paths, &keys)
+        .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathProtected { path }))?;
     check_protected_paths(&request.paths, &context.protected_paths)
         .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathProtected { path }))?;
     if tier == PermissionTier::WriteWorkspace {
         if request.paths.is_empty() {
             return Err(ToolRefusal::PathsMissing);
         }
+        let mut read_only = context.read_only_paths.clone();
+        read_only.push(CATERVAS_STATE.to_string());
+        check_protected_paths(&request.paths, &read_only)
+            .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathReadOnly { path }))?;
         check_allowed_paths(&request.paths, &context.allowed_paths).map_err(|refusal| {
             first_path(refusal, |path| ToolRefusal::PathOutsideAllowed { path })
         })?;
@@ -479,8 +498,9 @@ const WRAPPERS: [&str; 11] = [
 ///
 /// # Errors
 ///
-/// `InvalidPattern` when a pattern does not compile, then `GitViaExec`, then `ForbiddenCommand`
-/// with the first pattern that matches.
+/// `InvalidPattern` when a pattern does not compile, then `GitViaExec` (git other than the
+/// read-only subcommands and `rules.git_subcommands`), then `ForbiddenCommand` with the first
+/// pattern that matches.
 pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandRefusal> {
     let patterns = compile_patterns(&rules.forbidden_commands)?;
     let segments: Vec<&str> = command
@@ -488,7 +508,11 @@ pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandR
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
         .collect();
-    if segments.iter().copied().any(runs_git) {
+    if segments
+        .iter()
+        .copied()
+        .any(|segment| runs_git(segment, &rules.git_subcommands))
+    {
         return Err(CommandRefusal::GitViaExec);
     }
     for (pattern, regex) in &patterns {
@@ -535,9 +559,10 @@ pub const READ_ONLY_GIT: [&str; 8] = [
 const GIT_OPTIONS_THAT_ACT: [&str; 2] = ["--output", "--open-files-in-pager"];
 
 /// Whether the segment runs git other than by a read-only subcommand: its first git call, whose
-/// next bare word is the subcommand, is not one of `READ_ONLY_GIT`, or it carries an option that
-/// acts.
-fn runs_git(segment: &str) -> bool {
+/// next bare word is the subcommand, is neither one of `READ_ONLY_GIT` nor one the owner allowed,
+/// or it is a read-only one that carries an option that acts. A subcommand the owner allowed runs
+/// with any option (ADR 0080 decision 6).
+fn runs_git(segment: &str, owner_allowed: &[String]) -> bool {
     let words: Vec<&str> = segment.split_whitespace().filter_map(bare_word).collect();
     let Some((first, rest)) = words.split_first() else {
         return false;
@@ -552,6 +577,12 @@ fn runs_git(segment: &str) -> bool {
     } else {
         return false;
     };
+    if words
+        .get(at + 1)
+        .is_some_and(|subcommand| owner_allowed.iter().any(|allowed| allowed == subcommand))
+    {
+        return false;
+    }
     let read_only = words
         .get(at + 1)
         .is_some_and(|subcommand| READ_ONLY_GIT.contains(subcommand));
@@ -819,6 +850,48 @@ mod tests {
                 false
             ),
             Err(Refused::ApprovalNeeded)
+        );
+    }
+
+    #[test]
+    fn an_ask_tool_waits_for_the_owner_as_a_paid_one_does() {
+        let connector = SessionConnector {
+            tools: [("post_note".to_string(), ConnectorTag::Ask)].into(),
+            allowances: [("post_note".to_string(), 2)].into(),
+            ..github()
+        };
+        let call = |granted, used| {
+            evaluate_connector_call(
+                "post_note",
+                &json!({ "text": "x" }),
+                Some(&connector),
+                granted,
+                used,
+                false,
+            )
+        };
+        assert_eq!(call(None, 2), Err(Refused::ApprovalNeeded));
+        assert_eq!(
+            call(Some(7), 2),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Ask,
+                approval: Some(7),
+                allowance: None,
+                plan_approved: false
+            })
+        );
+        assert_eq!(
+            call(None, 1),
+            Ok(ConnectorPass {
+                tag: ConnectorTag::Ask,
+                approval: None,
+                allowance: Some(2),
+                plan_approved: false
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(ConnectorTag::Ask).unwrap(),
+            json!("ask")
         );
     }
 
@@ -1202,6 +1275,7 @@ mod tests {
         ToolCallContext {
             allowed_paths: strings(&["src/login/**"]),
             protected_paths: TeamRules::default().protected_paths,
+            read_only_paths: Vec::new(),
             approved_calls: Vec::new(),
         }
     }
@@ -1365,6 +1439,74 @@ mod tests {
                 path: ".env".to_string()
             })
         );
+    }
+
+    #[test]
+    fn a_read_only_path_is_read_and_never_written() {
+        let mut context = a_context();
+        context.read_only_paths = strings(&[".env"]);
+        context.protected_paths = Vec::new();
+        context.allowed_paths = strings(&[".env", "src/**"]);
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("read_file", T::Read, &[".env"]),
+                &developer_grants(),
+                &context
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("write_file", T::WriteWorkspace, &[".env"]),
+                &developer_grants(),
+                &context
+            ),
+            Err(ToolRefusal::PathReadOnly {
+                path: ".env".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn catervas_state_is_never_written_and_its_keys_never_read() {
+        let mut context = a_context();
+        context.protected_paths = Vec::new();
+        context.allowed_paths = strings(&["**"]);
+        let grants = developer_grants();
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("read_file", T::Read, &[".catervas/local/catervas.db"]),
+                &grants,
+                &context
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call(
+                    "write_file",
+                    T::WriteWorkspace,
+                    &[".catervas/local/catervas.db"]
+                ),
+                &grants,
+                &context
+            ),
+            Err(ToolRefusal::PathReadOnly {
+                path: ".catervas/local/catervas.db".to_string()
+            })
+        );
+        for key in [
+            ".catervas/local/daemon.json",
+            ".catervas/local/sessions/s1/settings.json",
+        ] {
+            assert_eq!(
+                evaluate_tool_call(&a_call("read_file", T::Read, &[key]), &grants, &context),
+                Err(ToolRefusal::PathProtected {
+                    path: key.to_string()
+                }),
+                "{key}"
+            );
+        }
     }
 
     #[test]
@@ -1578,6 +1720,30 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn runs_the_git_the_owner_allowed() {
+        let rules = TeamRules {
+            git_subcommands: strings(&["fetch", "diff"]),
+            ..TeamRules::default()
+        };
+        for command in ["git fetch origin", "cd x && git diff --output=p.txt"] {
+            assert_eq!(evaluate_command(command, &rules), Ok(()), "{command}");
+        }
+        for command in ["git push", "sudo git merge main"] {
+            assert_eq!(
+                evaluate_command(command, &rules),
+                Err(CommandRefusal::GitViaExec),
+                "{command}"
+            );
+        }
+        let none = TeamRules::default();
+        assert_eq!(
+            evaluate_command("git diff --output=p.txt", &none),
+            Err(CommandRefusal::GitViaExec)
+        );
+        assert_eq!(evaluate_command("git status", &none), Ok(()));
     }
 
     #[test]

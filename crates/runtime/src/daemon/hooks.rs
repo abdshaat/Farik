@@ -9,6 +9,7 @@ use catervas_core::governor::permissions::{
     AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
     ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
+use catervas_core::governor::team_rules::CATERVAS_KEYS;
 use catervas_core::marketing::active_plan;
 use catervas_core::team::{AgentStatus, Team};
 use catervas_protocol::event::{
@@ -361,6 +362,7 @@ fn judge_call(
             .map(ToString::to_string)
             .collect()
     });
+    let rules = team.rules_for(&registration.agent_id);
     evaluate_tool_call(
         &ToolCallRequest {
             tool: ToolDescriptor {
@@ -376,7 +378,8 @@ fn judge_call(
         },
         &ToolCallContext {
             allowed_paths,
-            protected_paths: team.rules().protected_paths,
+            protected_paths: rules.protected_paths,
+            read_only_paths: rules.read_only_paths,
             approved_calls: Vec::new(),
         },
     )
@@ -521,8 +524,9 @@ fn in_read_root(
             .map(|part| part.as_os_str().to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
-        let mut protected = team.rules().protected_paths;
+        let mut protected = team.rules_for(&registration.agent_id).protected_paths;
         protected.push(".git/**".to_string());
+        protected.extend(CATERVAS_KEYS.iter().map(|key| (*key).to_string()));
         return judge_in_root(tool, &root.name, &relative, &protected).map(|()| true);
     }
     Ok(false)
@@ -639,14 +643,18 @@ fn judge_connector(
     let mut used = 0;
     let mut plan = None;
     let tag = connector.and_then(|connector| connector.tools.get(tool).copied());
-    if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::ExternalEffect)) {
+    if matches!(
+        tag,
+        Some(ConnectorTag::Paid | ConnectorTag::Ask | ConnectorTag::ExternalEffect)
+    ) {
         plan_gate(deps, team, registration, PermissionTier::ExternalEffect)?;
         if connector.is_some_and(|connector| connector.plan_tools.contains(tool)) {
             // The owner's plan approves it or nothing does: no grant is looked up and no allowance
             // counted, and the log is read for the active plan only for such a tool.
             plan = active_marketing_plan(deps)?;
-        } else if tag == Some(ConnectorTag::Paid) {
-            // Only a call that costs money asks (ADR 0061): an `external_effect` call runs.
+        } else if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::Ask)) {
+            // Only a call that costs money, or one the owner chose to be asked about, asks (ADR
+            // 0061, ADR 0080): an `external_effect` call runs.
             granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
             // Zero asks every time, and a grant is used before an allowance: neither needs the
             // count.
@@ -666,9 +674,14 @@ fn judge_connector(
             allowance: pass.allowance,
             marketing_plan: plan.filter(|_| pass.plan_approved),
         }),
-        Err(ConnectorRefusal::ApprovalNeeded) => {
-            Err(ask(deps, registration, server, tool, &request.tool_input))
-        }
+        Err(ConnectorRefusal::ApprovalNeeded) => Err(ask(
+            deps,
+            registration,
+            server,
+            tool,
+            tag,
+            &request.tool_input,
+        )),
         Err(refusal) => Err(Denial::from(match refusal {
             ConnectorRefusal::ConnectorNotInSession => format!(
                 "connector_not_in_session: {server} is not a connector this session was given"
@@ -786,11 +799,17 @@ fn ask(
     registration: &SessionRegistration,
     server: &str,
     tool: &str,
+    tag: Option<ConnectorTag>,
     input: &Value,
 ) -> Denial {
     if registration.task_id.is_none() {
+        let why = if tag == Some(ConnectorTag::Ask) {
+            "asks you first"
+        } else {
+            "costs money"
+        };
         return Denial::from(format!(
-            "external_effect_refused: {tool} of {server} costs money, \
+            "external_effect_refused: {tool} of {server} {why}, \
              and only a session about a task can ask you to allow it"
         ));
     }
@@ -966,6 +985,7 @@ fn tag_wire(tag: ConnectorTag) -> ConnectorTagWire {
         ConnectorTag::Network => ConnectorTagWire::Network,
         ConnectorTag::ExternalEffect => ConnectorTagWire::ExternalEffect,
         ConnectorTag::Paid => ConnectorTagWire::Paid,
+        ConnectorTag::Ask => ConnectorTagWire::Ask,
         ConnectorTag::Denied => ConnectorTagWire::Denied,
     }
 }
@@ -1122,6 +1142,48 @@ mod tests {
             assert!(!decision.allow, "{tool} {input}: {decision:?}");
             denied_for(&decision, "path_protected");
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn judges_a_call_by_the_agents_own_rules() {
+        let daemon = TestDaemon::on_team(
+            "hook-own-rules",
+            |wire| {
+                wire["rules"] = json!({
+                    "protected_paths": ["infra/**"],
+                    "read_only_paths": ["vendor/**"],
+                    "lifted_paths": [".env", ".env.*", "**/*.pem", "**/*.key", ".catervas/local/**"]
+                });
+                wire["agents"][1]["rules"] = json!({ "lifted_paths": ["infra/**"] });
+            },
+            |_| {},
+        );
+        let theo = "9d2e7c41-5a3b-4f08-8c16-0e7a1b2c3d4e";
+        daemon.register(theo, "dev-b", None, DEFAULT_SESSION_LIMITS);
+        let read = json!({ "file_path": daemon.inside("infra/main.tf") });
+        let ada = decide_pre_tool_use(&daemon.dev_call("Read", &read), &daemon.state);
+        assert!(ada.allow, "{ada:?}");
+        let other = decide_pre_tool_use(&daemon.call(theo, "Read", &read), &daemon.state);
+        denied_for(&other, "path_protected");
+
+        let edit = decide_pre_tool_use(
+            &daemon.dev_call(
+                "Edit",
+                &json!({ "file_path": daemon.inside("vendor/x.js"), "old_string": "a", "new_string": "b" }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&edit, "path_read_only");
+
+        let key = decide_pre_tool_use(
+            &daemon.dev_call(
+                "Read",
+                &json!({ "file_path": daemon.inside(".catervas/local/daemon.json") }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&key, "path_protected");
     }
 
     #[test]
@@ -2538,6 +2600,40 @@ mod tests {
         assert!(
             daemon.events(EventKind::ToolApprovalRequested).is_empty(),
             "nothing is recorded that no row lists and nothing can decide"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_ask_tool_outside_a_task_says_it_asks_not_that_it_costs() {
+        use catervas_core::governor::permissions::ConnectorTag;
+
+        let daemon = TestDaemon::new("hook-ask-no-task", |_| {});
+        with_github(&daemon);
+        {
+            let mut sessions = daemon.state.sessions();
+            let registration = &mut sessions
+                .get_mut("session-github")
+                .expect("registered")
+                .registration;
+            registration.task_id = None;
+            registration.connectors[0]
+                .tools
+                .insert("create_issue".to_string(), ConnectorTag::Ask);
+        }
+
+        let decision = create_issue(&daemon, "session-github", &json!({ "title": "x" }));
+
+        denied_for(&decision, "external_effect_refused");
+        assert!(
+            decision.reason.contains("asks you first"),
+            "{}",
+            decision.reason
+        );
+        assert!(
+            !decision.reason.contains("costs money"),
+            "{}",
+            decision.reason
         );
     }
 

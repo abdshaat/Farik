@@ -71,6 +71,7 @@ describe("settings directory", () => {
 		expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
 			[en.sectionGeneral, "/settings/general"],
 			[en.sectionAllowedActions, "/settings/allowed-actions"],
+			[en.sectionRules, "/settings/rules"],
 			[en.sectionSpending, "/settings/spending"],
 			[en.sectionWork, "/settings/work"],
 			[en.sectionYourApp, "/settings/your-app"],
@@ -78,8 +79,8 @@ describe("settings directory", () => {
 			[en.sectionComputer, "/settings/computer"],
 			[en.sectionAccount, "/settings/account"],
 		]);
-		// The team's rules have three sections of their own, not one.
-		expect(links).toHaveLength(8);
+		// The team's rules have four sections of their own, not one.
+		expect(links).toHaveLength(9);
 		expect(links.map((a) => a.textContent)).not.toContain("Your team’s rules");
 		expect(links.map((a) => a.getAttribute("aria-current"))).toEqual(
 			SECTIONS.map((s) => (s.path === "general" ? "page" : null)),
@@ -479,5 +480,213 @@ describe("settings directory", () => {
 			).toBeNull();
 			cleanup();
 		}
+	});
+
+	describe("rules", () => {
+		const rulesTeam = (policy: object = {}, rules: object = {}) => ({
+			team: {
+				name: "Corner Bakery",
+				agents: [agent("software_developer")],
+				budgets: {},
+				policy: { integration: "auto_merge", ...policy },
+				rules,
+			},
+			agents: [],
+			max_agents: 7,
+		});
+		const defaults = { budgets: {}, rules: {}, policy: {}, ui_paths: [] };
+		/** The Rules page, its team answered. */
+		async function rulesPage(team = rulesTeam()) {
+			const { s } = await open("/settings/rules", team);
+			await answerQuery(s, "settings.defaults", defaults);
+			await main().findByRole("heading", {
+				level: 3,
+				name: en.rulesFilesTitle,
+			});
+			return s;
+		}
+		/** The team the last Save sent, in wire form. */
+		const saved = async (s: FakeSocket) => {
+			const frame = await waitFor(() => {
+				const f = s.calls("team.save")[0];
+				if (!f) throw new Error("no team.save was sent");
+				return f;
+			});
+			return frame.params.team as Record<string, unknown>;
+		};
+		const row = (glob: string) =>
+			main().getByRole("group", {
+				name: new RegExp(`\\(${glob.replace(/[.*]/g, "\\$&")}\\)$`),
+			});
+
+		it("lifts_a_shipped_path_makes_it_read_only_and_adds_the_owners_own", async () => {
+			const s = await rulesPage();
+			fireEvent.click(
+				within(row(".env")).getByRole("radio", { name: en.filesReadOnly }),
+			);
+			expect(main().getByText(en.forbiddenSecretsWarn)).toBeTruthy();
+			fireEvent.change(main().getByLabelText(en.filesAdd), {
+				target: { value: "infra/**" },
+			});
+			fireEvent.click(
+				partOf(en.rulesFilesTitle).getByRole("button", {
+					name: en.filesAddButton,
+				}),
+			);
+			await saveOf(partOf(en.rulesFilesTitle));
+			expect((await saved(s)).rules).toEqual({
+				lifted_paths: [".env"],
+				read_only_paths: [".env"],
+				protected_paths: ["infra/**"],
+			});
+		});
+
+		/** The part under `title`, its Save button and the words typed into it. */
+		const partOf = (title: string) =>
+			within(main().getByRole("region", { name: title }));
+		const typeInto = (
+			part: ReturnType<typeof partOf>,
+			label: string,
+			v: string,
+		) => fireEvent.change(part.getByLabelText(label), { target: { value: v } });
+		const saveOf = async (part: ReturnType<typeof partOf>) => {
+			const save = await part.findByRole("button", { name: en.agentSave });
+			await waitFor(() => expect(save).toHaveProperty("disabled", false));
+			fireEvent.click(save);
+		};
+
+		it("adds_a_forbidden_command_in_plain_words_and_git_the_owner_allows", async () => {
+			const s = await rulesPage();
+			const commands = partOf(en.rulesCommandsTitle);
+			typeInto(commands, en.commandsAdd, "rm -rf");
+			fireEvent.click(
+				commands.getByRole("button", { name: en.commandsAddButton }),
+			);
+			expect(
+				commands.getByRole("button", { name: `${en.commandsRemove} rm -rf` }),
+			).toBeTruthy();
+			await saveOf(commands);
+			expect((await saved(s)).rules).toEqual({
+				forbidden_commands: ["^rm -rf"],
+			});
+			cleanup();
+
+			const again = await rulesPage();
+			const git = partOf(en.rulesGitTitle);
+			// The read-only eight are always allowed, and cannot be taken away.
+			for (const word of [
+				"status",
+				"diff",
+				"log",
+				"show",
+				"ls-files",
+				"grep",
+				"rev-parse",
+				"blame",
+			]) {
+				expect(git.getByText(word)).toBeTruthy();
+				expect(
+					git.queryByRole("button", { name: `${en.gitRemove} ${word}` }),
+				).toBeNull();
+			}
+			typeInto(git, en.gitAdd, "Fetch");
+			expect(git.getByRole("button", { name: en.gitAddButton })).toHaveProperty(
+				"disabled",
+				true,
+			);
+			expect(git.getByText(en.gitAddWrong)).toBeTruthy();
+			typeInto(git, en.gitAdd, "fetch");
+			fireEvent.click(git.getByRole("button", { name: en.gitAddButton }));
+			await saveOf(git);
+			expect((await saved(again)).rules).toEqual({
+				git_subcommands: ["fetch"],
+			});
+		});
+
+		it("lists_the_remotes_agents_may_push_to", async () => {
+			const s = await rulesPage(
+				rulesTeam({ permissions: { run_commands: false, push: true } }),
+			);
+			const remotes = partOf(en.rulesRemotesTitle);
+			// The last remote cannot be removed.
+			expect(
+				remotes.getByRole("button", {
+					name: new RegExp(`^${en.remotesRemove} origin`),
+				}),
+			).toHaveProperty("disabled", true);
+			typeInto(remotes, en.remotesAdd, "fork");
+			fireEvent.click(
+				remotes.getByRole("button", { name: en.remotesAddButton }),
+			);
+			await saveOf(remotes);
+			expect(
+				((await saved(s)).policy as Record<string, unknown>).push_remotes,
+			).toEqual(["origin", "fork"]);
+			cleanup();
+
+			// With no agent able to push, the part is one line pointing to Allowed actions.
+			await rulesPage();
+			const none = main().getByRole("region", { name: en.rulesRemotesTitle });
+			expect(within(none).queryByLabelText(en.remotesAdd)).toBeNull();
+			expect(
+				within(none)
+					.getByRole("link", { name: en.sectionAllowedActions })
+					.getAttribute("href"),
+			).toBe("/settings/allowed-actions");
+		});
+
+		it("sets_when_work_stops_and_how_long_a_session_runs", async () => {
+			const s = await rulesPage();
+			const limits = partOf(en.rulesLimitsTitle);
+			typeInto(limits, en.limitsReadiness, "5");
+			await saveOf(limits);
+			expect(
+				((await saved(s)).policy as Record<string, unknown>).readiness_attempts,
+			).toBe(5);
+			cleanup();
+
+			const again = await rulesPage();
+			const session = partOf(en.rulesSessionTitle);
+			typeInto(session, en.sessionMinutes, "10");
+			await saveOf(session);
+			expect(
+				((await saved(again)).budgets as { session: unknown }).session,
+			).toEqual({ max_wall_clock_seconds: 600 });
+			cleanup();
+
+			// Put back clears each from the saved team.
+			const set = rulesTeam({ readiness_attempts: 5 });
+			set.team.budgets = { session: { max_wall_clock_seconds: 600 } } as never;
+			const back = await rulesPage(set);
+			const lim = partOf(en.rulesLimitsTitle);
+			fireEvent.click(lim.getByRole("button", { name: en.putBack }));
+			await saveOf(lim);
+			expect(
+				((await saved(back)).policy as Record<string, unknown>)
+					.readiness_attempts,
+			).toBeUndefined();
+			cleanup();
+
+			const back2 = await rulesPage(set);
+			const ses = partOf(en.rulesSessionTitle);
+			fireEvent.click(ses.getByRole("button", { name: en.putBack }));
+			await saveOf(ses);
+			expect(
+				((await saved(back2)).budgets as Record<string, unknown>).session,
+			).toBeUndefined();
+		});
+
+		it("keeps_catervass_own_files_unwritable", async () => {
+			await rulesPage();
+			const own = within(row(".catervas/local/**"));
+			expect(
+				own.getAllByRole("radio").map((r) => r.getAttribute("value")),
+			).toEqual(["off", "read"]);
+			expect(own.queryByRole("radio", { name: en.filesAllowed })).toBeNull();
+			// The other four offer all three answers.
+			expect(
+				within(row(".env")).getByRole("radio", { name: en.filesAllowed }),
+			).toBeTruthy();
+		});
 	});
 });

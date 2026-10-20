@@ -865,3 +865,14 @@
 	align-items: center;
 	min-height: 44px;
 }
+
+/* A connector's tools behind "What each tool does": one choice for each. */
+.toolChoices {
+	display: grid;
+	gap: var(--catervas-space-2);
+	margin-top: var(--catervas-space-2);
+}
+
+.toolChoices > summary {
+	cursor: pointer;
+}

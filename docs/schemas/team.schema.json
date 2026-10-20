@@ -239,10 +239,11 @@
       "enum": [
         "network",
         "paid",
+        "ask",
         "external_effect",
         "denied"
       ],
-      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and runs without asking, each use recorded; paid, it costs money at the service, asks the human and is the only one that does (ADR 0061); denied, never offered."
+      "description": "A connector tool's label (spec 5.6): network, it only reads; external_effect, it changes something outside the sandbox and runs without asking, each use recorded; paid, it costs money at the service and asks the human (ADR 0061); ask, it costs nothing and the owner chose to be asked first, so it waits as a paid one does (ADR 0080); denied, never offered."
     },
     "role": {
       "type": "string",
@@ -347,6 +348,41 @@
             "$ref": "#/$defs/skillPin"
           },
           "description": "The skills given to this agent alone, each pinned by the hash of its folder `.catervas/agents/<id>/skills/<name>/` (spec 6.7, ADR 0034). An agent's skill replaces the team's of the same name. A name appears once in a list (validate_team: skill_name_twice)."
+        },
+        "rules": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "protected_paths": {
+              "type": "array",
+              "maxItems": 100,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Globs no tool may read or write for this agent, on top of the team's (ADR 0080)."
+            },
+            "read_only_paths": {
+              "type": "array",
+              "maxItems": 100,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Globs this agent may read and no tool may write, on top of the team's (ADR 0080)."
+            },
+            "lifted_paths": {
+              "type": "array",
+              "maxItems": 100,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Globs of the team's protected_paths or read_only_paths, or of the five catervas-core ships, that do not apply to this agent, written exactly as the team writes them (ADR 0080). validate_team refuses one nobody set: lifted_path_unknown."
+            },
+            "forbidden_commands": {
+              "type": "array",
+              "maxItems": 100,
+              "items": { "type": "string", "minLength": 1 },
+              "description": "ECMAScript regular expressions a command of this agent must not match, on top of the team's (ADR 0080)."
+            },
+            "git_subcommands": { "$ref": "#/$defs/gitSubcommands" }
+          },
+          "description": "Rules for this agent alone, applied on top of the team's (ADR 0080, spec 5.12)."
+        },
+        "session": {
+          "$ref": "#/$defs/sessionLimits"
         }
       }
     },
@@ -399,6 +435,16 @@
           "$ref": "#/$defs/sessionLimits"
         }
       }
+    },
+    "gitSubcommands": {
+      "type": "array",
+      "maxItems": 50,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,39}$"
+      },
+      "description": "Git subcommands a command may run on top of the read-only eight catervas-core ships, with any options (ADR 0080). A pushing subcommand listed here is the owner's choice and is not held to policy.push_remotes."
     },
     "sessionLimits": {
       "type": "object",
@@ -480,6 +526,23 @@
         "solo": {
           "type": "boolean",
           "description": "One agent alone (ADR 0071): the team is exactly one agent that is not retired, of any role but the Scrum Master and the UI/UX Designer, with no Product Manager, no reviewer and no planning. Absent means false."
+        },
+        "push_remotes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+          },
+          "description": "The remotes catervas_git_push may push a task branch to (spec 5.14, ADR 0080). Left out, origin."
+        },
+        "readiness_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "How many times a task may fail its readiness check before it escalates (spec 5.7, ADR 0080). Left out, three."
         },
         "integration_branch": {
           "type": "string",
@@ -603,6 +666,28 @@
             "minLength": 1
           },
           "description": "Globs no tool may read or write, whatever its tier (spec 5.6). Left out, the five catervas-core ships."
+        },
+        "lifted_paths": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [".env", ".env.*", "**/*.pem", "**/*.key", ".catervas/local/**"]
+          },
+          "description": "Which of the five globs catervas-core ships as protected paths no longer apply (spec 5.6, ADR 0080)."
+        },
+        "read_only_paths": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Globs an agent may read and no tool may write (ADR 0080)."
+        },
+        "git_subcommands": {
+          "$ref": "#/$defs/gitSubcommands"
         },
         "allowed_paths_ceiling": {
           "type": "array",

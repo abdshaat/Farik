@@ -479,6 +479,43 @@ mod tests {
     }
 
     #[test]
+    fn the_image_carries_the_libraries_a_headless_browser_needs() {
+        // A project's own Chrome (Remotion, Playwright, Puppeteer) fails to start on a bare
+        // node-slim with "libnspr4.so: cannot open shared object file", and an agent cannot
+        // install system packages in the sandbox, so the image's apt-get line names them.
+        let joined = super::DOCKERFILE.replace("\\\n", " ");
+        let apt = joined
+            .lines()
+            .find(|line| line.contains("apt-get install"))
+            .expect("the Dockerfile installs packages");
+        assert!(apt.contains("--no-install-recommends"), "{apt}");
+        for package in [
+            "libnss3",
+            "libnspr4",
+            "libdbus-1-3",
+            "libatk1.0-0",
+            "libatk-bridge2.0-0",
+            "libcups2",
+            "libdrm2",
+            "libgbm1",
+            "libxkbcommon0",
+            "libxcomposite1",
+            "libxdamage1",
+            "libxfixes3",
+            "libxrandr2",
+            "libpango-1.0-0",
+            "libcairo2",
+            "libasound2",
+            "fonts-liberation",
+        ] {
+            assert!(
+                apt.split_whitespace().any(|word| word == package),
+                "{package} is missing from {apt}"
+            );
+        }
+    }
+
+    #[test]
     fn retries_a_program_that_is_busy_being_written() {
         let bin =
             std::env::temp_dir().join(format!("catervas-computer-busy-{}", std::process::id()));

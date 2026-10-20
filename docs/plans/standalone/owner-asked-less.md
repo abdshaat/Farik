@@ -3,7 +3,7 @@
 Status: ready
 Branch: `fix/ux-after-the-studio` (its own pull request to `main`); tasks 1, 2 and 7 on `fix/ux-after-the-studio-b` in a second worktree, merged in before task 9
 Decision: ADR 0081
-Spec: `docs/SPEC.md` 5.5, 5.9, 5.16, 8.3, 8.6 (revision 0.136; 0.135 is taken by #85 and #86)
+Spec: `docs/SPEC.md` 5.5, 5.9, 5.16, 8.3, 8.6 (revision 0.137; 0.136 is taken by #85 and #86)
 Depends on: `origin/main` at `d581bb6b`
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-20 (ADR 0065)
 
@@ -98,8 +98,8 @@ Files: `runtime/src/preview.rs`
 
 ### Task 9: the spec says it
 
-Files: `docs/SPEC.md` (5.5, 5.9, 5.16, 8.3, 8.6, the rpc and team file formats, revision 0.136)
-- [x] `docs(spec): the owner is asked less and waits less, revision 0.136 (ADR 0081)`
+Files: `docs/SPEC.md` (5.5, 5.9, 5.16, 8.3, 8.6, the rpc and team file formats, revision 0.137)
+- [x] `docs(spec): the owner is asked less and waits less, revision 0.137 (ADR 0081)`
 
 ## Verification
 

@@ -76,6 +76,9 @@ pub struct PromptInput<'a> {
     pub documents_local: bool,
     /// The agents of the team that are not retired, for the `Your team` section (ADR 0081).
     pub team: &'a [&'a Agent],
+    /// The remotes the team lets an agent push to (`policy.push_remotes`, ADR 0080), for the Team
+    /// rules' line about them, said only to an agent that holds `git_remote`.
+    pub push_remotes: &'a [String],
 }
 
 /// One repository of the project, as the Team rules' line says it.
@@ -263,6 +266,15 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
             ),
             input.document_format,
             input.documents_local,
+            if input
+                .agent
+                .tiers(input.permissions)
+                .contains(&PermissionTier::GitRemote)
+            {
+                input.push_remotes
+            } else {
+                &[]
+            },
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -556,12 +568,14 @@ fn rules_section(
     ),
     format: DocumentFormat,
     documents_local: bool,
+    push_remotes: &[String],
 ) -> String {
     let list = |name: &str, values: &[String]| {
         (!values.is_empty()).then(|| format!("- {name}: {}", values.join(", ")))
     };
     [
         list("protected_paths", &rules.protected_paths),
+        list("read_only_paths", &rules.read_only_paths),
         list("allowed_paths_ceiling", &rules.allowed_paths_ceiling),
         list("required_criteria", &rules.required_criteria),
         Some(format!(
@@ -575,6 +589,8 @@ fn rules_section(
                 .map_or_else(|| "none".to_string(), |usd| usd.to_string())
         )),
         list("forbidden_commands", &rules.forbidden_commands),
+        list("git_subcommands", &rules.git_subcommands),
+        list("push_remotes", push_remotes),
         // Unlike the other lists, an empty one here is a rule of its own, so it is said.
         list("document_paths", &rules.document_paths).or_else(|| {
             Some(
@@ -828,6 +844,7 @@ mod tests {
                 attached: None,
                 documents_local: false,
                 team: &[],
+                push_remotes: &[],
             }
         }
     }
@@ -1277,6 +1294,8 @@ mod tests {
         let mut inputs = a_product_manager();
         inputs.rules = TeamRules {
             protected_paths: vec![".env".to_string(), "**/*.pem".to_string()],
+            read_only_paths: vec!["vendor/**".to_string()],
+            git_subcommands: Vec::new(),
             allowed_paths_ceiling: Vec::new(),
             required_criteria: Vec::new(),
             require_new_tests: false,
@@ -1290,6 +1309,7 @@ mod tests {
             section(&prompt, "Team rules"),
             format!(
                 "- protected_paths: .env, **/*.pem\n\
+                 - read_only_paths: vendor/**\n\
                  - require_new_tests: no\n\
                  - max_task_budget_usd: none\n\
                  - document_paths: none (no task but a Software Developer's can be ready)\n\
@@ -1300,6 +1320,8 @@ mod tests {
 
         inputs.rules = TeamRules {
             protected_paths: vec![".env".to_string()],
+            read_only_paths: Vec::new(),
+            git_subcommands: vec!["fetch".to_string(), "merge".to_string()],
             allowed_paths_ceiling: vec!["src/**".to_string(), "docs/**".to_string()],
             required_criteria: vec!["test".to_string()],
             require_new_tests: true,
@@ -1318,10 +1340,35 @@ mod tests {
                  - require_new_tests: yes\n\
                  - max_task_budget_usd: 12.5\n\
                  - forbidden_commands: ^rm -rf /\n\
+                 - git_subcommands: fetch, merge\n\
                  - document_paths: docs/**, **/*.md, CHANGELOG.md\n\
                  - folders: docs/catervas/product/ (Product Manager). Yours is docs/catervas/product/: write no other folder named here. Read any of them, and where a document has an .agent.html or .agent.md twin beside it, read the twin, which is written for agents.\n{}",
                 format_line(DocumentFormat::Html)
             )
+        );
+    }
+
+    #[test]
+    fn says_the_remotes_to_an_agent_that_pushes() {
+        let mut inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
+        let remotes = ["origin".to_string(), "fork".to_string()];
+        let line = |inputs: &Inputs| {
+            let prompt = assembled(&PromptInput {
+                push_remotes: &remotes,
+                ..inputs.full(SessionPurpose::Implement)
+            });
+            section(&prompt, "Team rules")
+                .lines()
+                .find(|line| line.starts_with("- push_remotes:"))
+                .map(str::to_string)
+        };
+        assert_eq!(line(&inputs), None, "a developer without git_remote");
+        let mut wire = serde_json::to_value(&inputs.agent).expect("an agent serialises");
+        wire["grants"] = json!(["git_remote"]);
+        inputs.agent = serde_json::from_value(wire).expect("an agent");
+        assert_eq!(
+            line(&inputs).as_deref(),
+            Some("- push_remotes: origin, fork")
         );
     }
 

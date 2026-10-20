@@ -21,6 +21,7 @@ export const SECTIONS: readonly Section[] = [
 		name: "sectionAllowedActions",
 		summary: "sectionAllowedActionsSummary",
 	},
+	{ path: "rules", name: "sectionRules", summary: "sectionRulesSummary" },
 	{
 		path: "spending",
 		name: "sectionSpending",

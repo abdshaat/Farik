@@ -11,6 +11,7 @@ use std::time::Duration;
 
 use catervas_core::governor::paths::literal_folder;
 use catervas_core::governor::permissions::PermissionTier;
+use catervas_core::governor::team_rules::{CATERVAS_KEYS, CATERVAS_STATE, TeamRules};
 use catervas_core::team::validate_team;
 use catervas_store::files::yaml_value;
 use serde_json::{Value, json};
@@ -641,9 +642,9 @@ pub fn claude_args(
     resume: bool,
 ) -> Result<Vec<String>, RuntimeError> {
     refuse_a_catervas_server(spec)?;
-    let protected = protected_paths(&config.team_file)?;
-    refuse_an_unexpressible_glob(&protected)?;
-    let settings = settings_json(config, &protected, spec);
+    let denied = Denied::of(&session_rules(&config.team_file, &spec.agent_id)?);
+    refuse_an_unexpressible_glob(&denied.all())?;
+    let settings = settings_json(config, &denied, spec);
     let session_flag = if resume { "--resume" } else { "--session-id" };
     let disallowed = std::iter::once(REFUSED_BUILTIN)
         .chain(spec.disallowed_tools.iter().map(String::as_str))
@@ -846,8 +847,42 @@ fn refuse_a_catervas_server(spec: &SessionSpec) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-/// The team's protected paths, the shipped ones among them.
-fn protected_paths(team_file: &Path) -> Result<Vec<String>, RuntimeError> {
+/// What a session's Claude Code is denied (ADR 0080): the globs it may not `Read`, which are the
+/// agent's protected paths and the daemon's keys, and the globs it may not `Edit`, which are its
+/// read-only paths and Catervas's own state.
+struct Denied {
+    read: Vec<String>,
+    edit: Vec<String>,
+}
+
+impl Denied {
+    fn of(rules: &TeamRules) -> Self {
+        let with = |globs: &[String], floor: &[&str]| {
+            globs
+                .iter()
+                .cloned()
+                .chain(floor.iter().map(|glob| (*glob).to_string()))
+                .fold(Vec::new(), |mut all, glob| {
+                    if !all.contains(&glob) {
+                        all.push(glob);
+                    }
+                    all
+                })
+        };
+        Self {
+            read: with(&rules.protected_paths, &CATERVAS_KEYS),
+            edit: with(&rules.read_only_paths, &[CATERVAS_STATE]),
+        }
+    }
+
+    fn all(&self) -> Vec<String> {
+        self.read.iter().chain(&self.edit).cloned().collect()
+    }
+}
+
+/// The rules of the session's agent: the team's with its own applied, the shipped protected paths
+/// among them unless lifted.
+fn session_rules(team_file: &Path, agent_id: &str) -> Result<TeamRules, RuntimeError> {
     let refused = |detail: String| RuntimeError::Spawn {
         detail: format!(
             "{} cannot be read, and a session is not started without its protected paths: {detail}",
@@ -858,21 +893,21 @@ fn protected_paths(team_file: &Path) -> Result<Vec<String>, RuntimeError> {
     let value = yaml_value(text.strip_prefix('\u{feff}').unwrap_or(&text), "team.yaml")
         .map_err(|error| refused(error.to_string()))?;
     let team = validate_team(&value).map_err(|errors| refused(format!("{errors:?}")))?;
-    Ok(team.rules().protected_paths)
+    Ok(team.rules_for(agent_id))
 }
 
-/// Refuses a protected path that a `Read(<glob>)` rule cannot say as it is: Claude Code reads a
+/// Refuses a path that a `Read(<glob>)` or `Edit(<glob>)` rule cannot say as it is: Claude Code reads a
 /// rule's content up to its parentheses and takes a backslash as an escape, and in `-p` mode it
 /// ignores settings it cannot read without a word, so such a path would leave the session with
 /// no deny rules at all.
-fn refuse_an_unexpressible_glob(protected: &[String]) -> Result<(), RuntimeError> {
-    match protected.iter().find(|glob| {
+fn refuse_an_unexpressible_glob(globs: &[String]) -> Result<(), RuntimeError> {
+    match globs.iter().find(|glob| {
         glob.chars()
             .any(|character| matches!(character, '(' | ')' | '\\') || character.is_control())
     }) {
         Some(glob) => Err(RuntimeError::Spawn {
             detail: format!(
-                "the protected path {glob:?} cannot be expressed as a Read rule: it holds a \
+                "the path {glob:?} cannot be expressed as a Read or Edit rule: it holds a \
                  parenthesis, a backslash, or a control character"
             ),
         }),
@@ -908,9 +943,10 @@ fn read_root_rules(spec: &SessionSpec, protected: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// `--settings`: both hooks on every tool, and a `Read` deny rule for each protected path, which
-/// Claude Code also holds its search tools to, and for each of those in a read root.
-fn settings_json(config: &ClaudeConfig, protected: &[String], spec: &SessionSpec) -> Value {
+/// `--settings`: both hooks on every tool, a `Read` deny rule for each protected path and key,
+/// which Claude Code also holds its search tools to, and for each of those in a read root, and an
+/// `Edit` deny rule for each read-only path and for Catervas's state.
+fn settings_json(config: &ClaudeConfig, denied: &Denied, spec: &SessionSpec) -> Value {
     let hook = |command: String| {
         json!([{
             "matcher": "*",
@@ -932,10 +968,12 @@ fn settings_json(config: &ClaudeConfig, protected: &[String], spec: &SessionSpec
             "PostToolUse": hook(line("post-tool-use")),
         },
         "permissions": {
-            "deny": protected
+            "deny": denied
+                .read
                 .iter()
                 .map(|path| format!("Read({path})"))
-                .chain(read_root_rules(spec, protected))
+                .chain(denied.edit.iter().map(|path| format!("Edit({path})")))
+                .chain(read_root_rules(spec, &denied.read))
                 .collect::<Vec<_>>(),
         },
         // A skill's body may hold `!` commands that run when it loads; Catervas refuses such a
@@ -1548,6 +1586,43 @@ mod tests {
             .collect();
         assert!(deny.contains(&"Read(.env)"), "{deny:?}");
         assert!(deny.contains(&"Read(**/*.pem)"), "{deny:?}");
+    }
+
+    #[test]
+    fn denies_reads_of_off_limits_and_edits_of_read_only_paths() {
+        let project = TempProject::new("claude-own-deny");
+        let mut wire = a_team_wire();
+        wire["rules"]["lifted_paths"] = json!([".env"]);
+        wire["rules"]["read_only_paths"] = json!([".env"]);
+        wire["agents"][0]["rules"] = json!({ "protected_paths": ["notes/**"] });
+        project
+            .files()
+            .write_team(&validate_team(&wire).expect("a team"))
+            .expect("the team is written");
+        let config = config(&project);
+        let spec = SessionSpec {
+            agent_id: "ada".to_string(),
+            ..spec()
+        };
+        let args = claude_args(&spec, &config, &session_dir(&config, &spec), false)
+            .expect("the args are built");
+        let settings = settings(&args);
+        let deny: Vec<&str> = settings["permissions"]["deny"]
+            .as_array()
+            .expect("an array")
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        assert!(deny.contains(&"Edit(.env)"), "{deny:?}");
+        assert!(!deny.contains(&"Read(.env)"), "{deny:?}");
+        assert!(deny.contains(&"Read(notes/**)"), "ada's own: {deny:?}");
+        for rule in [
+            "Read(.catervas/local/daemon.json)",
+            "Read(.catervas/local/sessions/**)",
+            "Edit(.catervas/local/**)",
+        ] {
+            assert!(deny.contains(&rule), "{rule}: {deny:?}");
+        }
     }
 
     #[test]

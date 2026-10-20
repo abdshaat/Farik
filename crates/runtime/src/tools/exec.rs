@@ -37,7 +37,8 @@ pub(crate) struct ExecInput {
 /// (5.12). The environment is empty, the directory the workspace unless `cwd` says otherwise, and
 /// the timeout 600 seconds unless asked, 1800 at most. Each stream is cut at 64 KiB.
 pub(super) async fn exec(call: &Call<'_>, input: ExecInput) -> Result<Value, ToolError> {
-    evaluate_command(&input.command, &call.team.rules()).map_err(Refusal::Command)?;
+    evaluate_command(&input.command, &call.team.rules_for(call.agent_id()))
+        .map_err(Refusal::Command)?;
     let executor = call
         .context
         .executor
@@ -184,6 +185,36 @@ mod tests {
         assert!(
             recording.0.lock().expect("unpoisoned").is_empty(),
             "nothing ran"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn runs_the_git_the_agent_is_allowed() {
+        let without = TestProject::new("tools-exec-fetch-no", &a_team_of_three(|_| {}));
+        let recording = Arc::new(Recording::default());
+        match exec(
+            &without,
+            recording.clone(),
+            json!({ "command": "git fetch" }),
+        ) {
+            Err(ToolError::Refused { reason }) => {
+                assert!(reason.starts_with("git_via_exec: "), "{reason}");
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        let with = TestProject::new(
+            "tools-exec-fetch-yes",
+            &a_team_of_three(|wire| {
+                wire["agents"][1]["rules"] = json!({ "git_subcommands": ["fetch"] });
+            }),
+        );
+        exec(&with, recording.clone(), json!({ "command": "git fetch" }))
+            .expect("the governor lets it through");
+        assert_eq!(
+            recording.0.lock().expect("unpoisoned").len(),
+            1,
+            "it ran once, for the agent that may"
         );
     }
 

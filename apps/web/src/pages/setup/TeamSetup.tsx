@@ -7,6 +7,7 @@ import { type ServeStatus, useQuery } from "../../app/store.ts";
 import type { Effort } from "../../components/ModelFields.tsx";
 import { t } from "../../strings/t.ts";
 import type { Template } from "../SavedTeams.tsx";
+import type { Tier } from "../Team.tsx";
 import {
 	formOf,
 	type Preview,
@@ -15,6 +16,15 @@ import {
 } from "./PreviewFields.tsx";
 import { slug } from "./SetupProject.tsx";
 
+/** Rules for one agent alone, laid over the team's (ADR 0080). */
+export type AgentRulesFile = {
+	protectedPaths?: string[];
+	readOnlyPaths?: string[];
+	/** Globs of the team's that do not apply to this agent. */
+	liftedPaths?: string[];
+	forbiddenCommands?: string[];
+	gitSubcommands?: string[];
+};
 export type Agent = {
 	id: string;
 	displayName: string;
@@ -26,6 +36,12 @@ export type Agent = {
 	model?: { id?: string; effort?: Effort } | undefined;
 	/** The connectors its sessions get (spec 5.6). */
 	mcpServers?: McpServer[];
+	/** The permission tiers its role lacks and the team gives it. */
+	grants?: Tier[] | undefined;
+	/** Its own rules, laid over the team's. */
+	rules?: AgentRulesFile | undefined;
+	/** Its own session limits, laid over the team's. */
+	session?: SessionLimits | undefined;
 };
 /** An agent's connector as `team.yaml` holds it: a built-in by name, or the user's own (ADR 0030). */
 export type McpServer = {
@@ -39,12 +55,27 @@ export type McpServer = {
 	credentialKeys?: string[];
 	/** Present when the user signs in to the service instead of giving a key (ADR 0033). */
 	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
-	tools?: Record<string, "network" | "paid" | "external_effect" | "denied">;
+	tools?: Record<
+		string,
+		"network" | "paid" | "external_effect" | "denied" | "ask"
+	>;
+};
+/** One session's limits as `team.yaml` holds them; what is left out keeps the role's default. */
+export type SessionLimits = {
+	maxInputTokens?: number;
+	maxOutputTokens?: number;
+	maxWallClockSeconds?: number;
+	maxToolCalls?: number;
 };
 export type Team = {
 	name: string;
 	agents: Agent[];
-	budgets: { dailyUsd?: number; [key: string]: unknown };
+	budgets: {
+		dailyUsd?: number;
+		/** Applied to every agent's session, before the agent's own (ADR 0080). */
+		session?: SessionLimits;
+		[key: string]: unknown;
+	};
 	policy: {
 		integration: string;
 		permissions?: { runCommands?: boolean; push?: boolean };
@@ -56,12 +87,31 @@ export type Team = {
 		solo?: boolean;
 		/** Whether the team's documents are kept on this computer, out of git (ADR 0074). */
 		documentsLocal?: boolean;
+		/** The remotes a task branch may be pushed to; absent means `origin`. */
+		pushRemotes?: string[];
+		/** How many times a task may fail its readiness check before it escalates; absent means 3. */
+		readinessAttempts?: number;
+		maxIterations?: number;
+		blockedLimitHours?: number;
+		/** How long an open escalation may wait on the owner; absent means 24. */
+		escalationAgeHours?: number;
+		wipLimitPerAgent?: number;
 		[key: string]: unknown;
 	};
 	rules: {
 		requireNewTests?: boolean;
 		maxTaskBudgetUsd?: number;
 		uiPaths?: string[];
+		/** Which of the five shipped protected globs no longer apply (ADR 0080). */
+		liftedPaths?: string[];
+		/** Globs an agent may read and no tool may write. */
+		readOnlyPaths?: string[];
+		/** The owner's own off-limits globs, on top of the shipped ones. */
+		protectedPaths?: string[];
+		/** Patterns a command must not match. */
+		forbiddenCommands?: string[];
+		/** Git subcommands a command may run on top of the read-only eight. */
+		gitSubcommands?: string[];
 		[key: string]: unknown;
 	};
 	preview?: Preview;
