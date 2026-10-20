@@ -64,6 +64,10 @@ pub(crate) struct WriteContractInput {
     /// Criteria from the library, appended to the exit criteria.
     #[serde(default)]
     criteria: Vec<CriterionRef>,
+    /// In an epic's session, a waiting task of that epic (`draft`, `refining` or `ready`) to write
+    /// instead of the epic.
+    #[serde(default)]
+    task_id: Option<String>,
 }
 
 /// `catervas_create_task`'s input.
@@ -143,7 +147,7 @@ pub(super) fn write_contract(
     call: &Call<'_>,
     input: WriteContractInput,
 ) -> Result<Value, ToolError> {
-    let task = call.task()?;
+    let task = &call.target(input.task_id.as_deref())?;
     let (contract, row) = call.contract(task)?;
     let actor = contract_writer(call, &contract, row.status)?;
     if contract.kind == TaskKind::Epic && has_asked(call, task)? {
@@ -677,6 +681,49 @@ mod tests {
             )
             .expect("an epic is a parent");
         assert_eq!(project.file("CTV-3")["parent"], "CTV-1");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn writes_a_waiting_task_of_the_epic_from_its_session() {
+        let project = a_project("tools-epic-session");
+        project.filed("CTV-1", "in_progress", "epic", None);
+        project.filed("CTV-2", "refining", "task", Some("CTV-1"));
+        project.filed("CTV-3", "ready", "task", Some("CTV-1"));
+        project.filed("CTV-4", "in_progress", "task", Some("CTV-1"));
+        project.filed("CTV-5", "ready", "task", None);
+        let epic = project.file("CTV-1");
+
+        project
+            .call_in(
+                SessionPurpose::Plan,
+                "pm",
+                Some("CTV-1"),
+                "catervas_write_contract",
+                json!({ "task_id": "CTV-3", "fields": { "dependencies": ["CTV-2"] } }),
+            )
+            .expect("a waiting child of the epic is written from the epic's session");
+        assert_eq!(project.file("CTV-3")["dependencies"], json!(["CTV-2"]));
+        assert_eq!(project.file("CTV-1"), epic);
+
+        for outside in ["CTV-5", "CTV-4"] {
+            let before = (project.file(outside), project.event_count());
+            let refused = project.call_in(
+                SessionPurpose::Plan,
+                "pm",
+                Some("CTV-1"),
+                "catervas_write_contract",
+                json!({ "task_id": outside, "fields": { "dependencies": ["CTV-2"] } }),
+            );
+            let Err(ToolError::InvalidInput { detail }) = refused else {
+                panic!("expected a refusal, got {refused:?}");
+            };
+            assert!(
+                detail.contains("is not a waiting task of CTV-1"),
+                "{detail}"
+            );
+            assert_eq!((project.file(outside), project.event_count()), before);
+        }
     }
 
     #[test]

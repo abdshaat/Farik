@@ -32,7 +32,7 @@ Files: `crates/core/src/governor/transition_table.rs` (and its tests' counts), `
 
 Files: `crates/runtime/src/tools/contracts.rs`, `crates/runtime/src/tools/work.rs`, `crates/runtime/src/tools.rs` (input structs), the plan prompt in `crates/runtime/src/orchestrator/messages.rs`
 - `writes_a_waiting_task_of_the_epic_from_its_session` (contracts.rs) — a PM `plan` session on epic CTV-1 writes `dependencies` of its ready child CTV-3 with `task_id: "CTV-3"`; CTV-3's contract changes and CTV-1's does not. The same with `task_id` of a task outside CTV-1, or of an `in_progress` child, is refused with "is not a waiting task of".
-- [ ] `feat(runtime): the Product Manager changes an epic's waiting tasks from the epic's session`
+- [x] `feat(runtime): the Product Manager changes an epic's waiting tasks from the epic's session`
 
 ### Task 29: the spec and the ADR say it
 

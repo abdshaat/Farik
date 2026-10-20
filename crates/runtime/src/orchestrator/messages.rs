@@ -289,7 +289,8 @@ pub(super) fn breakdown_message(contract: &TaskContract, builders: usize) -> Str
     };
     format!(
         "Break the epic {epic} down: file each of its tasks with `catervas_create_task`, `parent` \
-         {epic}, within its allowed paths ({paths}) and its remaining budget.{lanes}",
+         {epic}, within its allowed paths ({paths}) and its remaining budget.{lanes}{change}",
+        change = CHANGE_A_WAITING_TASK,
         paths = contract
             .allowed_paths
             .iter()
@@ -298,6 +299,10 @@ pub(super) fn breakdown_message(contract: &TaskContract, builders: usize) -> Str
             .join(", ")
     )
 }
+
+/// What an epic's `plan` session is told about its waiting tasks (ADR 0079, second list).
+const CHANGE_A_WAITING_TASK: &str = " To change a waiting task of this epic, pass its `task_id` to \
+     `catervas_write_contract` or `catervas_request_transition`.";
 
 /// The Product Manager's message for an epic in progress with no live task and an active
 /// Architect: file the task that writes the plan at `plan`.
@@ -310,7 +315,7 @@ pub(super) fn plan_task_message(contract: &TaskContract, plan: &str, builders: u
          team has {builders} active builders (Software Developers and UI/UX Designers), so the \
          plan has no more lanes than that. No agent reviews the plan: give its task only an \
          `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and \
-         you are asked for its tasks then."
+         you are asked for its tasks then.{CHANGE_A_WAITING_TASK}",
     )
 }
 
@@ -333,7 +338,8 @@ pub(super) fn plan_tasks_message(
          The epic's tasks so far: {tasks}\n\nFile one task per planned task with \
          `catervas_create_task`, `parent` {epic}, with its `plan` {plan}, its `lane`, the planned \
          tasks it needs in `dependencies`, the plan's paths as `allowed_paths` and its constraints \
-         as `constraints`, and acceptance criteria from the epic's requirements and the spec.",
+         as `constraints`, and acceptance criteria from the epic's requirements and the spec.{change}",
+        change = CHANGE_A_WAITING_TASK,
         text = untrusted_block("plan", text, RESULTS_CAP_BYTES),
         tasks = untrusted_block("tasks", &listed, RESULTS_CAP_BYTES),
     )
@@ -1493,9 +1499,9 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Changes, Resume, ReviewBrief, breakdown_message, close_out_message, design_review_message,
-        human_message, implement_message, plan_message, plan_task_message, plan_tasks_message,
-        refine_message, retro_message, review_message,
+        CHANGE_A_WAITING_TASK, Changes, Resume, ReviewBrief, breakdown_message, close_out_message,
+        design_review_message, human_message, implement_message, plan_message, plan_task_message,
+        plan_tasks_message, refine_message, retro_message, review_message,
     };
     use super::{DeliveredTask, architecture_refresh_message, product_refresh_message};
     use crate::tools::fixtures::at;
@@ -1600,7 +1606,11 @@ mod tests {
         assert!(!alone.contains("Assign each once it is ready"), "{alone}");
         assert!(!alone.contains("lane"), "{alone}");
         let lanes = breakdown_message(&epic, 2);
-        assert!(lanes.starts_with(&alone), "{lanes}");
+        let alone_head = alone
+            .strip_suffix(CHANGE_A_WAITING_TASK)
+            .expect("a plan session is told how to change a waiting task");
+        assert!(lanes.starts_with(alone_head), "{lanes}");
+        assert!(lanes.ends_with(CHANGE_A_WAITING_TASK), "{lanes}");
         assert!(
             lanes.contains(
                 "The team has no active Architect, so plan its lanes yourself: give each task its `lane`, lanes 1 to 2, one per active builder. A lane is the tasks one builder does in order; tasks in different lanes run side by side, so their `allowed_paths` must not meet."
@@ -1622,7 +1632,7 @@ mod tests {
         }
         assert!(
             message.ends_with(
-                "No agent reviews the plan: give its task only an `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and you are asked for its tasks then."
+                "No agent reviews the plan: give its task only an `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and you are asked for its tasks then. To change a waiting task of this epic, pass its `task_id` to `catervas_write_contract` or `catervas_request_transition`."
             ),
             "{message}"
         );
