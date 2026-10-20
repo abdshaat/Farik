@@ -1623,13 +1623,14 @@ async fn in_progress(
     let Some(resume) = resume(deps, team, &contract, assignee)? else {
         return Ok(None);
     };
-    // The branch sees what the integration branch gained since the last session (ADR 0079).
+    // What a tool changed outside the task's paths is put back before the agent works (ADR 0069).
+    deps.tools.transitions.tidy(&row.task_id, team, None)?;
+    // The branch sees what the integration branch gained since the last session (ADR 0079), after
+    // the tidy: a leftover edit could make git refuse the merge.
     let resume = Resume {
         behind: bring_up_to_date(deps, team, &contract),
         ..resume
     };
-    // What a tool changed outside the task's paths is put back before the agent works (ADR 0069).
-    deps.tools.transitions.tidy(&row.task_id, team, None)?;
     // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
     let executor: Option<Arc<dyn Executor>> = if task_private_folder(&contract).is_some() {
         None
@@ -4115,6 +4116,29 @@ mod tests {
         assert!(worktree.join("from_main.txt").is_file());
         let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
         assert_eq!(merges, "chore: bring up to date with main");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn brings_main_in_after_putting_back_a_tool_edit_to_a_file_main_changed() {
+        let harness = Harness::new("orch-up-to-date-after-tidy", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let repo = harness.project.repo.path.clone();
+        let worktree = harness.worktree("CTV-1");
+        // A tool rewrote a file outside the task's paths, which main changed too: git would refuse
+        // the merge over it until the tidy puts it back.
+        std::fs::write(worktree.join("README.md"), "a tool's rewrite\n").expect("written");
+        std::fs::write(repo.join("README.md"), "main's line\n").expect("written");
+        git_in(&repo, &["commit", "-am", "main's line"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(!prompt.contains("merging it conflicts"), "{prompt}");
     }
 
     #[tokio::test]
