@@ -182,7 +182,7 @@ Tests (`permissions.rs` `mod tests`, `autopilot.rs` `mod tests`, `team.rs` `mod 
 - `autopilot.rs`: `rate_limits_an_agents_paid_calls_by_tool_by_all_tools_and_by_repeated_input` — with `per_hour` 30 and `now` 12:00, every input distinct unless said: 9 calls of `exa/search` in the hour and a 10th at 10:59 (outside it) pass; 10 in the hour refuse `ThisTool` with `calls: 10` and `frees_at` one hour after the oldest of the ten; 29 calls spread over five tools, none at 10, pass and 30 refuse `AllTools` with `calls: 30`; 3 calls of `exa/search` with one `input_sha256` refuse `SameInput` with `calls: 3` and `frees_at` one hour after the first of the three, while the same three pass for a call of another tool or with another input; with `per_hour` 3 the same three still answer `SameInput`, not `ThisTool` or `AllTools`; `per_tool_calls_per_hour` is 10 for 30, 1 for 1 and for 2, 333 for 1000.
 - `team.rs`: `refuses_a_number_outside_what_a_rule_allows` (extended) — `/policy/paid_calls_per_hour` 0 and 1001 are refused; `defaults_the_memory_cap` (renamed `defaults_the_memory_cap_and_the_paid_call_rate`) — a team without the key gives `paid_calls_per_hour()` 30, and `a_full_team_wire` carries `paid_calls_per_hour: 12`, which reads back 12.
 
-- [ ] `feat(core): a paid or asking call runs under autopilot, within its rate`
+- [x] `feat(core): a paid or asking call runs under autopilot, within its rate`
 
 ### Task 6: the log's answers
 

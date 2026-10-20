@@ -668,7 +668,15 @@ fn judge_connector(
         }
     }
     let active = plan.is_some();
-    match evaluate_connector_call(tool, &request.tool_input, connector, granted, used, active) {
+    match evaluate_connector_call(
+        tool,
+        &request.tool_input,
+        connector,
+        granted,
+        used,
+        active,
+        false,
+    ) {
         Ok(pass) => Ok(Pass {
             approval: pass.approval,
             allowance: pass.allowance,

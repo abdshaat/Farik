@@ -10,6 +10,7 @@ use jsonschema::Validator;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
+use crate::autopilot::PAID_CALLS_PER_HOUR;
 use crate::contract::{
     TaskContract, TaskKind, named, pointer, repeated_ids, with_integers_normalised,
 };
@@ -1313,6 +1314,13 @@ impl Team {
             })
     }
 
+    /// How many paid or asking connector calls one agent may make in an hour under autopilot: its
+    /// `policy.paid_calls_per_hour`, 30 when left out (ADR 0082 decision 12).
+    #[must_use]
+    pub fn paid_calls_per_hour(&self) -> u32 {
+        u32::try_from(self.policy.paid_calls_per_hour.get()).unwrap_or(PAID_CALLS_PER_HOUR)
+    }
+
     /// The format new documents are written in: its `policy.document_format`, HTML when left out.
     #[must_use]
     pub fn document_format(&self) -> DocumentFormat {
@@ -2367,9 +2375,12 @@ mod tests {
     }
 
     #[test]
-    fn defaults_the_memory_cap() {
+    fn defaults_the_memory_cap_and_the_paid_call_rate() {
         // 5.8: an agent's notebook holds 8,000 tokens unless the team says otherwise.
         assert_eq!(team(&a_team_wire()).policy.memory_cap_tokens, 8000);
+        // 8.6: an agent's paid calls are limited to 30 an hour under autopilot unless it says.
+        assert_eq!(team(&a_team_wire()).paid_calls_per_hour(), 30);
+        assert_eq!(team(&a_full_team_wire()).paid_calls_per_hour(), 12);
     }
 
     #[test]
@@ -2387,6 +2398,8 @@ mod tests {
             ("/policy/max_iterations", json!(101)),
             ("/policy/escalation_age_hours", json!(0)),
             ("/policy/escalation_age_hours", json!(721)),
+            ("/policy/paid_calls_per_hour", json!(0)),
+            ("/policy/paid_calls_per_hour", json!(1001)),
             ("/policy/memory_cap_tokens", json!(499)),
             ("/policy/memory_cap_tokens", json!(16001)),
             ("/budgets/daily_usd", json!(0)),

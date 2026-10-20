@@ -86,6 +86,7 @@ pub fn a_full_team_wire() -> Value {
             "integration_branch": "trunk",
             "push_remotes": ["origin", "fork"],
             "readiness_attempts": 5,
+            "paid_calls_per_hour": 12,
             "permissions": { "run_commands": true, "push": false }
         },
         "rules": {
