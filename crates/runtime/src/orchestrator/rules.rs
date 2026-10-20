@@ -14,7 +14,7 @@ use catervas_core::governor::task_status::is_terminal;
 use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::marketing::plans_to_end;
-use catervas_core::team::{Agent, AgentStatus, Team, task_private_folder};
+use catervas_core::team::{Agent, AgentStatus, Team, may_build, may_review, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationAgedBody, EventBody, EventIds, EventKind, SessionStartedBodyPurpose,
     Thread, new_event,
@@ -30,10 +30,10 @@ use chrono::{DateTime, Utc};
 use super::design::{self, Stage};
 use super::integrate::{awaiting, awaiting_folder_changes, cleanup};
 use super::messages::{
-    DeliveredTask, Digest, ProductFiles, Resume, architecture_refresh_message, ceremony_message,
-    delivery_review_message, implement_message, mention_message, owners_folder_lines,
-    owners_folder_words, plan_message, posts_heard, product_refresh_message, retro_message,
-    task_cost, with_the_approved_plan, work_summary,
+    DeliveredTask, Digest, ProductFiles, Resume, architect_builds_message,
+    architecture_refresh_message, ceremony_message, delivery_review_message, implement_message,
+    mention_message, owners_folder_lines, owners_folder_words, plan_message, posts_heard,
+    product_refresh_message, retro_message, task_cost, with_the_approved_plan, work_summary,
 };
 use super::requests;
 use super::session::{SessionAsk, SessionEnd, run_session};
@@ -1915,17 +1915,25 @@ async fn ready(
     }
     // The tasks of a lane go to one builder, who waits for room rather than give them away.
     let lane_builder = transitions::lane_builder(&deps.tools.files, team, board, row, &contract)?;
-    let assignees: Vec<String> = team
-        .active_agents()
-        .filter(|agent| Role::from(agent.role) == contract.assignee_role)
-        .filter(|agent| {
-            lane_builder
-                .as_deref()
-                .is_none_or(|builder| agent.id.as_str() == builder)
-        })
-        .filter(|agent| has_room(team, board, agent, row.parent.as_ref()))
-        .map(|agent| agent.id.to_string())
-        .collect();
+    let with_room = |role: Role| -> Vec<String> {
+        team.active_agents()
+            .filter(|agent| Role::from(agent.role) == role)
+            .filter(|agent| {
+                lane_builder
+                    .as_deref()
+                    .is_none_or(|builder| agent.id.as_str() == builder)
+            })
+            .filter(|agent| has_room(team, board, agent, row.parent.as_ref()))
+            .map(|agent| agent.id.to_string())
+            .collect()
+    };
+    // The Architect builds a Developer's task only when no Developer has room (ADR 0077).
+    let mut assignees = with_room(contract.assignee_role);
+    let mut architect_builds = false;
+    if assignees.is_empty() && may_build(Role::Architect, contract.assignee_role) {
+        assignees = with_room(Role::Architect);
+        architect_builds = true;
+    }
     let Some(first) = assignees.first() else {
         return Ok(None);
     };
@@ -1937,6 +1945,25 @@ async fn ready(
         .filter(|agent| Role::from(agent.role) == contract.reviewer_role)
         .map(|agent| agent.id.to_string())
         .collect();
+    let mut initial_prompt = plan_message(
+        &contract,
+        team,
+        &assignees,
+        &reviewers,
+        lane_builder.as_deref(),
+    );
+    if architect_builds {
+        let others: Vec<String> = team
+            .active_agents()
+            .filter(|agent| {
+                may_review(Role::from(agent.role), contract.reviewer_role, Role::Architect)
+                    // One Architect offered never reviews what it builds.
+                    && !(assignees.len() == 1 && assignees[0] == agent.id.as_str())
+            })
+            .map(|agent| agent.id.to_string())
+            .collect();
+        initial_prompt.push_str(&architect_builds_message(&contract, &assignees, &others));
+    }
     let end = run_session(
         deps,
         team,
@@ -1951,13 +1978,7 @@ async fn ready(
             tools: None,
             in_reply_to: None,
             thread: None,
-            initial_prompt: plan_message(
-                &contract,
-                team,
-                &assignees,
-                &reviewers,
-                lane_builder.as_deref(),
-            ),
+            initial_prompt,
         },
     )
     .await?;
@@ -6927,6 +6948,64 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn offers_a_developers_task_to_the_architect_when_no_developer_has_room() {
+        let with_an_architect = |wire: &mut serde_json::Value| {
+            with_a_scrum_master(wire);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(catervas_core::team::fixtures::an_agent_wire(
+                    "arch",
+                    "architect",
+                ));
+        };
+        let offered = |name: &str, dev_b_busy: bool| {
+            let harness = Harness::new(name, with_an_architect);
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
+            if dev_b_busy {
+                harness.in_progress("CTV-2", "dev-b", "dev-a");
+            }
+            harness.file("CTV-3", "ready", |wire| {
+                wire["reviewer_role"] = json!("architect");
+            });
+            async move {
+                let adapter = harness.recorded(vec![reads_a_file()]);
+                let orchestrator = harness.orchestrator(adapter.clone());
+                orchestrator
+                    .tick_within(&TickScope {
+                        task_id: Some("CTV-3".parse().expect("a task id")),
+                        rules: TickRules::All,
+                    })
+                    .await
+                    .expect("the tick runs");
+                let started = adapter.started();
+                assert_eq!(
+                    (started[0].agent_id.as_str(), started[0].purpose),
+                    ("sm", SessionPurpose::Plan)
+                );
+                started[0].initial_prompt.clone()
+            }
+        };
+
+        // Both Developers are full: the Architect builds it, and a Developer may review it.
+        let message = offered("orch-architect-builds", true).await;
+        assert!(message.contains("with room for it: arch."), "{message}");
+        assert!(
+            message.contains(
+                "No Software Developer has room, so arch, an Architect, may build it, reviewed by \
+                 another Architect or a Software Developer: dev-a, dev-b."
+            ),
+            "{message}"
+        );
+
+        // A Developer has room: the Developer is offered it, the Architect is not.
+        let message = offered("orch-architect-waits", false).await;
+        assert!(message.contains("with room for it: dev-b."), "{message}");
+        assert!(!message.contains("may build it"), "{message}");
     }
 
     #[tokio::test]

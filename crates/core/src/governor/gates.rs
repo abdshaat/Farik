@@ -10,7 +10,7 @@ use crate::generated::task_contract::CatervasTaskContractKind as Kind;
 use crate::governor::done::{CriterionResult, RunBy};
 use crate::governor::task_status::is_terminal;
 use crate::governor::transition_table::TransitionActor;
-use crate::team::{changes_code, private_folder, task_private_folder};
+use crate::team::{changes_code, may_build, may_review, private_folder, task_private_folder};
 use crate::text::{distinct, listed};
 
 /// What a gate says: nothing when it passes, or every reason it does not, in the order the rules
@@ -144,7 +144,12 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     } else {
         contract.assignee_role
     };
-    if input.assignee_role != expected_assignee {
+    let builds = if contract.kind == Kind::Epic {
+        input.assignee_role == expected_assignee
+    } else {
+        may_build(input.assignee_role, expected_assignee)
+    };
+    if !builds {
         reasons.push(format!(
             "the assignee has role {} and this contract is assigned to role {expected_assignee}",
             input.assignee_role
@@ -159,7 +164,7 @@ pub fn check_assignment(contract: &TaskContract, input: &AssignmentInput) -> Gat
     } else {
         contract.reviewer_role
     };
-    if !input.solo && input.reviewer_role != expected_reviewer {
+    if !input.solo && !may_review(input.reviewer_role, expected_reviewer, input.assignee_role) {
         reasons.push(format!(
             "the reviewer has role {} and this contract is reviewed by role {expected_reviewer}",
             input.reviewer_role
@@ -1327,6 +1332,37 @@ mod tests {
             reasons(check_assignment(&a_contract(), &input)),
             [
                 "the assignee has role marketing_specialist and this contract is assigned to role software_developer"
+            ]
+        );
+    }
+
+    #[test]
+    fn lets_the_architect_build_a_developers_task_reviewed_by_a_developer() {
+        let mut input = an_assignment();
+        input.assignee_id = "arch-1".to_string();
+        input.assignee_role = Role::Architect;
+        input.reviewer_id = "dev-1".to_string();
+        input.reviewer_role = Role::SoftwareDeveloper;
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+        // Another Architect may review it too.
+        input.reviewer_id = "arch-2".to_string();
+        input.reviewer_role = Role::Architect;
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+        // Never its own work.
+        input.reviewer_id = "arch-1".to_string();
+        assert_eq!(
+            reasons(check_assignment(&a_contract(), &input)),
+            ["arch-1 cannot review its own work; name another agent as reviewer"]
+        );
+        // A Developer's task alone: a Designer's stays the Designer's.
+        let mut designs = a_contract();
+        designs.assignee_role = Role::UiUxDesigner;
+        input.reviewer_id = "dev-1".to_string();
+        input.reviewer_role = Role::SoftwareDeveloper;
+        assert_eq!(
+            reasons(check_assignment(&designs, &input)),
+            [
+                "the assignee has role architect and this contract is assigned to role ui_ux_designer"
             ]
         );
     }

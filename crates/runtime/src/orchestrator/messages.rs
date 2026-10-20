@@ -7,7 +7,7 @@ use catervas_core::folders::{DocumentFormat, with_format};
 use catervas_core::governor::done::CriterionResult;
 use catervas_core::governor::gates::Blocker;
 use catervas_core::marketing::network_name;
-use catervas_core::team::{Agent, Team, task_private_folder};
+use catervas_core::team::{Agent, Team, plain_role, task_private_folder};
 use catervas_protocol::event::{
     BudgetExhaustedBodyScope, CatervasEvent, EventBody, EventKind, HumanAcceptedBodySubject,
     NoteWrittenBodyKind, Thread,
@@ -579,6 +579,27 @@ pub(super) fn plan_message(
         reviewer_role = contract.reviewer_role,
         assignees = listed(&named(assignees)),
         reviewers = listed(&named(reviewers)),
+    )
+}
+
+/// What the plan message adds when no agent of the task's role has room and the Architect is
+/// offered it instead (ADR 0077): who may build it, and who may review it then.
+pub(super) fn architect_builds_message(
+    contract: &TaskContract,
+    architects: &[String],
+    reviewers: &[String],
+) -> String {
+    format!(
+        " No {role} has room, so {architects}, {an}, may build it, reviewed by another Architect \
+         or a Software Developer: {reviewers}.",
+        role = plain_role(contract.assignee_role),
+        architects = architects.join(", "),
+        an = if architects.len() == 1 {
+            "an Architect"
+        } else {
+            "Architects"
+        },
+        reviewers = reviewers.join(", "),
     )
 }
 
