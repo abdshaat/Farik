@@ -33,7 +33,7 @@ use chrono::{DateTime, Utc};
 use sha2::{Digest as _, Sha256};
 
 use super::design::RECORD_DESIGN_REVIEW_TOOL;
-use super::messages::{human_message, preview_address};
+use super::messages::{human_message, preview_address, preview_not_started};
 use super::verify::{append, append_stamped};
 use super::{
     OrchestratorDeps, OrchestratorError, TRIAGE_MODEL, repository_refused, task_repository_of,
@@ -436,7 +436,17 @@ async fn give_browser(
     };
     let running = match open_preview(deps, team, contract, ids, &ask.cwd, &preview).await? {
         Ok(running) => running,
-        Err(error) => return preview_failed(deps, team, contract, spec, ids, &error).map(Err),
+        Err(error) => {
+            if first_try_of_a_designer(deps, team, ask, contract, &error) {
+                let why = crate::preview::PreviewEnv::read(deps.tools.files.root())
+                    .map_or_else(|| error.to_string(), |env| env.hide(&error.to_string()));
+                let first_line = why.lines().next().unwrap_or_default().trim_end_matches(':');
+                spec.initial_prompt
+                    .push_str(&preview_not_started(first_line));
+                return Ok(Ok(None));
+            }
+            return preview_failed(deps, team, contract, spec, ids, &error).map(Err);
+        }
     };
     spec.initial_prompt
         .push_str(&preview_address(running.port(), &preview.path));
@@ -626,6 +636,42 @@ fn denied_tools(server: &CustomServer) -> impl Iterator<Item = String> + '_ {
 #[derive(serde::Serialize, serde::Deserialize)]
 struct Prepared {
     key: String,
+}
+
+/// Whether a designer's explore or implement session may go on without its preview: it failed to
+/// prepare or start, and the task branch has no commit of its own, so the app may not exist yet.
+/// Every later failure escalates.
+fn first_try_of_a_designer(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    contract: &TaskContract,
+    error: &PreviewError,
+) -> bool {
+    if ask.agent.role != RoleWire::UiUxDesigner
+        || !matches!(
+            ask.purpose,
+            SessionPurpose::Explore | SessionPurpose::Implement
+        )
+        || !matches!(
+            error,
+            PreviewError::Prepare { .. } | PreviewError::NeverAnswered { .. }
+        )
+    {
+        return false;
+    }
+    let Ok(repository) = task_repository_of(deps, team, contract) else {
+        return false;
+    };
+    let base = catervas_store::git::task_base(
+        &repository.git,
+        &repository.integration_branch,
+        &contract.id,
+    );
+    repository
+        .git
+        .commit_count(&base, &catervas_core::branch::task_branch(contract))
+        == Ok(0)
 }
 
 /// Prepares and starts the task's preview for a session, off the async workers: `prepare` is
@@ -2426,6 +2472,72 @@ mod tests {
         );
     }
 
+    /// One commit on `CTV-1`'s branch, so that the task is past its first try.
+    fn with_a_commit(harness: &Harness) {
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("done.txt"), "").expect("done.txt is written");
+        harness
+            .project
+            .deps
+            .git
+            .commit(&worktree, "Add done.txt", &["done.txt".to_string()])
+            .expect("done.txt is committed");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn builds_without_a_preview_before_the_first_commit() {
+        use crate::preview::PreviewError;
+        use crate::preview::fixtures::FakePreviews;
+
+        for (name, committed) in [("preview-first-try", false), ("preview-second-try", true)] {
+            let mut harness = Harness::new(name, browsing);
+            harness.previews = Arc::new(FakePreviews::failing(PreviewError::Prepare {
+                tail: "npm error The `npm ci` command needs a package-lock.json".to_string(),
+            }));
+            harness.in_progress("CTV-1", "iris", "ada");
+            if committed {
+                with_a_commit(&harness);
+            }
+            let adapter = harness.recorded(vec![crate::recorded::fixtures::reads_a_file()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            let deps = &orchestrator.deps;
+            let team = deps.tools.files.read_team().expect("the team");
+            let contract = deps
+                .tools
+                .files
+                .read_contract(&"CTV-1".parse().expect("an id"))
+                .expect("the contract");
+
+            run_session(deps, &team, exploring(&harness, &team, &contract))
+                .await
+                .expect("a preview that fails is an answer");
+
+            let raised = harness.events(&[EventKind::EscalationRaised]);
+            if committed {
+                assert_eq!(raised.len(), 1, "a later failure escalates as before");
+                assert!(adapter.started().is_empty(), "no session starts");
+            } else {
+                assert!(raised.is_empty(), "no escalation: {raised:?}");
+                let started = adapter.started();
+                assert_eq!(started.len(), 1, "the session runs");
+                assert!(
+                    started[0].initial_prompt.contains(
+                        "The preview did not start (the preview's prepare failed); \
+                         this task has no commits yet, so build without it and run the app \
+                         yourself when its entry point exists."
+                    ),
+                    "{}",
+                    started[0].initial_prompt
+                );
+                assert_ne!(
+                    harness.row("CTV-1").status,
+                    catervas_core::contract::TaskStatus::Escalated
+                );
+            }
+        }
+    }
+
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn escalates_a_preview_that_fails() {
@@ -2460,6 +2572,7 @@ mod tests {
             let mut harness = Harness::new(name, browsing);
             harness.previews = Arc::new(FakePreviews::failing(error));
             harness.in_progress("CTV-1", "iris", "ada");
+            with_a_commit(&harness);
             let adapter = harness.recorded(Vec::new());
             let orchestrator = harness.orchestrator(adapter.clone());
             let deps = &orchestrator.deps;
@@ -2508,6 +2621,7 @@ mod tests {
         }));
         harness.previews = previews.clone();
         harness.in_progress("CTV-1", "iris", "ada");
+        with_a_commit(&harness);
         let adapter = harness.recorded(Vec::new());
         let orchestrator = harness.orchestrator(adapter.clone());
         let deps = &orchestrator.deps;

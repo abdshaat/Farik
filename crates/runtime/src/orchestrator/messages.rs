@@ -1234,6 +1234,15 @@ pub(super) fn preview_address(port: u16, path: &str) -> String {
     format!("\n\nThe app's preview is at http://localhost:{port}{path}.")
 }
 
+/// What a designer is told when its preview could not start before the task has a commit:
+/// the error's first line, and that the app does not exist yet to be previewed.
+pub(super) fn preview_not_started(first_line: &str) -> String {
+    format!(
+        "\n\nThe preview did not start ({first_line}); this task has no commits yet, so build \
+         without it and run the app yourself when its entry point exists."
+    )
+}
+
 /// An implement session's message with the plan that was approved, an agent's words
 /// and so untrusted, after it.
 pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {

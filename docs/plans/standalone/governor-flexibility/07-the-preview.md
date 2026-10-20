@@ -25,7 +25,7 @@ Files: `crates/runtime/src/transitions.rs`, `crates/runtime/src/preview.rs`
 
 Files: `crates/runtime/src/orchestrator/session.rs` (and the explore/implement prompt in `messages.rs`)
 - `builds_without_a_preview_before_the_first_commit` (session.rs, next to the tests asserting `EscalationRaisedBodyReason::Preview`) — a designer task with no commits on its branch and a failing prepare: the session runs, no `escalation.raised` is recorded, and its prompt contains "The preview did not start". The same with one commit on the branch escalates as before.
-- [ ] `fix(runtime): a designer's first try starts without a preview that cannot exist yet`
+- [x] `fix(runtime): a designer's first try starts without a preview that cannot exist yet`
 
 ### Task 32: the spec says it
 
