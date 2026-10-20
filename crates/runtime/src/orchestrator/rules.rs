@@ -1754,12 +1754,12 @@ fn resume(
     }))
 }
 
-/// Merges the integration branch into the task's worktree before a build session, when the branch
+/// Merges the integration branch into the task's worktree before a build or review session, when the branch
 /// lacks commits of it (ADR 0079): an agent cannot run git, so nothing else brings in what landed
 /// on `main` while it worked. The merge commit is the record. A merge that conflicts is aborted
 /// and answers the branch and the files, for the prompt to say; a merge in progress, a worktree
 /// that is not there, or a refusal for another reason leaves the branch as it is.
-fn bring_up_to_date(
+pub(super) fn bring_up_to_date(
     deps: &OrchestratorDeps,
     team: &Team,
     contract: &TaskContract,
@@ -4122,6 +4122,31 @@ mod tests {
         assert_eq!(adapter.started().len(), 1);
         git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
         assert!(worktree.join("from_main.txt").is_file());
+        let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
+        assert_eq!(merges, "chore: bring up to date with main");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn brings_a_task_up_to_date_with_main_before_its_review() {
+        let harness = Harness::new("orch-up-to-date-review", |_| {});
+        harness.verifying("CTV-1");
+        let repo = harness.project.repo.path.clone();
+        std::fs::write(repo.join("from_main.txt"), "main moved\n").expect("written");
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-m", "main gains a file"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+
+        let worktree = harness.worktree("CTV-1");
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+        git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
         let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
         assert_eq!(merges, "chore: bring up to date with main");
     }

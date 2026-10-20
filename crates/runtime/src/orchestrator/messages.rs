@@ -1120,18 +1120,25 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
             untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
         );
     }
-    if let Some((into, paths)) = &resume.behind {
-        message = format!(
-            "{message}\n\nThe branch is behind {into} and merging it conflicts in {}; work from \
-             the branch as it is.",
-            untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
-        );
+    if let Some(behind) = &resume.behind {
+        message = with_the_branch_behind(&message, behind);
     }
     // What happened to the agent's posts comes last, after the rest.
     for heard in &resume.posts {
         message = format!("{message}\n\n{heard}");
     }
     message
+}
+
+/// `message` with the sentence that the task's branch is behind `into` and merging it conflicts in
+/// the files, for a session to work from the branch as it is (ADR 0079).
+pub(super) fn with_the_branch_behind(message: &str, behind: &(String, Vec<String>)) -> String {
+    let (into, paths) = behind;
+    format!(
+        "{message}\n\nThe branch is behind {into} and merging it conflicts in {}; work from \
+         the branch as it is.",
+        untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
+    )
 }
 
 /// The UI/UX Designer's `explore` session's message (ADR 0026): read the task's screens, then

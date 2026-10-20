@@ -31,7 +31,7 @@ Files: `apps/web/src/pages/HelpNeeded.tsx`, `HelpNeeded.test.tsx`
 
 Files: `crates/runtime/src/orchestrator/rules.rs`, `messages.rs` (verify prompt)
 - `brings_a_task_up_to_date_with_main_before_its_review` (ignored, git) — a task in verifying whose worktree lacks main's newest commit; after one tick the verify session ran and main's commit is an ancestor of the worktree's HEAD.
-- [ ] `fix(runtime): a review starts from a branch brought up to date with main`
+- [x] `fix(runtime): a review starts from a branch brought up to date with main`
 
 ### Task 24: the owner's answers stay with the task
 
