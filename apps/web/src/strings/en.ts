@@ -26,7 +26,7 @@ export const en = {
 	noPage: "No page here",
 	noPageHome: "Go to the start page",
 	linkUsed:
-		"This start link was already used. Each link works once, so run catervas serve again for a new one.",
+		"This start link was already used. In your project folder, run catervas open for a new one.",
 	noSessionTitle: "Open Catervas from its start link",
 	noSessionBody:
 		"For your safety, this page only works when opened from the link Catervas gives you. Each link works once, so an old one from your history will not open it.",
@@ -196,6 +196,7 @@ export const en = {
 	browserNote:
 		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Catervas makes the folder and sets up git for you.",
 	opening: "Opening your project…",
+	openingCatervas: "Opening Catervas…",
 	changeProject: "Change project…",
 	changeShort: "Change",
 	projectWord: "project",
@@ -416,7 +417,7 @@ export const en = {
 	teamCostTitle: "What a team like this costs",
 	teamCostNote: "It is a guide, not a limit.",
 	teamCostDesigner:
-		"{designer} uses the same model as {developer}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
+		"{designer} works with {model}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
 	teamCostLimitBefore: "Set a limit in ",
 	teamCostLimitAfter: ".",
 	agentBack: "Back to your team",
@@ -782,7 +783,9 @@ export const en = {
 	helpNothing: "There is nothing to choose here yet.",
 	helpTried: "What {name} tried",
 	helpNow: "What should happen now?",
-	helpNote: "Add a note for {name} (optional)",
+	helpNote: "Add a note for {name}",
+	helpNoteNeeded: "Write what {name} should know",
+	helpCancelled: "Cancelled by the owner",
 	helpWaiting: "Waiting since",
 	helpSpent: "Spent",
 	helpSpentOf: "{spent} of {max}",
@@ -907,6 +910,7 @@ export const en = {
 	filterCancelled: "Show cancelled",
 	laneTabs: "Lanes",
 	laneEmpty: "Nothing here right now.",
+	boardWaitsOn: "Waits on {tasks}",
 	boardShowAll: "Show all {count}",
 	boardShowFewer: "Show fewer",
 	boardThinking: "{name} · {role} — thinking",
@@ -1041,6 +1045,7 @@ export const en = {
 	taskRisk: "Risk",
 	taskLimit: "Spending limit",
 	taskLimitFor: "{usd} for this task",
+	taskNoBranchYet: "No changes yet: the work starts when it is assigned.",
 	taskChangesLine: "{size}, on the branch {branch}.",
 	privateChanges:
 		"This task changed the {role}’s private files, which are not shown in the browser. Its reviewer reads each changed file beside the copy taken when the task started.",
@@ -1060,6 +1065,9 @@ export const en = {
 	riskHighWhy: "High. The team may accept it without you, as for any task.",
 	taskAdded: "Added on {day}.",
 	taskStop: "Stop work on this task",
+	taskChangePlan: "Change the plan",
+	taskChangePlanTitle: "Send {title} back to its plan?",
+	taskChangePlanWhy: "What should change?",
 	taskCancel: "Cancel this task",
 	taskCancelTitle: "Cancel {title}?",
 	taskCancelWhy: "Why cancel it?",
@@ -1072,6 +1080,7 @@ export const en = {
 	meetingPostsOne: "1 post on {day}",
 	costsToday: "Today the team has spent {spent}, with no daily limit set.",
 	costsTodayOf: "Today the team has spent {spent}, of {limit} a day.",
+	costsCancelled: "{spent} of it went to cancelled tasks.",
 	costsSetLimit: "Set a daily limit",
 	limitSave: "Save the limit",
 	costsByAgent: "By agent",
@@ -1147,7 +1156,7 @@ export const en = {
 	draftPlanSent:
 		"Drafting it as {id}. Your team starts building once it is done.",
 	channelIntro:
-		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
+		"Where the team talks. A message to no one goes to {name}. To ask for work, use the request box on Today.",
 	channelMessages: "Messages",
 	channelYou: "You",
 	channelWhy: "Why: {reason}",
@@ -2630,7 +2639,6 @@ export const en = {
 	goalPlanning: "{name} is planning the next steps",
 	goalUnderWay: "{open} tasks under way, {done} done",
 	goalUnderWayOne: "1 task under way, {done} done",
-	goalWaitingOnYou: "Waiting on you ({count})",
 	goalPaused: "Paused",
 	goalNextRound: "The next steps are planned when the team is free",
 	goalPlannerOff: "{name} is {status}",

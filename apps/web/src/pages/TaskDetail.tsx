@@ -8,6 +8,7 @@ import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
+import { ChangePlan } from "./dialogs/ChangePlan.tsx";
 import {
 	approvesPlan,
 	dollars,
@@ -180,7 +181,10 @@ export function TaskDetail() {
 	const { data: plan } = useQuery<{ contract: Detail }>("contract.get", task);
 	const { data: history } = useQuery<{ events: Event[] }>("task.history", task);
 	const { data: checked } = useQuery<{ checks: Check[] }>("task.checks", task);
-	const { data: diff } = useQuery<Diff>("task.diff", task);
+	const { data: shownDiff, error: diffError } = useQuery<Diff>(
+		"task.diff",
+		task,
+	);
 	const { data: tries } = useQuery<Tries>("task.tries", task);
 	const { data: waiting } = useQuery<{ waiting: Waiting[] }>(
 		"waiting.list",
@@ -198,13 +202,14 @@ export function TaskDetail() {
 	}>("task.get", task);
 	const [tab, setTab] = useState<Tab>("summary");
 	const [cancelling, setCancelling] = useState(false);
+	const [changingPlan, setChangingPlan] = useState(false);
 	const { busy, refusal, send } = useCommand(() => {});
 	if (
 		!team ||
 		!plan ||
 		!history ||
 		!checked ||
-		!diff ||
+		(!shownDiff && !diffError) ||
 		!tries ||
 		!waiting ||
 		!activity ||
@@ -222,6 +227,9 @@ export function TaskDetail() {
 			</div>
 		);
 
+	// A task with no branch yet answers `task.diff` with an error: its page opens all the same.
+	const noBranch = !shownDiff;
+	const diff: Diff = shownDiff ?? { diff: "", files: [], added: 0, removed: 0 };
 	const contract = plan.contract;
 	const events = history.events;
 	const agents = team.team.agents;
@@ -598,6 +606,11 @@ export function TaskDetail() {
 					))}
 				</ul>
 			</>
+		) : noBranch ? (
+			<>
+				<h2>{t("tabChanges")}</h2>
+				<p>{t("taskNoBranchYet")}</p>
+			</>
 		) : (
 			<>
 				<h2>{t("tabChanges")}</h2>
@@ -817,7 +830,7 @@ export function TaskDetail() {
 						)}
 					</section>
 				)}
-				{(session || cancellable) && (
+				{(session || cancellable || contract.status === "ready") && (
 					<div className={page.stack}>
 						{session && (
 							<Button
@@ -830,6 +843,11 @@ export function TaskDetail() {
 								}
 							>
 								{t("taskStop")}
+							</Button>
+						)}
+						{contract.status === "ready" && (
+							<Button onClick={() => setChangingPlan(true)}>
+								{t("taskChangePlan")}
 							</Button>
 						)}
 						{cancellable && (
@@ -845,6 +863,13 @@ export function TaskDetail() {
 					</p>
 				)}
 			</aside>
+			{changingPlan && (
+				<ChangePlan
+					id={id}
+					title={contract.title}
+					onClose={() => setChangingPlan(false)}
+				/>
+			)}
 			{cancelling && (
 				<CancelTask
 					id={id}

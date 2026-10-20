@@ -11,6 +11,7 @@ import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { MarketingPlan } from "../pages/MarketingPlan.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
+import { Opening } from "../pages/Opening.tsx";
 import { PlanEditor } from "../pages/PlanEditor.tsx";
 import { PlanPage } from "../pages/PlanPage.tsx";
 import { ProcurementMailbox } from "../pages/ProcurementMailbox.tsx";
@@ -51,6 +52,7 @@ export function App() {
 	const [theme, setTheme] = useTheme();
 	// Without a session, or while Catervas is not answering, every path shows why.
 	if (status === "no_session" || status === "lost") return <Connect />;
+	if (status === "checking" || status === "connecting") return <Opening />;
 	return (
 		<Routes>
 			{/* With a live session, the connect page has nothing to say: a used link goes home. */}

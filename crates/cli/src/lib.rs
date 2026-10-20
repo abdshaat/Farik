@@ -46,6 +46,9 @@ pub mod log;
 pub mod marketing;
 /// The harness metrics.
 pub mod metrics;
+/// `catervas open`: a new start link for a browser.
+#[cfg(unix)]
+mod open;
 pub mod order;
 pub mod pipeline;
 /// Text as a terminal may be given it.
@@ -447,6 +450,9 @@ enum Commands {
         #[command(subcommand)]
         command: SkillCommands,
     },
+    /// Print a new link that opens the web app in a browser, from the running `catervas serve`.
+    #[cfg(unix)]
+    Open,
     /// Drive the team until nothing needs doing, a stop, or Ctrl-C (8.2).
     Run,
     /// Drive the team and keep driving when the board is idle, until a stop or Ctrl-C (8.1).
@@ -1292,6 +1298,8 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
                 } => skill::confirm(&project, name, &whose.whom(), hash, *replace, io),
             })
         }
+        #[cfg(unix)]
+        Commands::Open => open_project(&io.cwd, now).and_then(|project| open::open(&project)),
         #[cfg(unix)]
         Commands::Connector { .. } => unreachable!("a connector command returned above"),
         Commands::Hook { .. }

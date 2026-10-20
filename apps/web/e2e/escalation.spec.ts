@@ -58,6 +58,10 @@ test("an escalation is answered from Today in one action", async ({ page }) => {
 		for (const right of rights) expect(right).toBeLessThanOrEqual(360);
 		await wide(page);
 
+		// Giving room needs no note (ADR 0079): only an answer does.
+		await expect(
+			page.getByRole("button", { name: "Give it more room" }),
+		).toBeEnabled();
 		await page.getByRole("button", { name: "Give it more room" }).click();
 		await expect(page).toHaveURL(`${new URL(serve.url).origin}/`);
 		await expect(
@@ -69,7 +73,9 @@ test("an escalation is answered from Today in one action", async ({ page }) => {
 			{ body: { sessions: 4, cost_usd: 5, granted_by: "human" } },
 		]);
 		expect(log.filter((e) => e.kind === "escalation.resolved")).toMatchObject([
-			{ body: { to: "in_progress", resolved_by: "human" } },
+			// The budget counts work sessions only (ADR 0079), so the fourth is the review, and the
+			// task goes back to the review it was escalated from.
+			{ body: { to: "verifying", resolved_by: "human" } },
 		]);
 
 		await expect

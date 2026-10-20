@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("the rail's Connected dot outside 'open'", () => {
-	it.each(["connecting", "closed"])("stays_still_while_%s", async (status) => {
+	it.each(["reopening", "closed"])("stays_still_while_%s", async (status) => {
 		media.set("(min-width: 1024px)", true);
 		state.status = status;
 		const { socket } = await renderApp("/team");

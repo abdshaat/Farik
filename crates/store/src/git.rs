@@ -653,6 +653,28 @@ impl Git {
         })
     }
 
+    /// As `commit_count`, for the commits made on `head`'s own line: no merge commit, and none that a
+    /// merge brought in (`--first-parent`), main's own among them.
+    ///
+    /// # Errors
+    ///
+    /// As `commit_count`.
+    pub fn commit_count_no_merges(&self, base: &str, head: &str) -> Result<u32, GitError> {
+        self.require_repository()?;
+        let range = format!("{base}..{head}");
+        let counted = self.at_root(&[
+            "rev-list",
+            "--count",
+            "--no-merges",
+            "--first-parent",
+            &range,
+        ])?;
+        counted.parse().map_err(|_| GitError::CommandFailed {
+            command: format!("rev-list --count --no-merges --first-parent {range}"),
+            stderr: format!("answered {counted:?}, which is not a number of commits"),
+        })
+    }
+
     /// Every entry under `dir` as `rev` has it, at any depth, in git's order; a directory `rev`
     /// does not hold gives none.
     ///

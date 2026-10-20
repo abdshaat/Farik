@@ -22,15 +22,26 @@ export function renderMessageText(
 ): ReactNode {
 	const parts: ReactNode[] = [];
 	let at = 0;
+	let marked = false;
 	for (const match of text.matchAll(TOKEN)) {
 		const [whole, before = "", id] = match;
 		const start = match.index + before.length;
 		let shown: ReactNode;
-		if (id === undefined)
+		if (id === undefined) {
+			// Part of a file name ("plans/CTV-1.html"), not a task.
+			const end = match.index + whole.length;
+			if (
+				text[start - 1] === "/" ||
+				/^\.[A-Za-z]/.test(text.slice(end, end + 2))
+			)
+				continue;
+			// "waiting on you" once per message: the first link to a waiting task.
+			const first: boolean = !marked && waiting.some((w) => w.taskId === whole);
+			marked ||= first;
 			shown = (
 				<span key={start}>
 					<Link to={`/tasks/${whole}`}>{whole}</Link>
-					{waiting.some((w) => w.taskId === whole) && (
+					{first && (
 						<span className={styles.waiting}>
 							{" "}
 							({t("channelWaitingOnYou")})
@@ -38,7 +49,7 @@ export function renderMessageText(
 					)}
 				</span>
 			);
-		else {
+		} else {
 			const who = team.find((a) => a.id === id);
 			const name =
 				id === "human" ? t("channelAtYou") : who && `@${who.displayName}`;

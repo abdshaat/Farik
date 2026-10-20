@@ -610,7 +610,7 @@ fn shows_a_tasks_events_cost_and_children() {
         Some(("pm", "s-1")),
         "cost.recorded",
         &json!({
-            "purpose": "plan",
+            "purpose": "implement",
             "model_id": "claude-opus-5",
             "usage": {
                 "input_tokens": 1000,

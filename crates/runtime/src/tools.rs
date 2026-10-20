@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::{Arc, LazyLock};
 
-use catervas_core::contract::{Role, TaskContract, TaskId};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::DocumentFormat;
 use catervas_core::governor::permissions::{
     AgentGrants, PermissionTier, SessionConnector, ToolCallContext, ToolCallRequest,
@@ -632,6 +632,33 @@ impl Call<'_> {
             .task_id
             .as_ref()
             .ok_or_else(|| Refusal::NoTask.into())
+    }
+
+    /// The task a call acts on: the session's own, or with `task_id` a waiting child of the epic
+    /// the session is about (ADR 0079, second list). Only a Product Manager session whose own task
+    /// is an epic may name one, and only a child of that epic in `draft`, `refining` or `ready`.
+    fn target(&self, task_id: Option<&str>) -> Result<TaskId, ToolError> {
+        let own = self.task()?;
+        let Some(named) = task_id else {
+            return Ok(own.clone());
+        };
+        let refused = || ToolError::InvalidInput {
+            detail: format!("task_id: {named} is not a waiting task of {}", own.as_str()),
+        };
+        let named: TaskId = named.parse().map_err(|_| refused())?;
+        if self.role() != Role::ProductManager || self.row(own)?.kind != TaskKind::Epic {
+            return Err(refused());
+        }
+        let child = self.row(&named).map_err(|_| refused())?;
+        let waiting = matches!(
+            child.status,
+            TaskStatus::Draft | TaskStatus::Refining | TaskStatus::Ready
+        );
+        if child.parent.as_ref() == Some(own) && waiting {
+            Ok(named)
+        } else {
+            Err(refused())
+        }
     }
 
     /// The contract of `task`, with the status, people, and iteration the board gives it: the log

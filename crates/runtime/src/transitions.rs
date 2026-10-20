@@ -611,8 +611,9 @@ impl Transitions {
                     _ => None,
                 });
         }
+        // The words stand alone: the gate's name tells the owner nothing. With none, it is all there is.
         Ok(match words.as_deref().map(str::trim) {
-            Some(words) if !words.is_empty() => format!("{gate}: {words}"),
+            Some(words) if !words.is_empty() => words.to_string(),
             _ => gate,
         })
     }
@@ -1532,6 +1533,7 @@ fn gate_wire(gate: GateId) -> GateWire {
         GateId::GovernorEscalation => GateWire::GovernorEscalation,
         GateId::HumanRejection => GateWire::HumanRejection,
         GateId::PullRequestConflicted => GateWire::PullRequestConflicted,
+        GateId::DependencyCancelled => GateWire::DependencyCancelled,
     }
 }
 
@@ -4274,7 +4276,7 @@ mod tests {
             panic!("an escalation.raised");
         };
         assert_eq!(escalation.reason, EscalationRaisedBodyReason::BlockerAge);
-        assert_eq!(escalation.detail, "blocked_age: no key");
+        assert_eq!(escalation.detail, "no key");
     }
 
     #[test]
@@ -4319,10 +4321,7 @@ mod tests {
             escalation.reason,
             EscalationRaisedBodyReason::ExplicitRequest
         );
-        assert_eq!(
-            escalation.detail,
-            "governor_escalation: C1: git could not read the diff"
-        );
+        assert_eq!(escalation.detail, "C1: git could not read the diff");
     }
 
     #[test]
@@ -4752,10 +4751,7 @@ mod tests {
         let escalations = project.events("CTV-2", &[EventKind::EscalationRaised]);
         let escalation = escalation_body(&escalations[0]);
         assert_eq!(escalation.reason, EscalationRaisedBodyReason::Iterations);
-        assert_eq!(
-            escalation.detail,
-            "iteration_limit_reached: the form has no labels"
-        );
+        assert_eq!(escalation.detail, "the form has no labels");
     }
 
     /// A `human.accepted` of `subject` about `task`, with `message` when given.
@@ -5481,6 +5477,46 @@ mod tests {
             line.envelope.ids.task_id,
             Some("CTV-1".parse().expect("a task id"))
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn never_names_the_gate_in_an_escalation() {
+        let project = Project::new("no-gate-name", a_team(|_| {}), at(9));
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+            at(9),
+        );
+        let outcome = project.ask(
+            &a_request(
+                "CTV-1",
+                TaskStatus::Escalated,
+                TransitionActor::Governor,
+                None,
+            ),
+            &TransitionAsk {
+                preview_failed: Some("the preview's prepare failed".to_string()),
+                ..TransitionAsk::default()
+            },
+        );
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+
+        let escalations = project.events("CTV-1", &[EventKind::EscalationRaised]);
+        let escalation = escalation_body(&escalations[0]);
+        assert_eq!(escalation.reason, EscalationRaisedBodyReason::Preview);
+        assert_eq!(escalation.detail, "the preview's prepare failed");
+        let (line, _) = system_line(&project, "CTV-1");
+        let text = &posted_body(&line).text;
+        assert!(!text.contains("governor_escalation"), "{text}");
+        assert!(text.ends_with(": the preview's prepare failed"), "{text}");
     }
 
     #[test]

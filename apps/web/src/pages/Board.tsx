@@ -169,6 +169,18 @@ export function Board() {
 					<span className={styles.meta} title={meta}>
 						{meta}
 					</span>
+					{task.waitsOn && task.waitsOn.length > 0 && (
+						<span className={styles.meta}>
+							{t("boardWaitsOn", {
+								tasks: task.waitsOn
+									.map(
+										(wait) =>
+											`${wait.taskId} (${statusWord(wait.status).toLowerCase()})`,
+									)
+									.join(", "),
+							})}
+						</span>
+					)}
 					{task.kind === "epic" && (
 						<span className={styles.small}>
 							{t(parts.length === 1 ? "epicPartsOne" : "epicParts")

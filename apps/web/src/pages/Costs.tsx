@@ -18,6 +18,7 @@ type Summary = {
 	dailyLimitUsd?: number | null;
 	agents: { agentId: string; todayUsd: number }[];
 	conversationsTodayUsd: number;
+	cancelledTodayUsd?: number;
 };
 type Words = { words: string; usd: number };
 type Metrics = {
@@ -89,6 +90,14 @@ export function Costs() {
 								.replace("{limit}", dollars(summary.dailyLimitUsd))
 						: t("costsToday").replace("{spent}", today)}
 				</p>
+				{summary.cancelledTodayUsd ? (
+					<p>
+						{t("costsCancelled").replace(
+							"{spent}",
+							dollars(summary.cancelledTodayUsd),
+						)}
+					</p>
+				) : null}
 				<Button onClick={() => setLimiting(true)}>{t("costsSetLimit")}</Button>
 			</div>
 			<section className={styles.section} aria-labelledby="by-agent">

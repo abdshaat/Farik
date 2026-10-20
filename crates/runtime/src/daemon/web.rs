@@ -361,6 +361,19 @@ pub(super) async fn connect(
     }
 }
 
+/// `POST /connect/code`, from the token holder: a new one-time code for `/connect`, answered
+/// `{ "code" }`, so that `catervas open` can print a link for a browser that has none. A daemon
+/// without the browser routes answers 404.
+pub(super) async fn connect_code(State(state): State<Arc<DaemonState>>) -> Response {
+    let Some(web) = state.web() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    match web.codes.issue() {
+        Ok(code) => Json(serde_json::json!({ "code": code })).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
 /// Every session secret a request's `Cookie` header carries: a browser can send the name twice,
 /// a stale cookie beside the live one, and either may be the one that opens. One cookie needs no
 /// library: the header is `name=value` pairs split by `;`.
@@ -806,24 +819,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
             let events = deps.log.read(&query).map_err(|error| internal(&error))?;
             Ok(json!({ "events": events.iter().map(event_to_value).collect::<Vec<_>>() }))
         }
-        "tasks.list" => {
-            let board = deps.projections.board().map_err(|error| internal(&error))?;
-            let team = deps.files.read_team().map_err(|error| internal(&error))?;
-            let mut tasks = Vec::with_capacity(board.len());
-            for task in &board {
-                let mut wire = task_wire(task);
-                // A UI change in review says where its design review stands, for the board's card.
-                // One that cannot be read (its contract or branch) leaves only its card without
-                // the state, not the whole board blank; the task's page says what failed.
-                if task.status == TaskStatus::Verifying
-                    && let Ok((true, review)) = deps.transitions.design_review(&team, &task.task_id)
-                {
-                    wire["design_review_state"] = json!(review.state);
-                }
-                tasks.push(wire);
-            }
-            Ok(json!({ "tasks": tasks }))
-        }
+        "tasks.list" => tasks_list(deps),
         "task.get" => {
             let asked = params["task_id"].as_str().unwrap_or_default();
             let missing = || Failure::new(NOT_FOUND, format!("there is no task {asked}"));
@@ -1067,6 +1063,61 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
     })
     .await
     .unwrap_or_else(|error| Err(Failure::new(INTERNAL_ERROR, error.to_string())))
+}
+
+/// `tasks.list`: the board's rows, each with what it waits on and, in review, its design review.
+fn tasks_list(deps: &crate::tools::ToolDeps) -> Result<Value, Failure> {
+    let board = deps
+        .projections
+        .board()
+        .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?;
+    let team = deps
+        .files
+        .read_team()
+        .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?;
+    let mut tasks = Vec::with_capacity(board.len());
+    for task in &board {
+        let mut wire = task_wire(task);
+        // A UI change in review says where its design review stands, for the board's card.
+        // One that cannot be read (its contract or branch) leaves only its card without
+        // the state, not the whole board blank; the task's page says what failed.
+        if task.status == TaskStatus::Verifying
+            && let Ok((true, review)) = deps.transitions.design_review(&team, &task.task_id)
+        {
+            wire["design_review_state"] = json!(review.state);
+        }
+        if let Some(waits_on) = waits_on(deps, &board, task) {
+            wire["waits_on"] = waits_on;
+        }
+        tasks.push(wire);
+    }
+    Ok(json!({ "tasks": tasks }))
+}
+
+/// What a task not yet accepted or cancelled waits on, for its card: its contract's dependencies
+/// that are not accepted, with their statuses. `None` when it waits on nothing or its contract
+/// cannot be read, which leaves only its card without it.
+fn waits_on(
+    deps: &crate::tools::ToolDeps,
+    board: &[TaskProjection],
+    task: &TaskProjection,
+) -> Option<Value> {
+    if matches!(task.status, TaskStatus::Accepted | TaskStatus::Cancelled) {
+        return None;
+    }
+    let contract = deps.files.read_contract(&task.task_id).ok()?;
+    let waits_on: Vec<Value> = contract
+        .dependencies
+        .iter()
+        .filter_map(|dependency| {
+            board
+                .iter()
+                .find(|row| row.task_id.as_str() == dependency.as_str())
+        })
+        .filter(|row| row.status != TaskStatus::Accepted)
+        .map(|row| json!({ "task_id": row.task_id, "status": row.status }))
+        .collect();
+    (!waits_on.is_empty()).then(|| json!(waits_on))
 }
 
 /// The board's row as the wire carries it.
@@ -1318,6 +1369,33 @@ pub(super) mod tests {
         let now = daemon.state.deps().expect("a project").clock.now();
         let web = daemon.state.web().expect("the browser routes are on");
         assert!(web.sessions.verify(secret, now), "{cookie}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn issues_a_new_start_link_to_the_token_holder() {
+        let (daemon, _first) = served("web-new-code");
+        let ask = |token: Option<&str>| {
+            let mut request = Request::post("/connect/code");
+            if let Some(token) = token {
+                request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+            }
+            request.body(Body::empty()).expect("a request is built")
+        };
+
+        let refused = send(&daemon.state, ask(None)).await;
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+
+        let answer = send(&daemon.state, ask(Some(TOKEN))).await;
+        assert_eq!(answer.status(), StatusCode::OK);
+        let body: Value = serde_json::from_str(&body_text(answer).await).expect("JSON");
+        let code = body["code"].as_str().expect("a code").to_string();
+        assert!(is_hex_64(&code), "{code}");
+
+        let first = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(first.status(), StatusCode::NO_CONTENT);
+        let again = send(&daemon.state, connect(Some(ORIGIN), HOST, &code)).await;
+        assert_eq!(again.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -2186,6 +2264,38 @@ pub(super) mod tests {
         // A UI change in review says where its design review stands, so the board need not ask.
         assert_eq!(row("CTV-2")["design_review_state"], "waiting", "{listed}");
         assert_eq!(row("CTV-1").get("design_review_state"), None, "{listed}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lists_what_a_task_waits_on() {
+        let harness = Harness::new("rpc-board-waits-on", |_| {});
+        harness.file("CTV-1", "ready", |_| {});
+        harness
+            .project
+            .moved("CTV-1", "ready", "cancelled", &json!({}));
+        harness.accepted("CTV-2");
+        harness.file("CTV-3", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1", "CTV-2"]);
+        });
+        let (handle, mut socket) = driven(&harness).await;
+        let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
+        let row = |id: &str| {
+            listed["tasks"]
+                .as_array()
+                .and_then(|tasks| tasks.iter().find(|task| task["task_id"] == id))
+                .cloned()
+                .unwrap_or_else(|| panic!("{id} is listed: {listed}"))
+        };
+        // The accepted dependency is no wait; the cancelled one is, with its status.
+        assert_eq!(
+            row("CTV-3")["waits_on"],
+            json!([{ "task_id": "CTV-1", "status": "cancelled" }]),
+            "{listed}"
+        );
+        assert_eq!(row("CTV-2").get("waits_on"), None, "{listed}");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }

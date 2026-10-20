@@ -269,6 +269,39 @@ describe("team page", () => {
 		).toBeTruthy();
 	});
 
+	it("names_the_designers_own_model", async () => {
+		const { container, socket } = await renderApp("/team");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "team.get", {
+			team: {
+				...TEAM,
+				agents: [
+					agent("mira", "Mira", "product_manager", "product_manager"),
+					agent("theo", "Theo", "software_developer", "software_developer"),
+					agent("ivo", "Ivo", "ui_ux_designer", "extra-1"),
+				],
+			},
+			agents: [
+				["mira", OPUS],
+				["theo", { id: "claude-sonnet-5-5", label: "Sonnet 5.5" }],
+				["ivo", OPUS],
+			].map(([id, model]) => ({
+				id,
+				model: { ...(model as object), effort: "high" },
+				tiers: ["read"],
+				base_tiers: ["read"],
+			})),
+			max_agents: 7,
+		});
+		await answerQuery(s, "models.list", MODELS);
+		const cost = await screen.findByRole("region", { name: en.teamCostTitle });
+		expect(
+			within(cost).getByText("Ivo works with Opus 5.5, so a day costs more."),
+		).toBeTruthy();
+		expect(container.textContent).not.toContain("the same model");
+	});
+
 	it("shows_the_designer_card_in_its_colour", async () => {
 		const { container, s } = await opened("/team", {
 			...TEAM,
@@ -323,7 +356,7 @@ describe("team page", () => {
 				.getAllByRole("listitem")
 				.map((li) => li.textContent),
 		).toEqual([
-			"Iris uses the same model as Theo, so a day costs more.",
+			"Iris works with Opus 5.5, so a day costs more.",
 			"Before changing a screen, Iris writes a plan, which costs a little too.",
 		]);
 		expect(

@@ -53,9 +53,10 @@ use crate::skills::{
 use crate::tools::ToolDeps;
 use crate::tools::folders::{LandRefusal, land};
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, contract_accepted, refusal_details, result_accepted,
-    result_awaits_human, review_passed, status_wire,
+    TransitionAsk, TransitionOutcome, contract_accepted, last_move_into, refusal_details,
+    result_accepted, result_awaits_human, review_passed, status_wire,
 };
+use catervas_core::governor::gates::return_from_block;
 
 /// Who the human is in the log.
 /// The blocker of a task whose assignee the human paused, and a paused session's stop.
@@ -530,7 +531,17 @@ fn post_message(
 ) -> Result<CommandReport, CommandError> {
     held_to_attachments(tools, &attachments)?;
     let team = tools.files.read_team().map_err(failed)?;
-    let mentions = mentions_in(&text, &team, HUMAN);
+    let mut mentions = mentions_in(&text, &team, HUMAN);
+    // A message to nobody goes to the Product Manager, the one agent of a solo team (ADR 0079).
+    if mentions.is_empty() {
+        let addressed = if team.is_solo() {
+            team.active_agents().next()
+        } else {
+            product_manager(&team)
+        };
+        mentions.extend(addressed.map(|agent| agent.id.to_string()));
+    }
+    let answers = text.clone();
     let seq = post(
         &tools.log,
         tools.clock.as_ref(),
@@ -540,7 +551,7 @@ fn post_message(
             agent_id: None,
             kind: MessageKind::Human,
             text,
-            mentions,
+            mentions: mentions.clone(),
             task_id: None,
             thread: None,
             in_reply_to: None,
@@ -552,9 +563,58 @@ fn post_message(
         ChannelError::Refused { reason } => CommandError::Invalid { detail: reason },
         other => failed(other),
     })?;
+    let mut events = vec![seq];
+    events.extend(answered_blocks(tools, &mentions, &answers)?);
     Ok(CommandReport {
         said: "posted in the channel".to_string(),
-        events: vec![seq],
+        events,
+    })
+}
+
+/// The events of the blocks a channel message answers (ADR 0079): a task `blocked` whose assignee
+/// the message mentions and whose id it names is resolved as "Answer and carry on" would, with
+/// the message as the note. A resolution the governor refuses is left; the message stands.
+fn answered_blocks(
+    tools: &ToolDeps,
+    mentions: &[String],
+    text: &str,
+) -> Result<Vec<u64>, CommandError> {
+    let board = tools.projections.board().map_err(failed)?;
+    let mut events = Vec::new();
+    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+        let mentioned = row
+            .assignee_id
+            .as_ref()
+            .is_some_and(|assignee| mentions.contains(assignee));
+        if !mentioned || !names_task(text, row.task_id.as_str()) {
+            continue;
+        }
+        let back = return_from_block(blocked_from(tools, &row.task_id)?);
+        if let Ok(report) = resolve(tools, &row.task_id, back, text, None, false) {
+            events.extend(report.events);
+        }
+    }
+    Ok(events)
+}
+
+/// The status a blocked task was in when it blocked, from its last move into `blocked`.
+fn blocked_from(tools: &ToolDeps, task_id: &TaskId) -> Result<Option<TaskStatus>, CommandError> {
+    let history = history_of(tools, task_id)?;
+    Ok(
+        last_move_into(&history, TaskStatus::Blocked).and_then(|event| match &event.body {
+            EventBody::TaskTransitioned(body) => body.from.to_string().parse().ok(),
+            _ => None,
+        }),
+    )
+}
+
+/// Whether `text` writes the task id `id` as a word of its own: `CTV-1` in "For CTV-1: go", not
+/// in "CTV-11" or "XCTV-1".
+fn names_task(text: &str, id: &str) -> bool {
+    text.match_indices(id).any(|(at, _)| {
+        let word = |c: char| c.is_alphanumeric() || c == '-';
+        !text[..at].chars().next_back().is_some_and(word)
+            && !text[at + id.len()..].chars().next().is_some_and(word)
     })
 }
 
@@ -5011,6 +5071,53 @@ mod tests {
         assert_eq!(posted[0].envelope.ids.agent_id, None);
         assert_eq!(report.events, vec![posted[0].envelope.seq]);
         assert_eq!(report.said, "posted in the channel");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn gives_an_unaddressed_message_to_the_product_manager() {
+        let harness = Harness::new("human-message-nobody", |_| {});
+        let orchestrator = an_orchestrator(&harness);
+
+        said_in_the_channel(&orchestrator, "Recreate CTV-11")
+            .await
+            .expect("the message is posted");
+
+        let posted = harness.events(&[EventKind::MessagePosted]);
+        let EventBody::MessagePosted(body) = &posted[0].body else {
+            panic!("a message");
+        };
+        assert_eq!(body.mentions, ["pm"]);
+        assert_eq!(body.text, "Recreate CTV-11");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn answers_a_block_from_the_channel() {
+        let harness = Harness::new("human-message-answers-block", |_| {});
+        harness.blocked("CTV-1", "dev-a", "dev-b");
+        let orchestrator = an_orchestrator(&harness);
+
+        // Naming the agent without the task answers nothing.
+        said_in_the_channel(&orchestrator, "@dev-a use the text below")
+            .await
+            .expect("the message is posted");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Blocked);
+        assert!(harness.events(&[EventKind::EscalationResolved]).is_empty());
+
+        said_in_the_channel(&orchestrator, "@dev-a For CTV-1: use the text below")
+            .await
+            .expect("the message is posted");
+
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+        let resolved = harness.events(&[EventKind::EscalationResolved]);
+        let [resolved] = resolved.as_slice() else {
+            panic!("one resolution: {resolved:?}");
+        };
+        let EventBody::EscalationResolved(body) = &resolved.body else {
+            panic!("a resolution");
+        };
+        assert_eq!(body.message, "@dev-a For CTV-1: use the text below");
     }
 
     #[tokio::test]

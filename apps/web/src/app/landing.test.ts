@@ -36,11 +36,11 @@ describe("landing", () => {
 		expect(landing(status({ setupPending: true }))).toBe("/setup/scan");
 		expect(landing(status({ setupPending: false }))).toBe("/");
 
-		// Before serve.status answers, "/" shows nothing and asks nothing of the project.
+		// Before serve.status answers, "/" says it is opening and asks nothing of the project.
 		const { container, socket } = await renderApp("/");
 		const s = socket as FakeSocket;
 		await waitFor(() => expect(s.calls("query").length).toBeGreaterThan(0));
-		expect(container.textContent).toBe("");
+		expect(container.textContent).toBe(en.openingCatervas);
 		expect(s.calls("query").map((q) => q.params.name as string)).toEqual([
 			"serve.status",
 		]);
@@ -56,7 +56,7 @@ describe("landing", () => {
 		expect(d.calls("query").map((q) => q.params.name as string)).toEqual([
 			"serve.status",
 		]);
-		expect(deep.container.textContent).toBe("");
+		expect(deep.container.textContent).toBe(en.openingCatervas);
 		// During setup, it goes where "/" would.
 		await answerStatus(deep.socket as FakeSocket, false, 1, {
 			setup_pending: true,

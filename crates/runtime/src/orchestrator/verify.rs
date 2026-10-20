@@ -28,9 +28,10 @@ use catervas_store::{EventQuery, Git, TaskProjection};
 use super::design::DESIGN_REVIEW_TOOLS;
 use super::messages::{
     Changes, ReviewBrief, accept_message, design_review_message, review_message,
+    with_the_branch_behind,
 };
 use super::requests;
-use super::rules::{Waiting, acted, active, spent, unavailable};
+use super::rules::{Waiting, acted, active, bring_up_to_date, spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::{
     Orchestrator, OrchestratorDeps, OrchestratorError, TickReport, repository_refused, session_dir,
@@ -648,6 +649,8 @@ async fn review(
     {
         return Ok(ran_criteria(row, ran));
     }
+    // The branch sees what the integration branch gained since the build (ADR 0079).
+    let behind = bring_up_to_date(deps, team, &contract);
     let history = history(deps, &row.task_id)?;
     let since = since_verifying(&history);
     let context = context(deps, team, &row.task_id)?;
@@ -687,7 +690,7 @@ async fn review(
         diff = diff_of(deps, team, &repository, &contract)?;
         Changes::Diff(&diff)
     };
-    let initial_prompt = review_message(&ReviewBrief {
+    let mut initial_prompt = review_message(&ReviewBrief {
         contract: &contract,
         results: &governor_results(&history, since),
         completion_note: context.done.completion_note.as_deref(),
@@ -696,6 +699,9 @@ async fn review(
         refused: &refused,
         design_review: design_review.as_deref(),
     });
+    if let Some(behind) = &behind {
+        initial_prompt = with_the_branch_behind(&initial_prompt, behind);
+    }
     let end = run_session(
         deps,
         team,

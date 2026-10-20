@@ -56,6 +56,9 @@ pub(crate) struct RequestTransitionInput {
     /// For a move into `verifying` of a task in your private folder, which has no commit to show
     /// its work: the workbooks you wrote, 1 to 20 paths in the folder, such as `books.xlsx`.
     workbooks: Option<Vec<String>>,
+    /// In an epic's session, a waiting task of that epic (`draft`, `refining` or `ready`) to move
+    /// instead of the epic.
+    task_id: Option<String>,
 }
 
 /// The most workbooks a move into `verifying` names.
@@ -152,7 +155,7 @@ pub(super) fn request_transition(
     call: &Call<'_>,
     input: RequestTransitionInput,
 ) -> Result<Value, ToolError> {
-    let task = call.task()?.clone();
+    let task = call.target(input.task_id.as_deref())?;
     let to = TaskStatus::from_str(&input.to).map_err(|_| ToolError::InvalidInput {
         detail: format!("{} is not a status", input.to),
     })?;

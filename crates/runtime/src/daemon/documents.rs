@@ -1301,7 +1301,23 @@ fn read(deps: &ToolDeps, asked: &str) -> Result<Value, Failure> {
         .find(|waiting| document.task.as_deref() == Some(waiting.task.as_str()))
     {
         let branch = DocumentSource::Branch(waiting.branch.clone());
-        let on_branch = |path: &str| version(deps, &docs, &branch, path, false);
+        // A commit whose subject names no task is still its task's work: the task's assignee is
+        // who wrote it.
+        let assignee = deps
+            .projections
+            .task(&waiting.task.parse().map_err(|_| missing())?)
+            .map_err(|e| internal(&e))?
+            .and_then(|row| row.assignee_id);
+        let on_branch = |path: &str| {
+            let mut found = version(deps, &docs, &branch, path, false)?;
+            if let (Some(assignee), Some(last)) = (&assignee, found.get_mut("last_change"))
+                && last["agent_id"].is_null()
+                && last["by_you"] == false
+            {
+                last["agent_id"] = json!(assignee);
+            }
+            Ok::<_, Failure>(found)
+        };
         return Ok(json!({
             "document": on_branch(&path)?,
             "twin": document.twin.as_deref().map(on_branch).transpose()?,
@@ -1373,6 +1389,7 @@ const FIT: &str = concat!(
     "body { margin: 0 auto; padding: 16px; max-width: 72rem; overflow-wrap: anywhere }",
     "img, svg, video, canvas { max-width: 100%; height: auto }",
     "table, pre { display: block; max-width: 100%; overflow-x: auto }",
+    "table { overflow-wrap: break-word }",
     "</style>"
 );
 
@@ -2090,6 +2107,44 @@ mod tests {
             .block_on(served(&harness, &cookie, &spec, ""));
         assert_eq!(status, 200);
         assert!(body.contains("the task's spec"), "{body}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn names_the_agent_of_a_pending_documents_task() {
+        let harness = project("files-pending-agent", "pull_request");
+        let spec = format!("{PRODUCT}/spec.html");
+        harness.project.filed("CTV-2", "in_progress", "task", None);
+        commit(&harness, "the task");
+        let branch = harness.branch("CTV-2");
+        git(&harness, &["checkout", "-b", &branch]);
+        write(&harness, &spec, "<h1>the task's spec</h1>\n");
+        // The commit's subject names no task.
+        commit(&harness, "the spec");
+        git(&harness, &["checkout", "main"]);
+        harness.project.moved(
+            "CTV-2",
+            "in_progress",
+            "accepted",
+            &json!({ "assignee": "ada", "reviewer": "pm" }),
+        );
+
+        let opened = read_path(&harness, &spec);
+
+        assert_eq!(
+            opened["document"]["last_change"]["agent_id"], "ada",
+            "{opened}"
+        );
+        assert_eq!(opened["document"]["last_change"]["by_you"], false);
+    }
+
+    #[test]
+    fn keeps_table_words_whole() {
+        let fitted = super::fit(false);
+        assert!(
+            fitted.contains("table { overflow-wrap: break-word }"),
+            "{fitted}"
+        );
     }
 
     #[test]

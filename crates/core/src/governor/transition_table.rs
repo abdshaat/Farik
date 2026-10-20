@@ -59,6 +59,9 @@ pub enum GateId {
     HumanRejection,
     /// The pull request of an accepted task no longer merges (ADR 0069).
     PullRequestConflicted,
+    /// A dependency of the ready task was cancelled, so the plan that named it is the Product
+    /// Manager's to change (ADR 0079).
+    DependencyCancelled,
 }
 
 /// A status pattern in a row: one status, or any status.
@@ -105,7 +108,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 31] = {
+pub static TRANSITION_TABLE: [TransitionRow; 33] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -247,6 +250,13 @@ pub static TRANSITION_TABLE: [TransitionRow; 31] = {
             A::Governor,
             G::PullRequestConflicted,
         ),
+        row(
+            Is(S::Ready),
+            Is(S::Refining),
+            A::Governor,
+            G::DependencyCancelled,
+        ),
+        row(Is(S::Ready), Is(S::Refining), A::Human, G::None),
         row(Any, Is(S::Escalated), A::Governor, G::GovernorEscalation),
         row(Any, Is(S::Escalated), A::Human, G::None),
         row(Any, Is(S::Cancelled), A::Human, G::None),
@@ -307,22 +317,35 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_thirty_one_distinct_rows() {
+    fn has_exactly_thirty_three_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 31);
-        assert_eq!(distinct.len(), 31);
+        assert_eq!(TRANSITION_TABLE.len(), 33);
+        assert_eq!(distinct.len(), 33);
     }
 
     #[test]
-    fn has_twenty_seven_specific_rows_and_four_any_rows() {
+    fn the_owner_sends_a_ready_task_back_to_its_plan() {
+        // ADR 0079, second list: a human move with words, gate none; the governor's own row stays.
+        assert_eq!(
+            actors_and_gates(&find_transitions(S::Ready, S::Refining)),
+            [
+                (A::Governor, G::DependencyCancelled),
+                (A::Human, G::None),
+                (A::ProductManager, G::None),
+            ]
+        );
+    }
+
+    #[test]
+    fn has_twenty_nine_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 27);
+        assert_eq!(specific, 29);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
@@ -353,7 +376,15 @@ mod tests {
                 ],
             ),
             // A task no one holds yet goes back to be re-planned (ADR 0078).
-            (S::Ready, S::Refining, &[(A::ProductManager, G::None)]),
+            (
+                S::Ready,
+                S::Refining,
+                &[
+                    (A::Governor, G::DependencyCancelled),
+                    (A::Human, G::None),
+                    (A::ProductManager, G::None),
+                ],
+            ),
             (S::Assigned, S::InProgress, &[(A::Assignee, G::None)]),
             (
                 S::InProgress,

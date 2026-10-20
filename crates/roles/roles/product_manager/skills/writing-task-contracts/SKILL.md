@@ -91,8 +91,8 @@ Include every method the team's rules require.
 
 ## 5. The Definition of Ready
 
-A contract written as sections 3 and 4 say meets the Definition of Ready. Request `ready` with `catervas_request_transition`. If the governor refuses, every failed rule is
-in the answer with what to change; fix them all and ask again. A contract that fails three times
+A contract written as sections 3 and 4 say meets the Definition of Ready. When the contract is complete, end the session: the governor checks readiness and moves it. If the governor refuses, every failed rule is
+in the next session's first message with what to change; fix them all and end the session again. A contract that fails three times
 escalates to the user. When no agent can review, ask the user to add one, an Architect or a second
 Developer; do not change the reviewer role to one nobody on the team holds. When the governor says nobody on the team holds the task's role, ask the user to add one with `catervas_ask_human`; do not give the work to a role whose job it is not.
 

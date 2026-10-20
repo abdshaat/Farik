@@ -136,7 +136,11 @@ describe("channel", () => {
 		expect(
 			await screen.findByRole("heading", { level: 1, name: en.channel }),
 		).toBeTruthy();
-		expect(screen.getByText(en.channelIntro)).toBeTruthy();
+		expect(
+			screen.getByText(
+				"Where the team talks. A message to no one goes to Mira. To ask for work, use the request box on Today.",
+			),
+		).toBeTruthy();
 		const list = screen.getByRole("list", { name: en.channelMessages });
 		const row = (text: string) =>
 			within(list).getByText(text).closest("li") as HTMLElement;

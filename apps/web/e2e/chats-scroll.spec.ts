@@ -12,11 +12,15 @@ test("the chats open at the newest message, each pane scrolling on its own, and 
 	test.setTimeout(90_000);
 	const serve = await startServe({
 		team: "pm-architect-developer",
-		// Theo's recorded reply waits three seconds before it plays.
-		transcripts: ["reply_to_a_mention"],
+		// Two recorded replies, each waiting three seconds before it plays: the Product Manager's,
+		// to the posts that name no one (ADR 0079), and Theo's.
+		transcripts: ["reply_to_a_mention", "reply_to_a_mention"],
 		paceMs: 3000,
 	});
 	try {
+		// A post that names no one goes to the Product Manager, so the team is paused while they
+		// are made, and Mira's one reply does not land among them.
+		catervas(serve.project, ["pause"]);
 		for (let n = 1; n <= 130; n++)
 			catervas(serve.project, ["say", `Line ${n}.`]);
 		await page.goto(serve.url);
@@ -66,6 +70,7 @@ test("the chats open at the newest message, each pane scrolling on its own, and 
 
 		// 3. The user's own post is followed; an agent's reply, while reading old ones, is offered.
 		const asked = "@theo can you look at the menu page?";
+		catervas(serve.project, ["resume"]);
 		catervas(serve.project, ["say", asked]);
 		// The chats list's Team row previews it too ("You: …"); the post is the one in the chat.
 		await expect(team.getByText(asked)).toBeInViewport({ ratio: 1 });
@@ -75,7 +80,7 @@ test("the chats open at the newest message, each pane scrolling on its own, and 
 		await team.evaluate((box) => {
 			box.scrollTop = 0;
 		});
-		const reply = team.getByText(REPLY);
+		const reply = team.getByText(REPLY).last();
 		await expect(
 			page.getByRole("button", { name: "New messages" }),
 		).toBeVisible({ timeout: 15_000 });
@@ -87,7 +92,7 @@ test("the chats open at the newest message, each pane scrolling on its own, and 
 		await narrow(page);
 		await page.goto(`http://127.0.0.1:${serve.port}/channel`);
 		await expect(
-			page.getByRole("region", { name: "Team" }).getByText(REPLY),
+			page.getByRole("region", { name: "Team" }).getByText(REPLY).last(),
 		).toBeInViewport({ ratio: 1 });
 		await expect(page.getByLabel("Message the team")).toBeInViewport({
 			ratio: 1,

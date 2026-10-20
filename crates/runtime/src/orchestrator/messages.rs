@@ -116,6 +116,9 @@ pub(super) struct Resume {
     /// Whether the team's documents are kept on this computer (ADR 0074), and when they are,
     /// whether the task has no branch because it changes documents only.
     pub(super) local_documents: Option<bool>,
+    /// The integration branch and the files its merge into the branch would conflict in, when
+    /// the branch is behind it and merging it was undone (ADR 0079).
+    pub(super) behind: Option<(String, Vec<String>)>,
 }
 
 /// What `agent` hears of the posts of `posts` that settled after the event numbered `since`, the
@@ -286,7 +289,8 @@ pub(super) fn breakdown_message(contract: &TaskContract, builders: usize) -> Str
     };
     format!(
         "Break the epic {epic} down: file each of its tasks with `catervas_create_task`, `parent` \
-         {epic}, within its allowed paths ({paths}) and its remaining budget.{lanes}",
+         {epic}, within its allowed paths ({paths}) and its remaining budget.{lanes}{change}",
+        change = CHANGE_A_WAITING_TASK,
         paths = contract
             .allowed_paths
             .iter()
@@ -295,6 +299,10 @@ pub(super) fn breakdown_message(contract: &TaskContract, builders: usize) -> Str
             .join(", ")
     )
 }
+
+/// What an epic's `plan` session is told about its waiting tasks (ADR 0079, second list).
+const CHANGE_A_WAITING_TASK: &str = " To change a waiting task of this epic, pass its `task_id` to \
+     `catervas_write_contract` or `catervas_request_transition`.";
 
 /// The Product Manager's message for an epic in progress with no live task and an active
 /// Architect: file the task that writes the plan at `plan`.
@@ -307,7 +315,7 @@ pub(super) fn plan_task_message(contract: &TaskContract, plan: &str, builders: u
          team has {builders} active builders (Software Developers and UI/UX Designers), so the \
          plan has no more lanes than that. No agent reviews the plan: give its task only an \
          `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and \
-         you are asked for its tasks then."
+         you are asked for its tasks then.{CHANGE_A_WAITING_TASK}",
     )
 }
 
@@ -330,7 +338,8 @@ pub(super) fn plan_tasks_message(
          The epic's tasks so far: {tasks}\n\nFile one task per planned task with \
          `catervas_create_task`, `parent` {epic}, with its `plan` {plan}, its `lane`, the planned \
          tasks it needs in `dependencies`, the plan's paths as `allowed_paths` and its constraints \
-         as `constraints`, and acceptance criteria from the epic's requirements and the spec.",
+         as `constraints`, and acceptance criteria from the epic's requirements and the spec.{change}",
+        change = CHANGE_A_WAITING_TASK,
         text = untrusted_block("plan", text, RESULTS_CAP_BYTES),
         tasks = untrusted_block("tasks", &listed, RESULTS_CAP_BYTES),
     )
@@ -464,7 +473,46 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
             _ => None,
         })
         .collect();
-    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+    let answers = owners_earlier_answers(history, since);
+    let mut told = Vec::new();
+    if !answers.is_empty() {
+        told.push(format!(
+            "The owner's answers on this task:\n{}",
+            answers.join("\n")
+        ));
+    }
+    told.extend(blocks);
+    (!told.is_empty()).then(|| told.join("\n\n"))
+}
+
+/// The owner's answers to this task's blocks and escalations that came before `since`, the start of
+/// the last session, and still belong to the task's try (from its last start out of `assigned` or
+/// `ready`): the newest three, oldest first. Those after `since` the caller tells already.
+fn owners_earlier_answers(history: &[CatervasEvent], since: u64) -> Vec<String> {
+    let try_start = history
+        .iter()
+        .rev()
+        .find(|event| {
+            matches!(&event.body, EventBody::TaskTransitioned(body)
+                if body.to.to_string() == "in_progress"
+                    && matches!(body.from.to_string().as_str(), "assigned" | "ready"))
+        })
+        .map_or(0, |event| event.envelope.seq);
+    let mut answers: Vec<String> = history
+        .iter()
+        .rev()
+        .filter(|event| event.envelope.seq > try_start && event.envelope.seq <= since)
+        .filter_map(|event| match &event.body {
+            EventBody::EscalationResolved(body) if body.resolved_by == "human" => Some(format!(
+                "The human, moving this to {}: {}",
+                body.to, body.message
+            )),
+            _ => None,
+        })
+        .take(3)
+        .collect();
+    answers.reverse();
+    answers
 }
 
 /// Whether `event` was recorded by the owner or by Catervas, not in an agent's session.
@@ -1159,11 +1207,25 @@ pub(super) fn implement_message(contract: &TaskContract, resume: &Resume) -> Str
             untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
         );
     }
+    if let Some(behind) = &resume.behind {
+        message = with_the_branch_behind(&message, behind);
+    }
     // What happened to the agent's posts comes last, after the rest.
     for heard in &resume.posts {
         message = format!("{message}\n\n{heard}");
     }
     message
+}
+
+/// `message` with the sentence that the task's branch is behind `into` and merging it conflicts in
+/// the files, for a session to work from the branch as it is (ADR 0079).
+pub(super) fn with_the_branch_behind(message: &str, behind: &(String, Vec<String>)) -> String {
+    let (into, paths) = behind;
+    format!(
+        "{message}\n\nThe branch is behind {into} and merging it conflicts in {}; work from \
+         the branch as it is.",
+        untrusted_block("conflicts", &paths.join("\n"), NOTE_CAP_BYTES)
+    )
 }
 
 /// The UI/UX Designer's `explore` session's message (ADR 0026): read the task's screens, then
@@ -1214,12 +1276,30 @@ pub(super) fn preview_address(port: u16, path: &str) -> String {
     format!("\n\nThe app's preview is at http://localhost:{port}{path}.")
 }
 
+/// What a designer is told when its preview could not start before the task has a commit:
+/// the error's first line, and that the app does not exist yet to be previewed.
+pub(super) fn preview_not_started(first_line: &str) -> String {
+    format!(
+        "\n\nThe preview did not start ({first_line}); this task has no commits yet, so build \
+         without it and run the app yourself when its entry point exists."
+    )
+}
+
 /// An implement session's message with the plan that was approved, an agent's words
 /// and so untrusted, after it.
 pub(super) fn with_the_approved_plan(message: &str, plan: &str) -> String {
     format!(
         "{message}\n\nYour plan is approved. Do what it says: {}",
         untrusted_block("plan", plan, NOTE_CAP_BYTES)
+    )
+}
+
+/// `message`, then what the owner wrote when they sent the task back to its plan (ADR 0079): their
+/// words, untrusted.
+pub(super) fn with_the_owners_words(message: &str, words: &str) -> String {
+    format!(
+        "{message}\n\nThe owner sent this back to its plan: {}",
+        untrusted_block("owner", words, NOTE_CAP_BYTES)
     )
 }
 
@@ -1470,9 +1550,9 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        Changes, Resume, ReviewBrief, breakdown_message, close_out_message, design_review_message,
-        human_message, implement_message, plan_message, plan_task_message, plan_tasks_message,
-        refine_message, retro_message, review_message,
+        CHANGE_A_WAITING_TASK, Changes, Resume, ReviewBrief, breakdown_message, close_out_message,
+        design_review_message, human_message, implement_message, plan_message, plan_task_message,
+        plan_tasks_message, refine_message, retro_message, review_message,
     };
     use super::{DeliveredTask, architecture_refresh_message, product_refresh_message};
     use crate::tools::fixtures::at;
@@ -1577,7 +1657,11 @@ mod tests {
         assert!(!alone.contains("Assign each once it is ready"), "{alone}");
         assert!(!alone.contains("lane"), "{alone}");
         let lanes = breakdown_message(&epic, 2);
-        assert!(lanes.starts_with(&alone), "{lanes}");
+        let alone_head = alone
+            .strip_suffix(CHANGE_A_WAITING_TASK)
+            .expect("a plan session is told how to change a waiting task");
+        assert!(lanes.starts_with(alone_head), "{lanes}");
+        assert!(lanes.ends_with(CHANGE_A_WAITING_TASK), "{lanes}");
         assert!(
             lanes.contains(
                 "The team has no active Architect, so plan its lanes yourself: give each task its `lane`, lanes 1 to 2, one per active builder. A lane is the tasks one builder does in order; tasks in different lanes run side by side, so their `allowed_paths` must not meet."
@@ -1599,7 +1683,7 @@ mod tests {
         }
         assert!(
             message.ends_with(
-                "No agent reviews the plan: give its task only an `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and you are asked for its tasks then."
+                "No agent reviews the plan: give its task only an `artifact` criterion that the plan exists. Catervas accepts it once the plan exists, and you are asked for its tasks then. To change a waiting task of this epic, pass its `task_id` to `catervas_write_contract` or `catervas_request_transition`."
             ),
             "{message}"
         );
@@ -1748,6 +1832,7 @@ mod tests {
             posts: Vec::new(),
             conflicts: None,
             local_documents: None,
+            behind: None,
         }
     }
 
@@ -2156,6 +2241,43 @@ mod tests {
             human_message(&history, "pm").as_deref(),
             Some("The human, approving the contract: Keep it to one file.")
         );
+    }
+
+    #[test]
+    fn keeps_the_owners_answers_for_the_whole_try() {
+        let started = json!({ "purpose": "implement", "model": "claude-opus-5", "effort": "high" });
+        let moved = |from: &str, to: &str| {
+            json!({
+                "from": from, "to": to, "actor": "governor", "requested_by": "governor",
+                "gate": "none", "effects": [], "iteration": 0
+            })
+        };
+        let answer =
+            |text: &str| json!({ "to": "in_progress", "message": text, "resolved_by": "human" });
+        let history = [
+            event(1, "task.transitioned", &moved("assigned", "in_progress")),
+            event(2, "escalation.resolved", &answer("plan text: X")),
+            event(3, "session.started", &started),
+            event(4, "task.transitioned", &moved("verifying", "rejected")),
+            event(5, "task.transitioned", &moved("rejected", "in_progress")),
+            event(6, "session.started", &started),
+        ];
+
+        let told = human_message(&history, "dev-a").expect("told");
+
+        assert!(
+            told.starts_with("The owner's answers on this task:"),
+            "{told}"
+        );
+        assert!(told.contains("plan text: X"), "{told}");
+        // An answer from an earlier try is not carried into the next.
+        let retried = [
+            event(0, "escalation.resolved", &answer("an old try")),
+            history[0].clone(),
+            event(7, "task.transitioned", &moved("ready", "in_progress")),
+            event(8, "session.started", &started),
+        ];
+        assert_eq!(human_message(&retried, "dev-a"), None);
     }
 
     /// An event of CTV-1 at `seq`, of `kind`, with `body`, in `agent`'s session `session`.

@@ -4,6 +4,7 @@
 //! missing rather than only that something is.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 use crate::contract::{Role, TaskContract, TaskStatus, wire_method};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -769,6 +770,24 @@ pub fn check_pull_request_conflicted(conflicts: &[String]) -> GateResult {
     Ok(())
 }
 
+/// The `DependencyCancelled` gate of `ready -> refining` (ADR 0079): a task the Product Manager
+/// made ready depends on a task that was cancelled, so its plan is the Product Manager's to change.
+///
+/// # Errors
+///
+/// One reason when no dependency is cancelled.
+pub fn check_dependency_cancelled(dependencies: &BTreeMap<String, TaskStatus>) -> GateResult {
+    if dependencies
+        .values()
+        .any(|status| *status == TaskStatus::Cancelled)
+    {
+        return Ok(());
+    }
+    Err(vec![
+        "no dependency of the task was cancelled, so it stays ready".to_string(),
+    ])
+}
+
 /// What the reviewer wrote when it rejected the work.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Rejection {
@@ -969,7 +988,8 @@ pub const FIELDS_THE_STORE_OWNS: [&str; 5] =
 /// it is, which the triage decided before refining started, and which epic it belongs to, which
 /// the epic's assignee set when it wrote the task. Re-triage is its own tool and its own event
 /// (`docs/SPEC.md` section 5.16); clearing `parent` here would take a task out of its epic and
-/// past the three checks the Definition of Ready makes against it.
+/// past the three checks the Definition of Ready makes against it. The Product Manager alone may
+/// repoint `parent` while the task has not started (ADR 0079).
 pub const FIELDS_FIXED_AT_CREATION: [&str; 2] = ["kind", "parent"];
 
 /// The contract's content: what the task is, written by the Product Manager, by an epic's
@@ -1082,7 +1102,13 @@ pub fn check_contract_write(
     if !stores.is_empty() {
         return Err(ContractWriteRefusal::StoresFields { fields: stores });
     }
-    let creation = within(changed_fields, &FIELDS_FIXED_AT_CREATION);
+    // The Product Manager may repoint a task that has not started (ADR 0079): `parent` is then
+    // a content field of its own, with `dependencies`.
+    let repoints = actor.kind == TransitionActor::ProductManager;
+    let creation: Vec<String> = within(changed_fields, &FIELDS_FIXED_AT_CREATION)
+        .into_iter()
+        .filter(|field| !(repoints && field == "parent"))
+        .collect();
     if !creation.is_empty() {
         return Err(ContractWriteRefusal::CreationFields { fields: creation });
     }
@@ -1094,7 +1120,10 @@ pub fn check_contract_write(
     if actor.kind != TransitionActor::Human && !humans.is_empty() {
         return Err(ContractWriteRefusal::HumansFields { fields: humans });
     }
-    let content = within(changed_fields, &FIELDS_OF_THE_CONTENT);
+    let mut content = within(changed_fields, &FIELDS_OF_THE_CONTENT);
+    if repoints && changed_fields.iter().any(|field| field == "parent") {
+        content.push("parent".to_string());
+    }
     if content.is_empty() {
         return Ok(ContractWriteOutcome::Allowed);
     }
@@ -1116,8 +1145,19 @@ pub fn check_contract_write(
     if locked {
         return Err(ContractWriteRefusal::ContractLocked);
     }
-    if frozen {
-        return Err(ContractWriteRefusal::ContractFrozen { fields: content });
+    // A `ready` task may still be repointed, and nothing else of it written.
+    let frozen_fields: Vec<String> = if repoints && status == TaskStatus::Ready {
+        content
+            .into_iter()
+            .filter(|field| !matches!(field.as_str(), "dependencies" | "parent"))
+            .collect()
+    } else {
+        content
+    };
+    if frozen && !frozen_fields.is_empty() {
+        return Err(ContractWriteRefusal::ContractFrozen {
+            fields: frozen_fields,
+        });
     }
     Ok(ContractWriteOutcome::Allowed)
 }
@@ -2634,6 +2674,10 @@ mod tests {
                 agent_id: Some("agent-1".to_string()),
             };
             for field in ["kind", "parent"] {
+                // The Product Manager repoints a task that has not started (ADR 0079).
+                if field == "parent" && kind == TransitionActor::ProductManager {
+                    continue;
+                }
                 assert_eq!(
                     check_contract_write(
                         Kind::Task,
@@ -2649,6 +2693,81 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn lets_the_product_manager_repoint_a_task_that_has_not_started() {
+        let product_manager = ContractWriteActor {
+            kind: TransitionActor::ProductManager,
+            agent_id: Some("pm-1".to_string()),
+        };
+        for field in ["dependencies", "parent"] {
+            for status in [TaskStatus::Draft, TaskStatus::Refining, TaskStatus::Ready] {
+                assert_eq!(
+                    check_contract_write(
+                        Kind::Task,
+                        status,
+                        false,
+                        &product_manager,
+                        &[field.to_string()]
+                    ),
+                    Ok(ContractWriteOutcome::Allowed),
+                    "{field} {status}"
+                );
+            }
+            assert_eq!(
+                check_contract_write(
+                    Kind::Task,
+                    TaskStatus::Assigned,
+                    false,
+                    &product_manager,
+                    &[field.to_string()]
+                ),
+                Err(ContractWriteRefusal::ContractFrozen {
+                    fields: vec![field.to_string()]
+                }),
+                "{field} assigned"
+            );
+        }
+        // The title stays frozen once the task is ready, and a lock holds the repoint.
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Ready,
+                false,
+                &product_manager,
+                &["title".to_string()]
+            ),
+            Err(ContractWriteRefusal::ContractFrozen {
+                fields: vec!["title".to_string()]
+            })
+        );
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Ready,
+                true,
+                &product_manager,
+                &["parent".to_string()]
+            ),
+            Err(ContractWriteRefusal::ContractLocked)
+        );
+        let scrum_master = ContractWriteActor {
+            kind: TransitionActor::ScrumMaster,
+            agent_id: Some("sm-1".to_string()),
+        };
+        assert_eq!(
+            check_contract_write(
+                Kind::Task,
+                TaskStatus::Ready,
+                false,
+                &scrum_master,
+                &["parent".to_string()]
+            ),
+            Err(ContractWriteRefusal::CreationFields {
+                fields: vec!["parent".to_string()]
+            })
+        );
     }
 
     #[test]

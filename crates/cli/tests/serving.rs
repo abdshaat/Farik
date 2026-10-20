@@ -2071,3 +2071,40 @@ fn changes_project_from_the_browser() {
     assert_eq!(ran.code, 0, "{}", serving.err.text());
     drop(repository);
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_how_to_start_when_nothing_runs() {
+    let repository = a_team("open-nothing-runs");
+
+    let ran = run(&repository.path, &["open"]);
+
+    assert_eq!(ran.code, 1, "{}\n{}", ran.out, ran.err);
+    assert!(
+        ran.err.contains("Catervas is not running here"),
+        "{}",
+        ran.err
+    );
+    assert!(ran.err.contains("catervas serve"), "{}", ran.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_a_new_link_from_the_running_driver() {
+    let repository = a_team("open-new-link");
+    let out = SharedOut::default();
+    let serving = serving_into(&repository.path, &out);
+    until("the link is printed", || !links(&out.text()).is_empty());
+    let (port, first) = links(&out.text())[0].clone();
+
+    let ran = run(&repository.path, &["open"]);
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    joined(serving, "the serve");
+
+    assert_eq!(ran.code, 0, "{}\n{}", ran.out, ran.err);
+    let printed = links(&ran.out);
+    assert_eq!(printed.len(), 1, "{}", ran.out);
+    assert_eq!(printed[0].0, port);
+    assert_ne!(printed[0].1, first);
+}

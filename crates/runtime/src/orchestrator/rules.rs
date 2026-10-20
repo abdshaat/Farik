@@ -264,6 +264,15 @@ pub(super) async fn tick(
             }
         }
     }
+    // A task whose dependency was cancelled goes back to the Product Manager (ADR 0079), before
+    // the plan of a ready task is asked for.
+    if scope.rules == TickRules::All {
+        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+            if let Some(report) = dependency_cancelled(deps, &team, &board, row)? {
+                return Ok(report);
+            }
+        }
+    }
     if runs(8) {
         // The tasks given in a chat go first (ADR 0063): next in their agent's queue.
         let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready)
@@ -1326,9 +1335,17 @@ fn budget(
     }
     // A task whose session runs is left to it (ADR 0064).
     let busy = deps.work.busy_tasks();
+    // A task that is `ready`, `assigned` or `blocked` starts no session, so it spends nothing
+    // (ADR 0079).
     for row in board.iter().filter(|row| {
         !is_terminal(row.status)
-            && row.status != TaskStatus::Escalated
+            && !matches!(
+                row.status,
+                TaskStatus::Escalated
+                    | TaskStatus::Ready
+                    | TaskStatus::Assigned
+                    | TaskStatus::Blocked
+            )
             && !row.waiting_on_human
             && !busy.contains(&row.task_id)
     }) {
@@ -1355,17 +1372,38 @@ fn escalate_if_spent(
         &SessionLedger::default(),
         deps.tools.clock.now(),
     )?;
-    let task_spent = check_budgets(&state).iter().any(|exhausted| {
-        matches!(
-            exhausted.scope,
-            BudgetScope::TaskUsd | BudgetScope::TaskSessions
-        )
-    });
-    if !task_spent || refused_since_entering(deps, &row.task_id, row.status, TaskStatus::Escalated)?
+    let exhausted = check_budgets(&state);
+    // The dollars first, as the governor's reason for the escalation reads them.
+    let spent = if exhausted
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::TaskUsd)
     {
+        Some(format!(
+            "spent ${:.2} of ${:.2}",
+            state.task_spent_usd, state.task_max_usd
+        ))
+    } else if exhausted
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::TaskSessions)
+    {
+        Some(format!(
+            "spent {} of {} sessions",
+            state.task_sessions, state.task_max_sessions
+        ))
+    } else {
+        None
+    };
+    let Some(spent) = spent else {
+        return Ok(None);
+    };
+    if refused_since_entering(deps, &row.task_id, row.status, TaskStatus::Escalated)? {
         return Ok(None);
     }
-    match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+    let ask = TransitionAsk {
+        reason: Some(spent),
+        ..TransitionAsk::default()
+    };
+    match governor_moves_with(deps, team, row, TaskStatus::Escalated, &ask)? {
         TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
             task_id: row.task_id.clone(),
             what: "escalated it: its dollars or sessions are spent".to_string(),
@@ -1381,6 +1419,17 @@ pub(super) fn governor_moves(
     row: &TaskProjection,
     to: TaskStatus,
 ) -> Result<TransitionOutcome, OrchestratorError> {
+    governor_moves_with(deps, team, row, to, &TransitionAsk::default())
+}
+
+/// `governor_moves`, with what the move brings: the words its channel line carries.
+fn governor_moves_with(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+    to: TaskStatus,
+    ask: &TransitionAsk,
+) -> Result<TransitionOutcome, OrchestratorError> {
     Ok(deps.tools.transitions.request(
         &TransitionRequest {
             task_id: row.task_id.clone(),
@@ -1388,9 +1437,42 @@ pub(super) fn governor_moves(
             actor: TransitionActor::Governor,
             agent_id: None,
         },
-        &TransitionAsk::default(),
+        ask,
         team,
     )?)
+}
+
+/// A `ready` task with a dependency that was cancelled moves to `refining` as the governor, whose
+/// `DependencyCancelled` gate decides (ADR 0079): the Product Manager repoints it. The move's line
+/// in the channel names the dependency. A task the governor would not move is passed over.
+fn dependency_cancelled(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let Some(cancelled) = contract.dependencies.iter().find(|dependency| {
+        board.iter().any(|other| {
+            other.task_id.as_str() == dependency.as_str() && other.status == TaskStatus::Cancelled
+        })
+    }) else {
+        return Ok(None);
+    };
+    let ask = TransitionAsk {
+        reason: Some(format!("{} was cancelled", cancelled.as_str())),
+        ..TransitionAsk::default()
+    };
+    match governor_moves_with(deps, team, row, TaskStatus::Refining, &ask)? {
+        TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!(
+                "sent it back to refining: {} was cancelled",
+                cancelled.as_str()
+            ),
+        })),
+        TransitionOutcome::Refused(_) => Ok(None),
+    }
 }
 
 /// The task's last `task.transitioned` into `status`.
@@ -1550,6 +1632,12 @@ async fn in_progress(
     };
     // What a tool changed outside the task's paths is put back before the agent works (ADR 0069).
     deps.tools.transitions.tidy(&row.task_id, team, None)?;
+    // The branch sees what the integration branch gained since the last session (ADR 0079), after
+    // the tidy: a leftover edit could make git refuse the merge.
+    let resume = Resume {
+        behind: bring_up_to_date(deps, team, &contract),
+        ..resume
+    };
     // A task in a private folder (6.6) has no worktree to give a sandbox, and no command to run.
     let executor: Option<Arc<dyn Executor>> = if task_private_folder(&contract).is_some() {
         None
@@ -1669,7 +1757,39 @@ fn resume(
         conflicts,
         posts: posts_heard_by(deps, agent)?,
         local_documents,
+        behind: None,
     }))
+}
+
+/// Merges the integration branch into the task's worktree before a build or review session, when the branch
+/// lacks commits of it (ADR 0079): an agent cannot run git, so nothing else brings in what landed
+/// on `main` while it worked. The merge commit is the record. A merge that conflicts is aborted
+/// and answers the branch and the files, for the prompt to say; a merge in progress, a worktree
+/// that is not there, or a refusal for another reason leaves the branch as it is.
+pub(super) fn bring_up_to_date(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    contract: &TaskContract,
+) -> Option<(String, Vec<String>)> {
+    let worktree = worktree(deps, &contract.id);
+    if !worktree.is_dir() || task_private_folder(contract).is_some() {
+        return None;
+    }
+    let repository = task_repository_of(deps, team, contract).ok()?;
+    let into = repository.integration_branch.clone();
+    if repository.git.has_remote("origin").ok()? {
+        // Offline, the local branch is what there is.
+        let _ = repository.git.fetch_fast_forward("origin", &into);
+    }
+    let here = Git::open(worktree.clone());
+    if here.is_merging(&worktree).ok()? || here.commit_count("HEAD", &into).ok()? == 0 {
+        return None;
+    }
+    let message = format!("chore: bring up to date with {into}");
+    match repository.git.merge_in(&worktree, &into, &message).ok()? {
+        catervas_store::MergeOutcome::Merged { .. } => None,
+        catervas_store::MergeOutcome::Conflicts(paths) => Some((into, paths)),
+    }
 }
 
 /// What `agent` hears of its social posts that settled since its previous implement session
@@ -1844,7 +1964,8 @@ fn start_worktree(
     branch: Option<&str>,
 ) -> Result<bool, OrchestratorError> {
     let git = &repository.git;
-    let starts = requests::start_point(deps, board, contract, repository)?;
+    let requests::StartPoint { starts, documents } =
+        requests::start_point(deps, board, contract, repository)?;
     match branch {
         Some(branch) => git.create_worktree(worktree, branch, &starts[0])?,
         None => git.create_detached_worktree(worktree, &starts[0])?,
@@ -1863,7 +1984,14 @@ fn start_worktree(
             return Ok(false);
         }
     }
-    if starts != [repository.integration_branch.clone()] {
+    for from in &documents {
+        let message = format!("chore: start from {from}");
+        if let Err(error) = git.merge_in(worktree, from, &message) {
+            undo_start(git, worktree, branch);
+            return Err(error.into());
+        }
+    }
+    if starts != [repository.integration_branch.clone()] || !documents.is_empty() {
         let start = git.head_of(worktree)?;
         git.set_ref(&catervas_store::git::task_start_ref(&contract.id), &start)?;
     }
@@ -2313,7 +2441,8 @@ mod tests {
         harness.ready("CTV-4");
         // A task in progress, whose implement session is work, and an epic in progress whose one
         // task was cancelled, whose breakdown is planning. One session is all the epic has room
-        // for, so that its breakdown, which files nothing here, is not asked for again.
+        // for, so that its breakdown, which files nothing here, is not asked for again (an
+        // epic's plan sessions count toward its own budget, ADR 0079).
         harness.in_progress("CTV-5", "dev-b", "dev-a");
         harness
             .project
@@ -3135,6 +3264,40 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_task_whose_dependency_was_cancelled_back_to_refining() {
+        let harness = Harness::new("orch-dependency-cancelled", |_| {});
+        harness.file("CTV-1", "ready", |_| {});
+        harness
+            .project
+            .moved("CTV-1", "ready", "cancelled", &json!({}));
+        harness.file("CTV-2", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1"]);
+        });
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter);
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Refining);
+        let moves = harness.events(&[EventKind::TaskTransitioned]);
+        let EventBody::TaskTransitioned(last) = &moves.last().expect("a move").body else {
+            panic!("a move");
+        };
+        assert_eq!(last.to.to_string(), "refining");
+        assert_eq!(
+            serde_json::to_value(last.gate).expect("a gate"),
+            json!("dependency_cancelled")
+        );
+        assert_eq!(last.requested_by, "governor");
+        let said = messages(&harness);
+        let line = said.last().expect("a channel line");
+        assert_eq!(line.kind, MessageKind::System);
+        assert!(line.text.contains("CTV-1 was cancelled"), "{}", line.text);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn plans_a_task_whose_dependency_is_accepted() {
         let harness = Harness::new("orch-plan-dependency-integrated", |_| {});
         harness.verifying("CTV-1");
@@ -3945,6 +4108,103 @@ mod tests {
             prompt.contains("done.txt committed; C1 not run yet."),
             "{prompt}"
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn brings_a_task_up_to_date_with_main_before_its_session() {
+        let harness = Harness::new("orch-up-to-date", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let repo = harness.project.repo.path.clone();
+        std::fs::write(repo.join("from_main.txt"), "main moved\n").expect("written");
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-m", "main gains a file"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        let worktree = harness.worktree("CTV-1");
+        assert_eq!(adapter.started().len(), 1);
+        git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
+        assert!(worktree.join("from_main.txt").is_file());
+        let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
+        assert_eq!(merges, "chore: bring up to date with main");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn brings_a_task_up_to_date_with_main_before_its_review() {
+        let harness = Harness::new("orch-up-to-date-review", |_| {});
+        harness.verifying("CTV-1");
+        let repo = harness.project.repo.path.clone();
+        std::fs::write(repo.join("from_main.txt"), "main moved\n").expect("written");
+        git_in(&repo, &["add", "-A"]);
+        git_in(&repo, &["commit", "-m", "main gains a file"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the review runs");
+
+        let worktree = harness.worktree("CTV-1");
+        assert_eq!(
+            sessions(&adapter),
+            vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+        git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
+        let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
+        assert_eq!(merges, "chore: bring up to date with main");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn brings_main_in_after_putting_back_a_tool_edit_to_a_file_main_changed() {
+        let harness = Harness::new("orch-up-to-date-after-tidy", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let repo = harness.project.repo.path.clone();
+        let worktree = harness.worktree("CTV-1");
+        // A tool rewrote a file outside the task's paths, which main changed too: git would refuse
+        // the merge over it until the tidy puts it back.
+        std::fs::write(worktree.join("README.md"), "a tool's rewrite\n").expect("written");
+        std::fs::write(repo.join("README.md"), "main's line\n").expect("written");
+        git_in(&repo, &["commit", "-am", "main's line"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        git_in(&worktree, &["merge-base", "--is-ancestor", &main, "HEAD"]);
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(!prompt.contains("merging it conflicts"), "{prompt}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_branch_that_conflicts_with_main_and_says_so() {
+        let harness = Harness::new("orch-up-to-date-conflict", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let repo = harness.project.repo.path.clone();
+        let worktree = harness.worktree("CTV-1");
+        std::fs::write(worktree.join("README.md"), "the task's line\n").expect("written");
+        git_in(&worktree, &["commit", "-am", "the task"]);
+        std::fs::write(repo.join("README.md"), "main's line\n").expect("written");
+        git_in(&repo, &["commit", "-am", "main's line"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the session runs");
+
+        assert!(
+            !catervas_store::Git::open(worktree.clone())
+                .is_merging(&worktree)
+                .expect("the worktree is read")
+        );
+        let prompt = &adapter.started()[0].initial_prompt;
+        assert!(prompt.contains("merging it conflicts in"), "{prompt}");
+        assert!(prompt.contains("README.md"), "{prompt}");
     }
 
     /// `text` without its `<untrusted ...>` blocks.
@@ -5241,7 +5501,7 @@ mod tests {
             wire["budget"]["max_sessions"] = json!(1);
         });
         harness.verifying("CTV-2");
-        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1(), implement_stops_early()]);
         let sandboxes = Arc::new(BrokenSandboxFactory::new(
             ExecError::SpawnFailed {
                 detail: "no shell".to_string(),
@@ -5271,10 +5531,14 @@ mod tests {
             escalation.detail
         );
         assert!(governor_runs(&harness).is_empty());
-        // The run went on to the ready task.
+        // The run went on to the ready task: planned, then worked until its one session was
+        // spent (a plan session is no try, ADR 0079).
         assert_eq!(
             sessions(&adapter),
-            vec![("pm".to_string(), SessionPurpose::Plan)]
+            vec![
+                ("pm".to_string(), SessionPurpose::Plan),
+                ("dev-a".to_string(), SessionPurpose::Implement)
+            ]
         );
     }
 
@@ -5335,6 +5599,53 @@ mod tests {
             vec![EscalationRaisedBodyReason::Sessions]
         );
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_ready_task_with_spent_sessions_alone() {
+        let harness = Harness::new("orch-budget-ready", |_| {});
+        harness.file("CTV-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(2);
+        });
+        for session in 0..2 {
+            harness.spent(Some("CTV-1"), &format!("s-{session}"), 0.01);
+        }
+        let orchestrator = harness.orchestrator(harness.recorded(vec![plan_assigns_ctv_1()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(escalation_reasons(&harness), Vec::new());
+        assert_ne!(harness.row("CTV-1").status, TaskStatus::Escalated);
+
+        // The same task at work is escalated.
+        let harness = Harness::new("orch-budget-ready-at-work", |_| {});
+        in_progress_with_sessions(&harness, 2, 2);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_what_a_spent_task_spent() {
+        let harness = Harness::new("orch-budget-says", |_| {});
+        in_progress_with_sessions(&harness, 2, 2);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let said = messages(&harness);
+        let line = said.last().expect("a channel line");
+        assert_eq!(line.kind, MessageKind::System);
+        assert!(
+            line.text.ends_with("spent 2 of 2 sessions"),
+            "{}",
+            line.text
+        );
+        assert!(!line.text.contains("governor_escalation"), "{}", line.text);
     }
 
     #[tokio::test]

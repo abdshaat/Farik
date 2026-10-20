@@ -144,10 +144,15 @@ pub enum PreviewError {
 impl fmt::Display for PreviewError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Prepare { tail } => write!(formatter, "the preview's prepare failed:\n{tail}"),
+            Self::Prepare { tail } => write!(
+                formatter,
+                "the preview's prepare failed:\n{}",
+                error_lines(tail)
+            ),
             Self::NeverAnswered { tail } => write!(
                 formatter,
-                "the preview's start did not answer within 120 seconds:\n{tail}"
+                "the preview's start did not answer within 120 seconds:\n{}",
+                error_lines(tail)
             ),
             Self::DockerUnavailable { detail } => {
                 write!(formatter, "Docker could not run the preview: {detail}")
@@ -158,6 +163,29 @@ impl fmt::Display for PreviewError {
 }
 
 impl std::error::Error for PreviewError {}
+
+/// The lines of a failed command's tail an owner needs: at most 8 that say `error` or `ERR`, not
+/// option help (a line starting `--` or `-<letter>`), in order; the last 8 lines when none do.
+/// The full tail stays in the session's log.
+fn error_lines(tail: &str) -> String {
+    const MOST: usize = 8;
+    let is_help = |line: &str| {
+        let line = line.trim();
+        line.starts_with("--")
+            || (line.starts_with('-') && line.chars().nth(1).is_some_and(char::is_alphabetic))
+    };
+    let errors: Vec<&str> = tail
+        .lines()
+        .filter(|line| line.to_ascii_lowercase().contains("error") && !is_help(line))
+        .take(MOST)
+        .collect();
+    if errors.is_empty() {
+        let lines: Vec<&str> = tail.lines().collect();
+        lines[lines.len().saturating_sub(MOST)..].join("\n")
+    } else {
+        errors.join("\n")
+    }
+}
 
 /// Why the page check did not answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1095,6 +1123,22 @@ mod tests {
             .filter(|pair| pair[0] == flag)
             .map(|pair| pair[1].as_str())
             .collect()
+    }
+
+    #[test]
+    fn says_a_preview_failure_in_its_error_lines() {
+        let mut tail = String::from("npm error code EUSAGE\n");
+        tail.push_str(&"npm warn help line\n".repeat(30));
+        tail.push_str("      --allow-scripts   run scripts\n");
+        tail.push_str("  -g, --global   install globally\n");
+        tail.push_str(
+            "npm error The `npm ci` command can only install with an existing package-lock.json\n",
+        );
+        let text = super::PreviewError::Prepare { tail }.to_string();
+
+        assert!(text.contains("can only install with an existing package-lock.json"));
+        assert!(!text.contains("--allow-scripts"), "{text}");
+        assert!(text.lines().count() <= 9, "{text}");
     }
 
     #[test]

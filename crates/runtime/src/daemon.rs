@@ -1169,6 +1169,15 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
             Arc::clone(&state),
             require_project,
         ));
+    // The token holder's alone, and none of the project's: a new start link works before a
+    // project is open, as the first one does.
+    let new_link = Router::new()
+        .route("/connect/code", post(web::connect_code))
+        .with_state(Arc::clone(&state))
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&expected),
+            require_token,
+        ));
     Router::new()
         .route("/hook/pre-tool-use", post(pre_tool_use))
         .route("/hook/post-tool-use", post(post_tool_use))
@@ -1178,6 +1187,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
         .merge(mcp)
         .layer(middleware::from_fn_with_state(state, require_project))
         .layer(middleware::from_fn_with_state(expected, require_token))
+        .merge(new_link)
         .merge(calls)
         .merge(browser)
 }
