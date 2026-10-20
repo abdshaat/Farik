@@ -69,7 +69,7 @@ Tests:
 - `lets_the_product_manager_repoint_a_task_that_has_not_started` (gates.rs) — ProductManager writing `["dependencies"]` and `["parent"]` on a `ready`, unlocked task is `Allowed`; the same on `assigned` is `ContractFrozen`; a Scrum Master writing `parent` on `ready` is refused with `CreationFields`.
 - `refuses_a_parent_that_is_not_an_epic` (contracts.rs) — a PM refine session's `catervas_write_contract` with `parent` naming a `task` is refused with "is not an epic"; naming an epic, the contract file's parent changes.
 
-- [ ] `feat(core): the Product Manager may repoint a task that has not started`
+- [x] `feat(core): the Product Manager may repoint a task that has not started`
 
 ### Task 3: a cancelled dependency sends its dependents back to the Product Manager
 

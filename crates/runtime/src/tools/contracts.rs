@@ -193,6 +193,22 @@ pub(super) fn write_contract(
         }
         Err(refusal) => return Err(Refusal::ContractWrite(refusal).into()),
     }
+    // A repointed task goes under an epic that exists (ADR 0079).
+    if changed.iter().any(|field| field == "parent")
+        && let Some(parent) = after.get("parent").and_then(Value::as_str)
+    {
+        let is_epic = parent
+            .parse::<TaskId>()
+            .ok()
+            .and_then(|id| call.row(&id).ok())
+            .is_some_and(|row| row.kind == TaskKind::Epic);
+        if !is_epic {
+            return Err(Refusal::ContractInvalid {
+                details: vec![format!("parent: {parent} is not an epic")],
+            }
+            .into());
+        }
+    }
     let mut written = validate_contract(&after).map_err(|errors| Refusal::ContractInvalid {
         details: errors
             .iter()
@@ -628,6 +644,39 @@ mod tests {
                 .expect("the repo is written");
             assert_eq!(project.file(task)["repo"], repo);
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn refuses_a_parent_that_is_not_an_epic() {
+        let project = a_project("tools-parent-epic");
+        project.filed("CTV-1", "in_progress", "epic", None);
+        project.filed("CTV-2", "refining", "task", None);
+        project.filed("CTV-3", "refining", "task", None);
+        let (file, events) = (project.file("CTV-3"), project.event_count());
+
+        let refused = project.call(
+            "pm",
+            Some("CTV-3"),
+            "catervas_write_contract",
+            json!({ "fields": { "parent": "CTV-2" } }),
+        );
+        let Err(ToolError::Refused { reason }) = refused else {
+            panic!("expected a refusal, got {refused:?}");
+        };
+        assert!(reason.contains("is not an epic"), "{reason}");
+        assert_eq!(project.file("CTV-3"), file);
+        assert_eq!(project.event_count(), events);
+
+        project
+            .call(
+                "pm",
+                Some("CTV-3"),
+                "catervas_write_contract",
+                json!({ "fields": { "parent": "CTV-1" } }),
+            )
+            .expect("an epic is a parent");
+        assert_eq!(project.file("CTV-3")["parent"], "CTV-1");
     }
 
     #[test]
