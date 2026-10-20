@@ -56,6 +56,8 @@ A second build ran from 06:22. The reviewer found the plan in her up-to-date wor
 - The owner had no way to send a `ready` task back to its plan; only blocked and escalated tasks offered one.
 - The Product Manager's epic session could not change the epic's waiting tasks, so a re-plan (ADR 0078) ended in a question to the owner, four times. Its tools now take a waiting child's id.
 
+With the third build's fixes waiting, CTV-12 was accepted and merged and CTV-13 and CTV-14 ran in two lanes at once. CTV-14, the designer's first task, was escalated before it began: its preview could not prepare, and could not have started, since the task itself creates the app's entry file. The owner was shown `governor_escalation:` and forty lines of npm's help. Plan 7: an escalation never shows the gate's name and shows a preview's error lines, not its help; a designer's first try, before its first commit, runs without a preview that fails.
+
 ## Alternatives rejected
 
 - **Redesign the governor around fewer gates.** Every refusal in the run had one specific cause; removing gates would give up guarantees (protected paths, the review, lanes) that did not cause it.
