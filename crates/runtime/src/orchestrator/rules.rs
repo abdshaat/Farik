@@ -1957,7 +1957,8 @@ fn start_worktree(
     branch: Option<&str>,
 ) -> Result<bool, OrchestratorError> {
     let git = &repository.git;
-    let starts = requests::start_point(deps, board, contract, repository)?;
+    let requests::StartPoint { starts, documents } =
+        requests::start_point(deps, board, contract, repository)?;
     match branch {
         Some(branch) => git.create_worktree(worktree, branch, &starts[0])?,
         None => git.create_detached_worktree(worktree, &starts[0])?,
@@ -1976,7 +1977,14 @@ fn start_worktree(
             return Ok(false);
         }
     }
-    if starts != [repository.integration_branch.clone()] {
+    for from in &documents {
+        let message = format!("chore: start from {from}");
+        if let Err(error) = git.merge_in(worktree, from, &message) {
+            undo_start(git, worktree, branch);
+            return Err(error.into());
+        }
+    }
+    if starts != [repository.integration_branch.clone()] || !documents.is_empty() {
         let start = git.head_of(worktree)?;
         git.set_ref(&catervas_store::git::task_start_ref(&contract.id), &start)?;
     }

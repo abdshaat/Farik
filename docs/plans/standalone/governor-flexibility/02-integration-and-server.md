@@ -45,7 +45,7 @@ Tests (integrate.rs, ignored like its neighbours):
 Tests (requests.rs):
 - `a_task_starts_with_the_teams_accepted_documents` — CTV-5 accepted, awaiting integration, allowed paths `docs/catervas/architecture/overview.html`; a new task CTV-8 with no dependencies starts; its worktree contains that file and its log has `chore: start from <CTV-5's branch>`. A documents branch that conflicts with the task's start is left out and the worktree still starts.
 
-- [ ] `feat(runtime): a new task starts with the team's accepted documents`
+- [x] `feat(runtime): a new task starts with the team's accepted documents`
 
 ### Task 11: a failed integration of a task is said in the channel
 
