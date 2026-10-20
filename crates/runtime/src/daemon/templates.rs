@@ -894,6 +894,10 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one scenario, each event of the apply checked in order"
+    )]
     fn applies_with_the_retirements_effects() {
         let (harness, folder) = templated("templates-apply", |wire| {
             wire["agents"][2]["display_name"] = json!("Sol");

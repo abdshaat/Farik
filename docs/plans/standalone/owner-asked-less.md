@@ -74,7 +74,7 @@ Files: `runtime/src/prompt.rs`, `runtime/src/orchestrator/session.rs` (input), `
 
 Files: `runtime/src/orchestrator/requests.rs` (`replan_for_idle`), `runtime/src/orchestrator/work.rs` (drop `replans`, `first_replan`)
 - `re_plans_once_until_something_changes` (requests.rs, ignored) — two idle-builder ticks in a row run one re-plan session; a `contract.written` on a child then allows a second; a change in which builders are idle alone does not.
-- [ ] `fix(runtime): a re-plan runs once per change of the epic or the team`
+- [x] `fix(runtime): a re-plan runs once per change of the epic or the team`
 
 ### Task 6: an owner's send-back does not cost the task a session
 

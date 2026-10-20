@@ -17,11 +17,11 @@ use catervas_protocol::event::{
     CatervasEvent, ContractEvaluatedBodyGate, CriterionRecordedBody, CriterionRecordedBodyRunBy,
     EventBody, EventKind, NoteWrittenBodyKind, ReviewRecordedBody, SessionStartedBodyPurpose,
 };
-use catervas_store::TaskProjection;
 use catervas_store::files::FilesError;
 use catervas_store::git::GitError;
 use catervas_store::product_plan::is_the_product_plan;
 use catervas_store::repos::TaskRepository;
+use catervas_store::{EventQuery, TaskProjection};
 
 use super::messages::{
     breakdown_message, close_out_message, epic_accept_message, epic_review_message,
@@ -893,8 +893,8 @@ pub(super) fn epic_assignee<'a>(
 /// After rule 8 (ADR 0078): when a builder, a Software Developer or a UI/UX Designer, has nothing
 /// to do while two or more `ready` tasks of its role wait in the lanes of an epic in progress, the
 /// Product Manager is given one plan session about the epic to re-plan them, so that the tasks
-/// that need no unfinished task's result go to a lane of their own. Asked once per epic, role and
-/// set of idle builders in a process.
+/// that need no unfinished task's result go to a lane of their own. Asked once per
+/// change of the epic's children or the team, read from the log (ADR 0081).
 pub(super) async fn replan_for_idle(
     deps: &OrchestratorDeps,
     team: &Team,
@@ -946,11 +946,7 @@ pub(super) async fn replan_for_idle(
             }
             if stuck.len() < 2
                 || unavailable(deps, pm, &mut waiting.slept)?
-                || !deps.work.first_replan(format!(
-                    "{}|{role}|{}",
-                    epic.task_id.as_str(),
-                    idle.join(",")
-                ))
+                || replanned_since_a_change(deps, board, &epic.task_id)?
             {
                 continue;
             }
@@ -977,6 +973,51 @@ pub(super) async fn replan_for_idle(
         }
     }
     Ok(None)
+}
+
+/// Whether a `plan` session of `epic` started after the last change to its children (a
+/// `contract.written` or `task.transitioned`) and to the team (`agent.updated`, `team.updated`),
+/// read from the log (ADR 0081): a re-plan runs once per change, however often the builders go
+/// idle and busy.
+fn replanned_since_a_change(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+    epic: &TaskId,
+) -> Result<bool, OrchestratorError> {
+    let newest = |query: EventQuery| -> Result<u64, OrchestratorError> {
+        Ok(deps
+            .tools
+            .log
+            .read(&EventQuery {
+                newest_first: true,
+                limit: Some(1),
+                ..query
+            })?
+            .first()
+            .map_or(0, |event| event.envelope.seq))
+    };
+    let mut changed = newest(EventQuery {
+        kinds: vec![EventKind::AgentUpdated, EventKind::TeamUpdated],
+        ..EventQuery::default()
+    })?;
+    for child in board.iter().filter(|row| row.parent.as_ref() == Some(epic)) {
+        changed = changed.max(newest(EventQuery {
+            task_id: Some(child.task_id.clone()),
+            kinds: vec![EventKind::ContractWritten, EventKind::TaskTransitioned],
+            ..EventQuery::default()
+        })?);
+    }
+    // Only plan sessions count, so the epic's session starts are read, not just the newest.
+    let starts = deps.tools.log.read(&EventQuery {
+        task_id: Some(epic.clone()),
+        kinds: vec![EventKind::SessionStarted],
+        after_seq: Some(changed),
+        ..EventQuery::default()
+    })?;
+    Ok(starts.iter().any(|event| {
+        matches!(&event.body, EventBody::SessionStarted(session)
+            if session.purpose == SessionStartedBodyPurpose::Plan)
+    }))
 }
 
 /// Rule 5 for an epic (ADR 0013): nothing while a task under it awaits integration; then Catervas
@@ -3729,11 +3770,10 @@ mod tests {
         assert!(message.contains("first of lane 1"), "{message}");
     }
 
-    #[tokio::test]
-    #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn replans_an_epic_whose_waiting_tasks_leave_a_builder_idle() {
-        let harness = Harness::new("epic-replan", |_| {});
-        an_epic_in_progress(&harness, |_| {});
+    /// An epic in progress whose lane 1 holds CTV-2, blocked, and CTV-3 and CTV-4 behind it, with
+    /// `dev-b` idle.
+    fn a_lane_waiting_behind_a_block(harness: &Harness) {
+        an_epic_in_progress(harness, |_| {});
         // dev-a's CTV-2 waits on a block; CTV-3 and CTV-4 wait behind it in lane 1, one after
         // the other, and dev-b has nothing to do.
         harness.file_under("CTV-2", "ready", Some("CTV-1"), |wire| {
@@ -3755,6 +3795,13 @@ mod tests {
                 wire["dependencies"] = json!([after]);
             });
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn replans_an_epic_whose_waiting_tasks_leave_a_builder_idle() {
+        let harness = Harness::new("epic-replan", |_| {});
+        a_lane_waiting_behind_a_block(&harness);
         let adapter = harness.recorded(vec![replays_catervas_read_board()]);
         let orchestrator = harness.orchestrator(adapter.clone());
 
@@ -3778,6 +3825,43 @@ mod tests {
         assert!(message.contains("dev-b"), "{message}");
         assert!(message.contains("CTV-3 (lane 1, after CTV-2)"), "{message}");
         assert!(message.contains("CTV-4 (lane 1, after CTV-3)"), "{message}");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn re_plans_once_until_something_changes() {
+        let harness = Harness::new("epic-replan-once", |_| {});
+        a_lane_waiting_behind_a_block(&harness);
+        let adapter = harness.recorded(vec![
+            replays_catervas_read_board(),
+            replays_catervas_read_board(),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // Two ticks in a row: one re-plan.
+        orchestrator.tick().await.expect("the tick runs");
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+
+        // The same board on a third tick, and a changed set of idle builders alone, ask nothing.
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+
+        // A contract written on a child allows one more.
+        harness.project.record(
+            "CTV-3",
+            "contract.written",
+            &json!({
+                "summary": { "kind": "task", "title": "Add a login page", "status": "ready", "risk": "low", "parent": "CTV-1" },
+                "written_by": "pm"
+            }),
+        );
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 2, "{started:?}");
+        assert_eq!(started[1].purpose, SessionPurpose::Plan);
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 2);
     }
 
     /// `with_a_scrum_master`, and an Architect, `ada`.
