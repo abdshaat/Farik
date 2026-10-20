@@ -2326,12 +2326,13 @@ mod tests {
         waits_for,
     };
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
+    use crate::prompt::{AUTOPILOT_ASK, AUTOPILOT_DECIDE};
     use crate::recorded::fixtures::{
-        accept_ctv_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
-        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1, plan_assigns_ctv_2,
-        provider_limit_429, provider_limit_rejected, reads_a_file, replays_catervas_read_board,
-        reply_to_a_mention, retro, review, review_answers_nothing, review_writes_note,
-        success_with_is_error,
+        accept_ctv_1, chat_answers_with_a_request, credential_refused, ends_without_a_decision,
+        hits_the_turn_limit, implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1,
+        plan_assigns_ctv_2, provider_limit_429, provider_limit_rejected, reads_a_file,
+        replays_catervas_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
+        review_writes_note, success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -6810,6 +6811,8 @@ mod tests {
                     "catervas_record_design_review",
                     "catervas_chat_reply",
                     "catervas_take_task",
+                    // Asked of the team only while autopilot is on.
+                    "catervas_ask_team",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",
@@ -6970,6 +6973,75 @@ mod tests {
     /// The Catervas tools a session was given, in no order.
     fn tools_of(spec: &crate::session::SessionSpec) -> BTreeSet<&str> {
         spec.catervas_tools.iter().map(String::as_str).collect()
+    }
+
+    /// Autopilot on or off in `harness`'s log, as the owner's switch would leave it.
+    fn autopilot(harness: &Harness, on: bool) {
+        harness
+            .project
+            .record("", "autopilot.changed", &json!({ "on": on }));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn offers_the_team_and_not_the_owner_under_autopilot() {
+        // The Developer's implement session, then the Product Manager's refine session, with
+        // autopilot on and off.
+        let rules_end = |spec: &crate::session::SessionSpec| {
+            spec.system_prompt
+                .split("## Team rules")
+                .nth(1)
+                .and_then(|rest| rest.split("\n## ").next())
+                .expect("a Team rules section")
+                .trim_end()
+                .to_string()
+        };
+        for on in [true, false] {
+            let harness = Harness::new(&format!("orch-autopilot-dev-{on}"), |_| {});
+            autopilot(&harness, on);
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
+            let adapter = harness.recorded(vec![implement_stops_early()]);
+            harness
+                .orchestrator(adapter.clone())
+                .tick()
+                .await
+                .expect("the tick runs");
+            let started = adapter.started();
+            let developer = &started[0];
+            assert_eq!(developer.purpose, SessionPurpose::Implement);
+            if on {
+                assert!(tools_of(developer).contains("catervas_ask_team"));
+                assert!(!tools_of(developer).contains("catervas_ask_human"));
+                assert!(rules_end(developer).ends_with(AUTOPILOT_ASK));
+            } else {
+                assert!(tools_of(developer).contains("catervas_ask_human"));
+                assert!(!tools_of(developer).contains("catervas_ask_team"));
+                assert!(!developer.system_prompt.contains(AUTOPILOT_ASK));
+                assert!(!developer.system_prompt.contains(AUTOPILOT_DECIDE));
+            }
+
+            let harness = Harness::new(&format!("orch-autopilot-pm-{on}"), |_| {});
+            autopilot(&harness, on);
+            harness.a_request("Add done.txt");
+            triaged_small(&harness, "CTV-1");
+            let adapter = harness.recorded(vec![ends_without_a_decision()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            for _ in 0..2 {
+                orchestrator.tick().await.expect("the tick runs");
+            }
+            let started = adapter.started();
+            let manager = &started[0];
+            assert_eq!(manager.purpose, SessionPurpose::Refine);
+            assert!(!tools_of(manager).contains("catervas_ask_team"));
+            if on {
+                assert!(!tools_of(manager).contains("catervas_ask_human"));
+                assert!(rules_end(manager).ends_with(AUTOPILOT_DECIDE));
+            } else {
+                assert!(tools_of(manager).contains("catervas_ask_human"));
+                assert!(!manager.system_prompt.contains(AUTOPILOT_ASK));
+                assert!(!manager.system_prompt.contains(AUTOPILOT_DECIDE));
+            }
+        }
     }
 
     /// The Catervas tools the standup and the review are given.

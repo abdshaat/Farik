@@ -1030,6 +1030,12 @@ const CHAT_REPLY_TOOL: &str = "catervas_chat_reply";
 /// alone (ADR 0063).
 const TAKE_TASK_TOOL: &str = "catervas_take_task";
 
+/// The tool that asks the owner, which the team does not use while it decides (ADR 0082).
+const ASK_HUMAN_TOOL: &str = "catervas_ask_human";
+
+/// The tool that asks the team in the owner's place while autopilot is on (ADR 0082).
+const ASK_TEAM_TOOL: &str = "catervas_ask_team";
+
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).
 const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
@@ -1087,7 +1093,12 @@ fn reviews_its_own_task(ask: &SessionAsk<'_>) -> bool {
 }
 
 /// The Catervas tools `ask`'s session is offered, before its tiers are applied.
-fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> Vec<CatervasTool> {
+fn offered_tools(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+    team_decides: bool,
+) -> Vec<CatervasTool> {
     // The page check is the Designer's, in a session that has the preview open (step 12).
     let checks_pages = ask.agent.role == RoleWire::UiUxDesigner
         && ask.contract.is_some()
@@ -1110,6 +1121,15 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
         .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
+        // Under autopilot nobody asks the owner: the team is asked, except by the Product Manager
+        // and an agent working alone, who decide (ADR 0082 decision 2).
+        .filter(|tool| match tool.name {
+            ASK_HUMAN_TOOL => !team_decides,
+            ASK_TEAM_TOOL => {
+                team_decides && ask.agent.role != RoleWire::ProductManager && !team.is_solo()
+            }
+            _ => true,
+        })
         // What a goal session files and records is its own (ADR 0075).
         .filter(|tool| {
             (tool.name != FILE_GOAL_WORK_TOOL && tool.name != RECORD_GOAL_PROGRESS_TOOL)
@@ -1450,7 +1470,8 @@ fn session_spec_without(
     let criteria = files.read_criteria()?;
     let tiers: BTreeSet<PermissionTier> = held_tiers(ask, team).into_iter().collect();
     let builtin_tools = builtins_of(ask, &tiers);
-    let tools = offered_tools(deps, team, ask);
+    let team_decides = catervas_store::autopilot::team_decides(&deps.tools.log, team)?;
+    let tools = offered_tools(deps, team, ask, team_decides);
     // A session given one tool has it whatever the agent's tiers.
     let catervas_tools = tools
         .iter()
@@ -1509,6 +1530,7 @@ fn session_spec_without(
         documents_local: catervas_store::document_source::documents_on_disk(team, &deps.tools.log)?,
         team: &roster,
         push_remotes: &push_remotes,
+        autopilot: team_decides,
     })?;
     let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {
@@ -1852,7 +1874,7 @@ mod tests {
                 thread,
                 initial_prompt: String::new(),
             };
-            offered_tools(deps, &team, &ask)
+            offered_tools(deps, &team, &ask, false)
                 .iter()
                 .any(|tool| tool.name == "catervas_write_folder_doc")
         };

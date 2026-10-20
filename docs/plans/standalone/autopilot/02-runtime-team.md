@@ -116,7 +116,7 @@ Tests:
 
 `CLOSING_INSTRUCTIONS`' length, `[_; 11]`, is what makes the compiler name a purpose left without its closing; no test of its own.
 
-- [ ] `feat(runtime): under autopilot agents ask the team, not the owner`
+- [x] `feat(runtime): under autopilot agents ask the team, not the owner`
 
 ### Task 9: the team answers its own questions
 

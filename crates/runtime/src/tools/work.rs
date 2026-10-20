@@ -137,6 +137,26 @@ pub(crate) struct AskHumanInput {
     choices: Vec<ChoiceInput>,
 }
 
+/// Whom a question to the team is for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum QuestionAboutInput {
+    /// What the product should do.
+    Product,
+    /// How to build it.
+    Technical,
+}
+
+/// `catervas_ask_team`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AskTeamInput {
+    /// The question, in 1 to 2000 characters.
+    question: String,
+    /// `product` for what the product should do, `technical` for how to build it.
+    about: QuestionAboutInput,
+}
+
 /// One answer `catervas_ask_human` offers.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -382,6 +402,46 @@ pub(super) fn ask_human(call: &Call<'_>, input: AskHumanInput) -> Result<Value, 
     Ok(json!({
         "question_id": event.envelope.seq,
         "next": "end your turn: the human's answer starts the next session",
+    }))
+}
+
+/// Asks the team a question under autopilot (ADR 0082 decision 2), and answers with the question's
+/// id. The task waits for the answer, as it waits for the owner's, and its agent is freed. The
+/// Product Manager and an agent working alone decide instead, and without autopilot the owner is
+/// the one asked.
+pub(super) fn ask_team(call: &Call<'_>, input: &AskTeamInput) -> Result<Value, ToolError> {
+    let refused = |code: &'static str, detail: &str| -> ToolError {
+        Refusal::Autopilot {
+            code,
+            detail: detail.to_string(),
+        }
+        .into()
+    };
+    if !catervas_store::autopilot::team_decides(&call.deps().log, &call.team).map_err(failed)? {
+        return Err(refused(
+            "autopilot_off",
+            "autopilot is off, so the owner is the one to ask: use catervas_ask_human",
+        ));
+    }
+    let task = call.task()?.clone();
+    if call.role() == Role::ProductManager || call.team.is_solo() {
+        return Err(refused(
+            "decide_yourself",
+            "nobody above you is asked under autopilot: decide, write the decision and its reason in the task's notes, and go on",
+        ));
+    }
+    let body = serde_json::from_value(json!({
+        "question": &input.question,
+        "asked_by": call.agent_id(),
+        "about": input.about,
+    }))
+    .map_err(|_| ToolError::InvalidInput {
+        detail: "the question is 1 to 2000 characters".to_string(),
+    })?;
+    let event = call.append(Some(&task), EventBody::TeamQuestionAsked(body))?;
+    Ok(json!({
+        "question_seq": event.envelope.seq,
+        "next": "end your turn: the team's answer starts the next session",
     }))
 }
 
@@ -1101,6 +1161,52 @@ mod tests {
             panic!("a question");
         };
         assert_eq!(body.asked_by, "pm");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn asks_the_team_and_holds_the_task() {
+        let project = a_project("tools-ask-team");
+        in_progress(&project);
+        let ask = |agent: &str, task: Option<&str>| {
+            project.call(
+                agent,
+                task,
+                "catervas_ask_team",
+                json!({ "question": "Which database?", "about": "technical" }),
+            )
+        };
+        // Off by default: the owner is the one asked.
+        refused_with(ask("dev-a", Some("CTV-1")), "autopilot_off");
+
+        project.record("", "autopilot.changed", &json!({ "on": true }));
+        let asked = ask("dev-a", Some("CTV-1")).expect("a Developer asks the team");
+        let events = project.events(&[EventKind::TeamQuestionAsked]);
+        assert_eq!(asked["question_seq"], json!(events[0].envelope.seq));
+        let EventBody::TeamQuestionAsked(body) = &events[0].body else {
+            panic!("a team question");
+        };
+        assert_eq!(body.asked_by, "dev-a");
+        assert_eq!(body.about.to_string(), "technical");
+        assert_eq!(
+            events[0]
+                .envelope
+                .ids
+                .task_id
+                .as_ref()
+                .map(|id| id.to_string()),
+            Some("CTV-1".to_string())
+        );
+        let row = project
+            .deps
+            .projections
+            .task(&"CTV-1".parse().expect("a task id"))
+            .expect("reads")
+            .expect("on the board");
+        assert!(row.waiting_on_human, "the task waits for the answer");
+
+        refused_with(ask("pm", Some("CTV-1")), "decide_yourself");
+        refused_with(ask("dev-b", None), "no_task");
     }
 
     #[test]

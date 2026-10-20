@@ -255,6 +255,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Ask the human a question; end your turn after asking.",
         ),
+        tool::<work::AskTeamInput>(
+            "catervas_ask_team",
+            Read,
+            "While autopilot is on, ask the team instead of the owner: `about` is `product` for what the product should do and `technical` for how to build it. End your turn after asking; the answer starts your next session.",
+        ),
         tool::<connections::RequestConnectionInput>(
             "catervas_request_connection",
             Read,
@@ -521,6 +526,7 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
+        "catervas_ask_team" => work::ask_team(&call, &parse(input)?),
         "catervas_request_connection" => connections::request_connection(&call, &parse(input)?),
         "catervas_file_goal_work" => goals::file_goal_work(&call, &parse(input)?),
         "catervas_record_goal_progress" => goals::record_goal_progress(&call, &parse(input)?),
@@ -897,6 +903,7 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
+            "catervas_ask_team",
             "catervas_request_connection",
             "catervas_file_goal_work",
             "catervas_record_goal_progress",
@@ -949,7 +956,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..37] {
+        for tool in &tools[..38] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {
