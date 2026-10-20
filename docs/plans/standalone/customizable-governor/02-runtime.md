@@ -65,7 +65,7 @@ Tests:
 - `hooks.rs`: `judges_a_call_by_the_agents_own_rules` — with a team protecting `infra/**` and agent `ada` lifting it, a `Read` of `infra/main.tf` from `ada`'s registration is allowed and from `theo`'s is denied `path_protected`; an `Edit` of a team read-only `vendor/x.js` inside the allowed paths is denied `path_read_only`; a `Read` of `.catervas/local/daemon.json` with every shipped path lifted is denied `path_protected`.
 - `exec.rs`: `runs_the_git_the_agent_is_allowed` — `git fetch` through `catervas_exec` is refused for an agent without `fetch` and passes the governor for one whose `rules.git_subcommands` holds it (the command's own run uses the test sandbox, as its neighbours do).
 
-- [ ] `feat(runtime): each agent's calls are judged by its own rules`
+- [x] `feat(runtime): each agent's calls are judged by its own rules`
 
 ### Task 8: a session's settings and the done check use the agent's rules
 

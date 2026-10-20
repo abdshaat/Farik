@@ -628,7 +628,12 @@ fn check_input<'a>(
         .map_err(|why| format_refusal(&path, call.team.document_format(), why))?
         .into_iter()
         .collect::<Vec<_>>();
-    if check_protected_paths(&removed, &call.team.rules().protected_paths).is_err() {
+    if check_protected_paths(
+        &removed,
+        &call.team.rules_for(call.agent_id()).protected_paths,
+    )
+    .is_err()
+    {
         return Err(refused(
             "folder_doc_path",
             format!("{} is a path the team protects", removed[0]),
@@ -739,7 +744,12 @@ fn checked_path(
             "a path is at most 512 characters",
         ));
     }
-    if check_protected_paths(&protected, &call.team.rules().protected_paths).is_err() {
+    if check_protected_paths(
+        &protected,
+        &call.team.rules_for(call.agent_id()).protected_paths,
+    )
+    .is_err()
+    {
         return Err(refused(
             "folder_doc_path",
             format!("{path} is a path the team protects"),

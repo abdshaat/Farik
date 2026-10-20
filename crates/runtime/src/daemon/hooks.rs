@@ -9,6 +9,7 @@ use catervas_core::governor::permissions::{
     AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
     ToolCallRequest, ToolDescriptor, evaluate_connector_call, evaluate_tool_call, input_sha256,
 };
+use catervas_core::governor::team_rules::CATERVAS_KEYS;
 use catervas_core::marketing::active_plan;
 use catervas_core::team::{AgentStatus, Team};
 use catervas_protocol::event::{
@@ -361,6 +362,7 @@ fn judge_call(
             .map(ToString::to_string)
             .collect()
     });
+    let rules = team.rules_for(&registration.agent_id);
     evaluate_tool_call(
         &ToolCallRequest {
             tool: ToolDescriptor {
@@ -376,8 +378,8 @@ fn judge_call(
         },
         &ToolCallContext {
             allowed_paths,
-            protected_paths: team.rules().protected_paths,
-            read_only_paths: team.rules().read_only_paths,
+            protected_paths: rules.protected_paths,
+            read_only_paths: rules.read_only_paths,
             approved_calls: Vec::new(),
         },
     )
@@ -522,8 +524,9 @@ fn in_read_root(
             .map(|part| part.as_os_str().to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
-        let mut protected = team.rules().protected_paths;
+        let mut protected = team.rules_for(&registration.agent_id).protected_paths;
         protected.push(".git/**".to_string());
+        protected.extend(CATERVAS_KEYS.iter().map(|key| (*key).to_string()));
         return judge_in_root(tool, &root.name, &relative, &protected).map(|()| true);
     }
     Ok(false)
@@ -1128,6 +1131,48 @@ mod tests {
             assert!(!decision.allow, "{tool} {input}: {decision:?}");
             denied_for(&decision, "path_protected");
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn judges_a_call_by_the_agents_own_rules() {
+        let daemon = TestDaemon::on_team(
+            "hook-own-rules",
+            |wire| {
+                wire["rules"] = json!({
+                    "protected_paths": ["infra/**"],
+                    "read_only_paths": ["vendor/**"],
+                    "lifted_paths": [".env", ".env.*", "**/*.pem", "**/*.key", ".catervas/local/**"]
+                });
+                wire["agents"][1]["rules"] = json!({ "lifted_paths": ["infra/**"] });
+            },
+            |_| {},
+        );
+        let theo = "9d2e7c41-5a3b-4f08-8c16-0e7a1b2c3d4e";
+        daemon.register(theo, "dev-b", None, DEFAULT_SESSION_LIMITS);
+        let read = json!({ "file_path": daemon.inside("infra/main.tf") });
+        let ada = decide_pre_tool_use(&daemon.dev_call("Read", &read), &daemon.state);
+        assert!(ada.allow, "{ada:?}");
+        let other = decide_pre_tool_use(&daemon.call(theo, "Read", &read), &daemon.state);
+        denied_for(&other, "path_protected");
+
+        let edit = decide_pre_tool_use(
+            &daemon.dev_call(
+                "Edit",
+                &json!({ "file_path": daemon.inside("vendor/x.js"), "old_string": "a", "new_string": "b" }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&edit, "path_read_only");
+
+        let key = decide_pre_tool_use(
+            &daemon.dev_call(
+                "Read",
+                &json!({ "file_path": daemon.inside(".catervas/local/daemon.json") }),
+            ),
+            &daemon.state,
+        );
+        denied_for(&key, "path_protected");
     }
 
     #[test]

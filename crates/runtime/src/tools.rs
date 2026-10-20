@@ -716,6 +716,7 @@ impl Call<'_> {
                 .collect(),
             None => Vec::new(),
         };
+        let rules = self.team.rules_for(self.agent_id());
         evaluate_tool_call(
             &ToolCallRequest {
                 tool: ToolDescriptor {
@@ -731,8 +732,8 @@ impl Call<'_> {
             },
             &ToolCallContext {
                 allowed_paths,
-                protected_paths: self.team.rules().protected_paths,
-                read_only_paths: self.team.rules().read_only_paths,
+                protected_paths: rules.protected_paths,
+                read_only_paths: rules.read_only_paths,
                 approved_calls: Vec::new(),
             },
         )
