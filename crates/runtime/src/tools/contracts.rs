@@ -396,15 +396,20 @@ fn check_given_task_fixed(
     Ok(())
 }
 
-/// Whether a question about `task` is still open: asked, and named by no `question.answered`
-/// (5.7).
+/// Whether a question about `task` is still open: asked, the owner's or the team's (ADR 0082), and
+/// named by no answer (5.7).
 fn has_asked(call: &Call<'_>, task: &TaskId) -> Result<bool, ToolError> {
     let events = call
         .deps()
         .log
         .read(&EventQuery {
             task_id: Some(task.clone()),
-            kinds: vec![EventKind::QuestionAsked, EventKind::QuestionAnswered],
+            kinds: vec![
+                EventKind::QuestionAsked,
+                EventKind::QuestionAnswered,
+                EventKind::TeamQuestionAsked,
+                EventKind::TeamQuestionAnswered,
+            ],
             ..EventQuery::default()
         })
         .map_err(failed)?;
@@ -412,11 +417,15 @@ fn has_asked(call: &Call<'_>, task: &TaskId) -> Result<bool, ToolError> {
         .iter()
         .filter_map(|event| match &event.body {
             EventBody::QuestionAnswered(body) => Some(body.question_id.get()),
+            EventBody::TeamQuestionAnswered(body) => Some(body.question_seq.get()),
             _ => None,
         })
         .collect();
     Ok(events.iter().any(|event| {
-        event.body.kind() == EventKind::QuestionAsked && !answered.contains(&event.envelope.seq)
+        matches!(
+            event.body.kind(),
+            EventKind::QuestionAsked | EventKind::TeamQuestionAsked
+        ) && !answered.contains(&event.envelope.seq)
     }))
 }
 

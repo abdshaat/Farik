@@ -126,7 +126,7 @@ Tests:
 - `orchestrator/autopilot.rs`: `the_architect_answers_a_technical_question_and_the_task_resumes` — under autopilot, with `CTV-1` in progress and the Developer's open technical question, a tick runs one `decide` session of the Architect offered exactly `DECIDE_QUESTION_TOOLS`; its recorded call of `catervas_answer_question` appends `team.question_answered` about `CTV-1`; the row is no longer `waiting_on_human`; the next implement session's `From the human` holds the answer; with autopilot off the same tick runs no decide session and `waiting.list` holds the question as a row.
 - `tools/decide.rs`: `answers_only_an_open_question_put_to_it` — the Developer answering is refused `not_yours`, a second answer `already_answered`, a `question.asked` seq `not_a_team_question`; the owner's `question_answer` of the same open team question is accepted once.
 
-- [ ] `feat(runtime): the team answers its own questions`
+- [x] `feat(runtime): the team answers its own questions`
 
 ### Task 10: the Product Manager takes the owner's decisions
 

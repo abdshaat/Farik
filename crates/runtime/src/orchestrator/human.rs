@@ -854,7 +854,11 @@ fn answer_question(
         .ok_or_else(|| CommandError::NotFound {
             what: format!("question {question_id}"),
         })?;
-    if asked.body.kind() != EventKind::QuestionAsked {
+    // The team's own questions are the owner's to answer too (ADR 0082).
+    if !matches!(
+        asked.body.kind(),
+        EventKind::QuestionAsked | EventKind::TeamQuestionAsked
+    ) {
         return Err(CommandError::Refused {
             reason: format!(
                 "not_a_question: event {question_id} is a {}, not a question.asked",
@@ -865,13 +869,15 @@ fn answer_question(
     let answered = tools
         .log
         .read(&EventQuery {
-            kinds: vec![EventKind::QuestionAnswered],
+            kinds: vec![EventKind::QuestionAnswered, EventKind::TeamQuestionAnswered],
             ..EventQuery::default()
         })
         .map_err(failed)?
         .iter()
-        .any(|event| {
-            matches!(&event.body, EventBody::QuestionAnswered(body) if body.question_id.get() == question_id)
+        .any(|event| match &event.body {
+            EventBody::QuestionAnswered(body) => body.question_id.get() == question_id,
+            EventBody::TeamQuestionAnswered(body) => body.question_seq.get() == question_id,
+            _ => false,
         });
     if answered {
         return Err(CommandError::Refused {

@@ -320,9 +320,11 @@ pub fn decision_on(events: &[CatervasEvent], approval: u64) -> Option<&CatervasE
 }
 
 /// The kinds that say what an agent asked the human, and what the human answered.
-const ASKED: [EventKind; 6] = [
+const ASKED: [EventKind; 8] = [
     EventKind::QuestionAsked,
     EventKind::QuestionAnswered,
+    EventKind::TeamQuestionAsked,
+    EventKind::TeamQuestionAnswered,
     EventKind::EscalationRaised,
     EventKind::ToolApprovalRequested,
     EventKind::ToolApprovalGranted,
@@ -365,7 +367,10 @@ pub fn waiting(
         order: None,
         pipeline: None,
     };
-    let mut waiting = unanswered(&board, &history, &item);
+    // While the team decides, its questions to itself wait on the team, not on the owner
+    // (ADR 0082); turned off, they wait on the owner again.
+    let team_decides = crate::autopilot::team_decides(log, team)?;
+    let mut waiting = unanswered(&board, &history, team_decides, &item);
     waiting.extend(undecided(&board, &history, team, &item));
     waiting.extend(plans_waiting(&board, log, team, &item)?);
     waiting.extend(posts_waiting(&board, log, team, &item)?);
@@ -552,34 +557,36 @@ fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
     TaskStatus::from_str(&status.to_string()).ok()
 }
 
-/// Every question nobody answered, by task.
+/// Every question nobody answered, by task. A question the team asked itself is one only while the
+/// team does not decide.
 fn unanswered(
     board: &[TaskProjection],
     history: &[CatervasEvent],
+    team_decides: bool,
     item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
 ) -> Vec<Waiting> {
     let mut waiting = Vec::new();
     for row in board {
         for event in history {
-            let EventBody::QuestionAsked(body) = &event.body else {
-                continue;
+            let (asked_by, question) = match &event.body {
+                EventBody::QuestionAsked(body) => (&body.asked_by, body.question.clone()),
+                EventBody::TeamQuestionAsked(body) if !team_decides => {
+                    (&body.asked_by, body.question.to_string())
+                }
+                _ => continue,
             };
             let seq = event.envelope.seq;
-            let answered = history.iter().any(|later| {
-                matches!(&later.body, EventBody::QuestionAnswered(answer)
-                    if answer.question_id.get() == seq)
+            let answered = history.iter().any(|later| match &later.body {
+                EventBody::QuestionAnswered(answer) => answer.question_id.get() == seq,
+                EventBody::TeamQuestionAnswered(answer) => answer.question_seq.get() == seq,
+                _ => false,
             });
             if answered || event.envelope.ids.task_id.as_ref() != Some(&row.task_id) {
                 continue;
             }
             waiting.push(Waiting {
                 question_id: Some(seq),
-                ..item(
-                    row,
-                    WaitingKind::Question,
-                    Some(&body.asked_by),
-                    body.question.clone(),
-                )
+                ..item(row, WaitingKind::Question, Some(asked_by), question)
             });
         }
     }

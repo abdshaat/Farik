@@ -716,11 +716,18 @@ fn catervafication_get(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
 }
 
 /// `questions.list`: every question, of `task` when one is named, oldest first, with its answer.
+/// The team's questions to itself are listed as the owner's are (ADR 0082), so that the owner can
+/// answer one too.
 fn questions(deps: &ToolDeps, task: Option<&str>) -> Result<Value, Failure> {
     let events = deps
         .log
         .read(&EventQuery {
-            kinds: vec![EventKind::QuestionAsked, EventKind::QuestionAnswered],
+            kinds: vec![
+                EventKind::QuestionAsked,
+                EventKind::QuestionAnswered,
+                EventKind::TeamQuestionAsked,
+                EventKind::TeamQuestionAnswered,
+            ],
             ..EventQuery::default()
         })
         .map_err(|e| internal(&e))?;
@@ -732,22 +739,33 @@ fn questions(deps: &ToolDeps, task: Option<&str>) -> Result<Value, Failure> {
             })
         })
         .filter_map(|event| {
-            let EventBody::QuestionAsked(body) = &event.body else {
-                return None;
+            let (agent, text, choices) = match &event.body {
+                EventBody::QuestionAsked(body) => (
+                    body.asked_by.clone(),
+                    body.question.clone(),
+                    json!(body.choices),
+                ),
+                EventBody::TeamQuestionAsked(body) => {
+                    (body.asked_by.clone(), body.question.to_string(), json!([]))
+                }
+                _ => return None,
             };
             let seq = event.envelope.seq;
             let answer = events.iter().rev().find_map(|later| match &later.body {
                 EventBody::QuestionAnswered(answer) if answer.question_id.get() == seq => {
                     Some(answer.answer.clone())
                 }
+                EventBody::TeamQuestionAnswered(answer) if answer.question_seq.get() == seq => {
+                    Some(answer.answer.to_string())
+                }
                 _ => None,
             });
             Some(json!({
                 "question_id": seq,
                 "task_id": event.envelope.ids.task_id,
-                "agent_id": body.asked_by,
-                "text": body.question,
-                "choices": body.choices,
+                "agent_id": agent,
+                "text": text,
+                "choices": choices,
                 "answer": answer,
             }))
         })

@@ -1,6 +1,7 @@
 //! The first user message of each kind of session: what it is about, in words the agent reads
 //! before anything else.
 
+use catervas_core::autopilot::QuestionAbout;
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::folders::{DocumentFormat, with_format};
@@ -422,16 +423,20 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
                 decision_block(history, event, body.approval.get(), agent_id)
             }
             _ if event.envelope.seq <= since => None,
+            // The team answered its own question (ADR 0082): the answer is an agent's words, as
+            // the question is.
+            EventBody::TeamQuestionAnswered(body) => {
+                let id = body.question_seq.get();
+                let question = asked_question(history, id);
+                Some(format!(
+                    "Question {id}, asked of the team:\n{}\nAnswer:\n{}",
+                    untrusted_block("question", &question, QUESTION_CAP_BYTES),
+                    untrusted_block("answer", &body.answer, NOTE_CAP_BYTES)
+                ))
+            }
             EventBody::QuestionAnswered(body) => {
                 let id = body.question_id.get();
-                let question = history
-                    .iter()
-                    .find(|asked| asked.envelope.seq == id)
-                    .and_then(|asked| match &asked.body {
-                        EventBody::QuestionAsked(asked) => Some(asked.question.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
+                let question = asked_question(history, id);
                 Some(format!(
                     "Question {id}:\n{}\nAnswer: {}",
                     untrusted_block("question", &question, QUESTION_CAP_BYTES),
@@ -483,6 +488,43 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
     }
     told.extend(blocks);
     (!told.is_empty()).then(|| told.join("\n\n"))
+}
+
+/// The question asked at `seq`, the owner's or the team's, or nothing when the history has none.
+fn asked_question(history: &[CatervasEvent], seq: u64) -> String {
+    history
+        .iter()
+        .find(|asked| asked.envelope.seq == seq)
+        .and_then(|asked| match &asked.body {
+            EventBody::QuestionAsked(asked) => Some(asked.question.clone()),
+            EventBody::TeamQuestionAsked(asked) => Some(asked.question.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The first message of the session in which `answerer` answers a question `asker` put to the team
+/// (ADR 0082 decision 2): the task's title and the question are the agents' words, so they are
+/// untrusted.
+pub(super) fn question_message(
+    answerer: &Agent,
+    asker: &str,
+    about: QuestionAbout,
+    task: &TaskContract,
+    seq: u64,
+    question: &str,
+) -> String {
+    format!(
+        "{answerer}, {asker} asked the team a {about} question about {id}.\n\nThe task's title:\n{title}\n\nThe question:\n{question}\n\nAnswer it with `catervas_answer_question` (question {seq}), as the owner would: decide, and say why in the answer.",
+        answerer = answerer.display_name.as_str(),
+        about = match about {
+            QuestionAbout::Product => "product",
+            QuestionAbout::Technical => "technical",
+        },
+        id = task.id.as_str(),
+        title = untrusted_block("title", &task.title.to_string(), NOTE_CAP_BYTES),
+        question = untrusted_block("question", question, QUESTION_CAP_BYTES),
+    )
 }
 
 /// The owner's answers to this task's blocks and escalations that came before `since`, the start of

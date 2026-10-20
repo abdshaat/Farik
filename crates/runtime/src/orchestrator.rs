@@ -31,6 +31,7 @@ use crate::sleep::Sleeper;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
+mod autopilot;
 mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;

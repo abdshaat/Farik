@@ -211,6 +211,13 @@ pub(super) async fn tick(
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
+    // While autopilot is on, the team answers its own questions and takes the owner's decisions
+    // before any other work is picked (ADR 0082).
+    if let Some(report) =
+        super::autopilot::autopilot_rule(deps, scope, &team, &board, &mut waiting).await?
+    {
+        return Ok(report);
+    }
     if runs(3) {
         for row in waiting_on_nobody(&board, TaskStatus::Rejected)
             .filter(in_scope)
@@ -6811,8 +6818,10 @@ mod tests {
                     "catervas_record_design_review",
                     "catervas_chat_reply",
                     "catervas_take_task",
-                    // Asked of the team only while autopilot is on.
+                    // Asked of the team only while autopilot is on, and answered in a decide
+                    // session.
                     "catervas_ask_team",
+                    "catervas_answer_question",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",

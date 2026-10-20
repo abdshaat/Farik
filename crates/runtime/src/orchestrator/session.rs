@@ -1036,6 +1036,9 @@ const ASK_HUMAN_TOOL: &str = "catervas_ask_human";
 /// The tool that asks the team in the owner's place while autopilot is on (ADR 0082).
 const ASK_TEAM_TOOL: &str = "catervas_ask_team";
 
+/// The tools of the team's decisions, which a decide session alone is offered (ADR 0082).
+const DECIDE_TOOLS_OFFERED: [&str; 1] = ["catervas_answer_question"];
+
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).
 const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
@@ -1121,6 +1124,9 @@ fn offered_tools(
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
         .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
+        .filter(|tool| {
+            !DECIDE_TOOLS_OFFERED.contains(&tool.name) || ask.purpose == SessionPurpose::Decide
+        })
         // Under autopilot nobody asks the owner: the team is asked, except by the Product Manager
         // and an agent working alone, who decide (ADR 0082 decision 2).
         .filter(|tool| match tool.name {
