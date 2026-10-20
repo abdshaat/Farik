@@ -119,7 +119,7 @@ Tests:
 - `team.rs`: `a_kit_row_names_the_tools_the_owners_plan_approves` — the Marketing Specialist's kit row for a connector with plan-marked tools carries them in `plan_approved`; a connector with none has no `plan_approved` key.
 - `hooks.rs`: `an_ask_tool_outside_a_task_says_it_asks_not_that_it_costs` — an `ask` tool called from a session about no task is denied with text containing "asks you first" and not "costs money".
 
-- [ ] `feat(runtime): the web app learns which tools the owner's plan marks`
+- [x] `feat(runtime): the web app learns which tools the owner's plan marks`
 
 ## Verification
 

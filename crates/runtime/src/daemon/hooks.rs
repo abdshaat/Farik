@@ -674,9 +674,14 @@ fn judge_connector(
             allowance: pass.allowance,
             marketing_plan: plan.filter(|_| pass.plan_approved),
         }),
-        Err(ConnectorRefusal::ApprovalNeeded) => {
-            Err(ask(deps, registration, server, tool, &request.tool_input))
-        }
+        Err(ConnectorRefusal::ApprovalNeeded) => Err(ask(
+            deps,
+            registration,
+            server,
+            tool,
+            tag,
+            &request.tool_input,
+        )),
         Err(refusal) => Err(Denial::from(match refusal {
             ConnectorRefusal::ConnectorNotInSession => format!(
                 "connector_not_in_session: {server} is not a connector this session was given"
@@ -794,11 +799,17 @@ fn ask(
     registration: &SessionRegistration,
     server: &str,
     tool: &str,
+    tag: Option<ConnectorTag>,
     input: &Value,
 ) -> Denial {
     if registration.task_id.is_none() {
+        let why = if tag == Some(ConnectorTag::Ask) {
+            "asks you first"
+        } else {
+            "costs money"
+        };
         return Denial::from(format!(
-            "external_effect_refused: {tool} of {server} costs money, \
+            "external_effect_refused: {tool} of {server} {why}, \
              and only a session about a task can ask you to allow it"
         ));
     }
@@ -2589,6 +2600,40 @@ mod tests {
         assert!(
             daemon.events(EventKind::ToolApprovalRequested).is_empty(),
             "nothing is recorded that no row lists and nothing can decide"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_ask_tool_outside_a_task_says_it_asks_not_that_it_costs() {
+        use catervas_core::governor::permissions::ConnectorTag;
+
+        let daemon = TestDaemon::new("hook-ask-no-task", |_| {});
+        with_github(&daemon);
+        {
+            let mut sessions = daemon.state.sessions();
+            let registration = &mut sessions
+                .get_mut("session-github")
+                .expect("registered")
+                .registration;
+            registration.task_id = None;
+            registration.connectors[0]
+                .tools
+                .insert("create_issue".to_string(), ConnectorTag::Ask);
+        }
+
+        let decision = create_issue(&daemon, "session-github", &json!({ "title": "x" }));
+
+        denied_for(&decision, "external_effect_refused");
+        assert!(
+            decision.reason.contains("asks you first"),
+            "{}",
+            decision.reason
+        );
+        assert!(
+            !decision.reason.contains("costs money"),
+            "{}",
+            decision.reason
         );
     }
 
