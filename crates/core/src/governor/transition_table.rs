@@ -59,6 +59,9 @@ pub enum GateId {
     HumanRejection,
     /// The pull request of an accepted task no longer merges (ADR 0069).
     PullRequestConflicted,
+    /// A dependency of the ready task was cancelled, so the plan that named it is the Product
+    /// Manager's to change (ADR 0079).
+    DependencyCancelled,
 }
 
 /// A status pattern in a row: one status, or any status.
@@ -105,7 +108,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 30] = {
+pub static TRANSITION_TABLE: [TransitionRow; 31] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -247,6 +250,12 @@ pub static TRANSITION_TABLE: [TransitionRow; 30] = {
             A::Governor,
             G::PullRequestConflicted,
         ),
+        row(
+            Is(S::Ready),
+            Is(S::Refining),
+            A::Governor,
+            G::DependencyCancelled,
+        ),
         row(Any, Is(S::Escalated), A::Governor, G::GovernorEscalation),
         row(Any, Is(S::Escalated), A::Human, G::None),
         row(Any, Is(S::Cancelled), A::Human, G::None),
@@ -305,29 +314,29 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_thirty_distinct_rows() {
+    fn has_exactly_thirty_one_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 30);
-        assert_eq!(distinct.len(), 30);
+        assert_eq!(TRANSITION_TABLE.len(), 31);
+        assert_eq!(distinct.len(), 31);
     }
 
     #[test]
-    fn has_twenty_six_specific_rows_and_four_any_rows() {
+    fn has_twenty_seven_specific_rows_and_four_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 26);
+        assert_eq!(specific, 27);
         assert_eq!(TRANSITION_TABLE.len() - specific, 4);
     }
 
     #[allow(clippy::too_many_lines)] // reason: the spec table, one line each
     #[test]
     fn matches_every_line_of_the_spec_table() {
-        let lines: [Line; 19] = [
+        let lines: [Line; 20] = [
             (S::Draft, S::Refining, &[(A::ProductManager, G::Triaged)]),
             (
                 S::Refining,
@@ -421,6 +430,11 @@ mod tests {
                 S::Accepted,
                 S::Assigned,
                 &[(A::Governor, G::PullRequestConflicted)],
+            ),
+            (
+                S::Ready,
+                S::Refining,
+                &[(A::Governor, G::DependencyCancelled)],
             ),
         ];
         for (from, to, expected) in lines {

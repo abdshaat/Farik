@@ -264,6 +264,15 @@ pub(super) async fn tick(
             }
         }
     }
+    // A task whose dependency was cancelled goes back to the Product Manager (ADR 0079), before
+    // the plan of a ready task is asked for.
+    if scope.rules == TickRules::All {
+        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+            if let Some(report) = dependency_cancelled(deps, &team, &board, row)? {
+                return Ok(report);
+            }
+        }
+    }
     if runs(8) {
         // The tasks given in a chat go first (ADR 0063): next in their agent's queue.
         let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready)
@@ -1374,6 +1383,17 @@ pub(super) fn governor_moves(
     row: &TaskProjection,
     to: TaskStatus,
 ) -> Result<TransitionOutcome, OrchestratorError> {
+    governor_moves_with(deps, team, row, to, &TransitionAsk::default())
+}
+
+/// `governor_moves`, with what the move brings: the words its channel line carries.
+fn governor_moves_with(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    row: &TaskProjection,
+    to: TaskStatus,
+    ask: &TransitionAsk,
+) -> Result<TransitionOutcome, OrchestratorError> {
     Ok(deps.tools.transitions.request(
         &TransitionRequest {
             task_id: row.task_id.clone(),
@@ -1381,9 +1401,42 @@ pub(super) fn governor_moves(
             actor: TransitionActor::Governor,
             agent_id: None,
         },
-        &TransitionAsk::default(),
+        ask,
         team,
     )?)
+}
+
+/// A `ready` task with a dependency that was cancelled moves to `refining` as the governor, whose
+/// `DependencyCancelled` gate decides (ADR 0079): the Product Manager repoints it. The move's line
+/// in the channel names the dependency. A task the governor would not move is passed over.
+fn dependency_cancelled(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    row: &TaskProjection,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let contract = deps.tools.files.read_contract(&row.task_id)?;
+    let Some(cancelled) = contract.dependencies.iter().find(|dependency| {
+        board.iter().any(|other| {
+            other.task_id.as_str() == dependency.as_str() && other.status == TaskStatus::Cancelled
+        })
+    }) else {
+        return Ok(None);
+    };
+    let ask = TransitionAsk {
+        reason: Some(format!("{} was cancelled", cancelled.as_str())),
+        ..TransitionAsk::default()
+    };
+    match governor_moves_with(deps, team, row, TaskStatus::Refining, &ask)? {
+        TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
+            task_id: row.task_id.clone(),
+            what: format!(
+                "sent it back to refining: {} was cancelled",
+                cancelled.as_str()
+            ),
+        })),
+        TransitionOutcome::Refused(_) => Ok(None),
+    }
 }
 
 /// The task's last `task.transitioned` into `status`.
@@ -3161,6 +3214,40 @@ mod tests {
             "{:?}",
             adapter.started()
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_task_whose_dependency_was_cancelled_back_to_refining() {
+        let harness = Harness::new("orch-dependency-cancelled", |_| {});
+        harness.file("CTV-1", "ready", |_| {});
+        harness
+            .project
+            .moved("CTV-1", "ready", "cancelled", &json!({}));
+        harness.file("CTV-2", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1"]);
+        });
+        let adapter = harness.recorded(Vec::new());
+        let orchestrator = harness.orchestrator(adapter);
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(acted_on(&report), Some("CTV-2"), "{report:?}");
+        assert_eq!(harness.row("CTV-2").status, TaskStatus::Refining);
+        let moves = harness.events(&[EventKind::TaskTransitioned]);
+        let EventBody::TaskTransitioned(last) = &moves.last().expect("a move").body else {
+            panic!("a move");
+        };
+        assert_eq!(last.to.to_string(), "refining");
+        assert_eq!(
+            serde_json::to_value(last.gate).expect("a gate"),
+            json!("dependency_cancelled")
+        );
+        assert_eq!(last.requested_by, "governor");
+        let said = messages(&harness);
+        let line = said.last().expect("a channel line");
+        assert_eq!(line.kind, MessageKind::System);
+        assert!(line.text.contains("CTV-1 was cancelled"), "{}", line.text);
     }
 
     #[tokio::test]

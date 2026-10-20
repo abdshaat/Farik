@@ -25,8 +25,8 @@ use crate::governor::escalation::{
 use crate::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
     check_assignment, check_blocker_resolved, check_blocker_written, check_children_done,
-    check_criteria_recorded, check_design_rejection, check_failed_criterion_ids,
-    check_pull_request_conflicted, check_rejection_reasons,
+    check_criteria_recorded, check_dependency_cancelled, check_design_rejection,
+    check_failed_criterion_ids, check_pull_request_conflicted, check_rejection_reasons,
 };
 use crate::governor::readiness::{ReadinessContext, evaluate_readiness};
 use crate::governor::transition_table::{GateId, TransitionActor, TransitionRow, find_transitions};
@@ -342,6 +342,7 @@ fn named_agent(actor: TransitionActor, contract: &TaskContract) -> Option<&str> 
 }
 
 /// Whether one gate opens, and everything it says when it does not.
+#[allow(clippy::too_many_lines, reason = "one arm for each gate of the table")]
 fn check_gate(
     gate: GateId,
     actor: TransitionActor,
@@ -449,6 +450,9 @@ fn check_gate(
         }
         GateId::PullRequestConflicted => {
             check_pull_request_conflicted(&context.pull_request_conflicts)
+        }
+        GateId::DependencyCancelled => {
+            check_dependency_cancelled(&context.readiness.dependency_statuses)
         }
     }
 }
@@ -692,7 +696,8 @@ fn escalation_reason(gate: GateId, context: &TransitionContext) -> EscalationRea
         | GateId::RejectionReasons
         | GateId::IterationBelowLimit
         | GateId::HumanRejection
-        | GateId::PullRequestConflicted => EscalationReason::ExplicitRequest,
+        | GateId::PullRequestConflicted
+        | GateId::DependencyCancelled => EscalationReason::ExplicitRequest,
     }
 }
 
@@ -2004,7 +2009,7 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 30] {
+    fn every_row() -> [Case; 31] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -2069,12 +2074,18 @@ mod tests {
             case(25, S::Accepted, S::Assigned, A::Governor, |context| {
                 context.pull_request_conflicts = vec!["src/login/form.rs".to_string()];
             }),
-            case(26, S::InProgress, S::Escalated, A::Governor, |context| {
+            case(26, S::Ready, S::Refining, A::Governor, |context| {
+                context
+                    .readiness
+                    .dependency_statuses
+                    .insert("CTV-9".to_string(), TaskStatus::Cancelled);
+            }),
+            case(27, S::InProgress, S::Escalated, A::Governor, |context| {
                 context.permission_denied = true;
             }),
-            case(27, S::InProgress, S::Escalated, A::Human, no_change),
-            case(28, S::InProgress, S::Cancelled, A::Human, no_change),
-            case(29, S::Escalated, S::Ready, A::Human, no_change),
+            case(28, S::InProgress, S::Escalated, A::Human, no_change),
+            case(29, S::InProgress, S::Cancelled, A::Human, no_change),
+            case(30, S::Escalated, S::Ready, A::Human, no_change),
         ]
     }
 

@@ -77,7 +77,7 @@ Files: `docs/schemas/event.schema.json`, core gate enum, `core/src/governor/tran
 Tests:
 - `sends_a_task_whose_dependency_was_cancelled_back_to_refining` (rules.rs) — CTV-2 `ready` depends on CTV-1 `cancelled`; after one tick CTV-2 is `refining`, its transition has actor `governor`, gate `dependency_cancelled`, and the channel has a system line containing "CTV-1 was cancelled".
 
-- [ ] `feat(runtime): a cancelled dependency sends its dependents back to the Product Manager`
+- [x] `feat(runtime): a cancelled dependency sends its dependents back to the Product Manager`
 
 ### Task 4: a send-back to refining reaches the Product Manager
 

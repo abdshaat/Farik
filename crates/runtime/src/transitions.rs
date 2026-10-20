@@ -1532,6 +1532,7 @@ fn gate_wire(gate: GateId) -> GateWire {
         GateId::GovernorEscalation => GateWire::GovernorEscalation,
         GateId::HumanRejection => GateWire::HumanRejection,
         GateId::PullRequestConflicted => GateWire::PullRequestConflicted,
+        GateId::DependencyCancelled => GateWire::DependencyCancelled,
     }
 }
 

@@ -4,6 +4,7 @@
 //! missing rather than only that something is.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 
 use crate::contract::{Role, TaskContract, TaskStatus, wire_method};
 use crate::generated::task_contract::CatervasTaskContractKind as Kind;
@@ -767,6 +768,24 @@ pub fn check_pull_request_conflicted(conflicts: &[String]) -> GateResult {
         ]);
     }
     Ok(())
+}
+
+/// The `DependencyCancelled` gate of `ready -> refining` (ADR 0079): a task the Product Manager
+/// made ready depends on a task that was cancelled, so its plan is the Product Manager's to change.
+///
+/// # Errors
+///
+/// One reason when no dependency is cancelled.
+pub fn check_dependency_cancelled(dependencies: &BTreeMap<String, TaskStatus>) -> GateResult {
+    if dependencies
+        .values()
+        .any(|status| *status == TaskStatus::Cancelled)
+    {
+        return Ok(());
+    }
+    Err(vec![
+        "no dependency of the task was cancelled, so it stays ready".to_string(),
+    ])
 }
 
 /// What the reviewer wrote when it rejected the work.
