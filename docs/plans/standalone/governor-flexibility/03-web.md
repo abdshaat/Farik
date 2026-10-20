@@ -40,7 +40,7 @@ Tests (`components/MessageText.test.tsx`, created if absent):
 - `leaves_a_file_name_alone` — "plans/CTV-1.html" renders no link; "CTV-1 is done." renders one.
 - `says_who_answers_an_unaddressed_message` (`pages/Channel.test.tsx`) — the header contains "A message to no one goes to Mira".
 
-- [ ] `fix(web): the channel marks a waiting task once, leaves file names alone, and says who answers`
+- [x] `fix(web): the channel marks a waiting task once, leaves file names alone, and says who answers`
 
 ### Task 18: Today says each thing once
 

@@ -1150,7 +1150,7 @@ export const en = {
 	draftPlanSent:
 		"Drafting it as {id}. Your team starts building once it is done.",
 	channelIntro:
-		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
+		"Where the team talks. A message to no one goes to {name}. To ask for work, use the request box on Today.",
 	channelMessages: "Messages",
 	channelYou: "You",
 	channelWhy: "Why: {reason}",

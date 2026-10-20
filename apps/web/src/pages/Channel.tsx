@@ -236,6 +236,10 @@ export function Channel() {
 
 	const agents = team?.team.agents ?? [];
 	const rows = waiting?.waiting ?? [];
+	// A message with no `@` goes to the Product Manager (the one agent alone).
+	const live = agents.filter((a) => a.status !== "retired");
+	const listener = (live.find((a) => a.role === "product_manager") ?? live[0])
+		?.displayName;
 	const today = new Date().toISOString().slice(0, 10);
 	const isOpen = (anchor: string) =>
 		opened[anchor] ?? anchor === `thread-standup-${today}`;
@@ -251,7 +255,9 @@ export function Channel() {
 					<h1 id="channel-title" className={styles.title}>
 						{t("channel")}
 					</h1>
-					<p className={styles.muted}>{t("channelIntro")}</p>
+					<p className={styles.muted}>
+						{t("channelIntro", { name: listener ?? t("you") })}
+					</p>
 				</div>
 				<Feed
 					labelledBy="channel-title"
