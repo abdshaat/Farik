@@ -38,7 +38,7 @@ apps/web/src/pages/Costs.tsx, Costs.test.tsx, strings/en.ts   modifies (T14b)
 Tests (integrate.rs, ignored like its neighbours):
 - `opens_a_pull_request_for_an_accepted_plan` — replaces `integrates_a_plan_task_by_its_plan_not_a_pull_request`: an accepted plan task whose plan is not on main, with an origin and the fake `gh`, gets `pull_request.opened` for its branch after one tick; one whose plan is on main is recorded integrated with no `gh` call.
 
-- [ ] `fix(runtime): a plan task opens its own pull request`
+- [x] `fix(runtime): a plan task opens its own pull request`
 
 ### Task 10: a new task starts with the team's accepted documents
 

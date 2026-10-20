@@ -391,14 +391,15 @@ fn integrate_locked(
             return escalate(tools, subject, words).map(Some);
         }
     };
-    // A task that writes an epic's plan opens no pull request: its plan reaches the integration
-    // branch with its tasks' pull requests (ADR 0061).
+    // A task that writes an epic's plan whose plan is already on the integration branch is
+    // recorded integrated; otherwise it goes through the forge like any task (ADR 0079).
     if let Subject::Task(task_id) = subject {
         let contract = tools.files.read_contract(task_id)?;
         if is_plan_task(&contract)
             && let Some(plan) = &contract.plan
+            && let Some(outcome) = carried_plan(tools, subject, &plan.to_string(), &target, asker)?
         {
-            return carried_plan(tools, subject, &plan.to_string(), &target, asker);
+            return Ok(Some(outcome));
         }
     }
     let integrated_before = integrations_of(tools, subject)?;
@@ -421,9 +422,8 @@ fn integrate_locked(
     }))
 }
 
-/// A plan task is integrated once its plan file is on the integration branch, carried there by its
-/// tasks' pull requests; it goes by the file, so that a squash merge counts. `None` while it is
-/// not, on a tick, and a refusal for the human's ask.
+/// A plan task whose plan file is already on the integration branch is integrated by the file, so
+/// that a squash merge counts. `None` while it is not: the task then opens its own pull request.
 fn carried_plan(
     tools: &ToolDeps,
     subject: &Subject,
@@ -438,14 +438,7 @@ fn carried_plan(
         Err(error) => return Err(error.into()),
     };
     if !carried {
-        return match asker {
-            Asker::Tick => Ok(None),
-            Asker::Human => Err(refused(format!(
-                "carried_by_its_tasks: {} writes an epic's plan, which reaches {into} with its \
-                 tasks' pull requests",
-                subject.name()
-            ))),
-        };
+        return Ok(None);
     }
     let head = target.git.merge_base(into, into)?;
     let integrated_by = match asker {
@@ -2515,7 +2508,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    async fn integrates_a_plan_task_by_its_plan_not_a_pull_request() {
+    async fn opens_a_pull_request_for_an_accepted_plan() {
         const PLAN: &str = "docs/catervas/architecture/plans/CTV-9.md";
         let harness = under("int-plan-task", "pull_request");
         let origin = harness.with_origin();
@@ -2544,21 +2537,15 @@ mod tests {
             .answers("create", &format!("{PULL_URL}\n"), "", 0);
         let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
 
-        // Its plan is on its own branch alone: no pull request, nothing on Today, and the human's
-        // ask is told that its tasks carry it.
-        assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
-        assert!(opened(&harness).is_empty());
-        assert!(harness.gh.calls().is_empty(), "{:?}", harness.gh.calls());
+        // Its plan is on its own branch alone: it opens a pull request like any task.
+        orchestrator.tick().await.expect("the tick runs");
+        let recorded = opened(&harness);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].branch, harness.branch("CTV-1"));
         assert!(harness.row("CTV-1").awaiting_integration);
-        assert!(integration_lines(&harness).is_empty());
-        let refusal = orchestrator.integrate(&task("CTV-1")).await;
-        assert!(
-            matches!(&refusal, Err(OrchestratorError::Refused { reason }) if reason.starts_with("carried_by_its_tasks: ")),
-            "{refusal:?}"
-        );
 
-        // Once the plan reaches the integration branch, with its tasks' pull requests, it is
-        // integrated.
+        // Once the plan is on the integration branch, it is integrated with no call to the forge.
+        let calls = harness.gh.calls().len();
         std::fs::create_dir_all(
             harness
                 .project
@@ -2569,6 +2556,7 @@ mod tests {
         .expect("the plans folder is made");
         harness.commit_at_root(PLAN, "# Plan for CTV-9\n", "docs: plan CTV-9");
         orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.gh.calls().len(), calls);
         let integrated = integrations(&harness);
         assert_eq!(integrated.len(), 1, "{integrated:?}");
         assert_eq!(integrated[0].into, "main");
