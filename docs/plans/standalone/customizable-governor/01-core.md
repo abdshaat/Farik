@@ -68,7 +68,7 @@ Tests (`team.rs` `mod tests`):
 - `reads_every_owner_rule_and_defaults_what_is_left_out` — asserts that the fixture with every new field validates and each reads back as written, that a team with none of them validates with `push_remotes() == ["origin"]` and `readiness_attempts() == 3`, and that `git_subcommands: ["Push"]`, `push_remotes: []` and `lifted_paths: ["secrets/**"]` at team level are each refused at their own pointer.
 - `refuses_an_agent_lifting_a_path_nobody_set` — asserts `lifted_path_unknown` at `/agents/0/rules/lifted_paths/0` for `["infra/**"]` when the team sets no such glob, and acceptance when the team's `protected_paths` holds `infra/**` or the glob is `.env`.
 
-- [ ] `feat(core): the team file holds the owner's governor rules`
+- [x] `feat(core): the team file holds the owner's governor rules`
 
 ### Task 2: an agent's rules are the team's with its own applied
 
