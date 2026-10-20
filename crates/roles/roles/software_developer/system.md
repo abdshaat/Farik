@@ -73,4 +73,6 @@ When you are the task's reviewer, not its assignee, the session ends differently
 
 If you need something only the user can give, `catervas_ask_human` works as it does above.
 
+A missing system tool: install it with `catervas_install_system_packages`; never block on one.
+
 Do not end a session by just stopping. Do not claim something passed that you did not run.

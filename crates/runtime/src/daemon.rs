@@ -192,6 +192,14 @@ pub type CommandHandler = Arc<
         + Sync,
 >;
 
+/// What a tool asks to have a task's sandbox made again with the system packages the team file
+/// lists (ADR 0081): the orchestrator's own (`crate::orchestrator::sandbox_recreator`).
+pub type SandboxRecreator = Arc<
+    dyn Fn(&TaskId, &catervas_core::team::Team) -> Result<(), crate::sandbox::SandboxError>
+        + Send
+        + Sync,
+>;
+
 /// What the daemon holds: the project's tools, the sessions it answers for, the notice a
 /// session's loop waits on for a stop, and who takes the human's commands. In setup mode it has no
 /// project's tools, and a host that answers the wizard in their place.
@@ -202,6 +210,9 @@ pub struct DaemonState {
     stops: tokio::sync::Notify,
     wakes: tokio::sync::Notify,
     commands: OnceLock<CommandHandler>,
+    /// What makes a task's sandbox again with the team's system packages (ADR 0081), once the
+    /// orchestrator driving the project in this process has set it.
+    sandbox_recreator: OnceLock<SandboxRecreator>,
     web: OnceLock<web::WebState>,
     /// Held by every write of `team.yaml` from its read to its write, so a change is checked
     /// against the team it replaces.
@@ -323,6 +334,7 @@ impl DaemonState {
             stops: tokio::sync::Notify::new(),
             wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
+            sandbox_recreator: OnceLock::new(),
             web: OnceLock::new(),
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
@@ -355,6 +367,7 @@ impl DaemonState {
             stops: tokio::sync::Notify::new(),
             wakes: tokio::sync::Notify::new(),
             commands: OnceLock::new(),
+            sandbox_recreator: OnceLock::new(),
             web: OnceLock::from(web),
             team_writes: Mutex::new(()),
             connector_secrets: OnceLock::new(),
@@ -679,6 +692,25 @@ impl DaemonState {
     /// is kept.
     pub fn set_command_handler(&self, handler: CommandHandler) -> bool {
         self.commands.set(handler).is_ok()
+    }
+
+    /// Lets tools have a task's sandbox made again through `recreator` from now on. Answers `true`,
+    /// or `false` when one was already set, which is kept.
+    pub fn set_sandbox_recreator(&self, recreator: SandboxRecreator) -> bool {
+        self.sandbox_recreator.set(recreator).is_ok()
+    }
+
+    /// Makes `task_id`'s sandbox again, with the packages `team` lists. `None` when no
+    /// orchestrator is driving the project in this process: the next session makes its sandbox
+    /// with them anyway.
+    pub(crate) fn recreate_sandbox(
+        &self,
+        task_id: &TaskId,
+        team: &catervas_core::team::Team,
+    ) -> Option<Result<(), crate::sandbox::SandboxError>> {
+        self.sandbox_recreator
+            .get()
+            .map(|recreate| recreate(task_id, team))
     }
 
     /// Turns the browser routes on with `web`: until then, and under every driver but
