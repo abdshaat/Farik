@@ -388,7 +388,7 @@ fn integrate_locked(
         // A member that is not there waits, as its tasks do: the human is told why on asking.
         Err(Unresolved::Missing(_)) if asker == Asker::Tick => return Ok(None),
         Err(Unresolved::Missing(words) | Unresolved::Other(words)) => {
-            return escalate(tools, subject, words).map(Some);
+            return escalate(tools, subject, "the integration branch", words).map(Some);
         }
     };
     // A task that writes an epic's plan whose plan is already on the integration branch is
@@ -642,7 +642,7 @@ fn through_the_forge(
         Ok(state) => state,
         Err(error) => {
             let detail = format!("reading the pull request {url} failed: {error}");
-            return escalate(tools, subject, detail).map(Some);
+            return escalate(tools, subject, &target.into, detail).map(Some);
         }
     };
     match state {
@@ -671,7 +671,7 @@ fn through_the_forge(
         PullRequestState::Merged { sha } => merged_on_the_forge(tools, subject, target, &url, sha),
         PullRequestState::Closed if asker == Asker::Tick => {
             let detail = format!("the pull request {url} was closed without merging");
-            let escalated = escalate(tools, subject, detail)?;
+            let escalated = escalate(tools, subject, &target.into, detail)?;
             revert_the_switch(tools, subject)?;
             Ok(Some(escalated))
         }
@@ -729,7 +729,7 @@ fn merged_on_the_forge(
              brought up to it: {}",
             git_words(&error)
         );
-        return escalate(tools, subject, detail).map(Some);
+        return escalate(tools, subject, &target.into, detail).map(Some);
     }
     if switches_storage {
         record_integrated(tools, subject, &sha, into, integrated_by)?;
@@ -765,7 +765,7 @@ fn merge_when_checks_pass(
                  yourself.",
                 names.join(", ")
             );
-            return escalate(tools, subject, detail);
+            return escalate(tools, subject, &target.into, detail);
         }
         Checks::Pending => return Ok(IntegrationOutcome::AwaitingForge),
         Checks::None | Checks::Passed => {}
@@ -779,7 +779,7 @@ fn merge_when_checks_pass(
                 "GitHub will not merge {url} yet: it needs a review or another of the branch's \
                  rules. Merge it yourself once it can."
             );
-            return escalate(tools, subject, detail);
+            return escalate(tools, subject, &target.into, detail);
         }
         MergeState::Clean | MergeState::HasHooks | MergeState::Unstable => {}
         MergeState::Dirty | MergeState::Draft | MergeState::Unknown => {
@@ -790,16 +790,16 @@ fn merge_when_checks_pass(
         Ok(methods) => methods,
         Err(error) => {
             let detail = format!("reading how {url} may be merged failed: {error}");
-            return escalate(tools, subject, detail);
+            return escalate(tools, subject, &target.into, detail);
         }
     };
     let Some(method) = methods.first().copied() else {
         let detail = format!("{} allows no merge method.", repository_of(url));
-        return escalate(tools, subject, detail);
+        return escalate(tools, subject, &target.into, detail);
     };
     if let Err(error) = target.forge.merge_pull_request(url, method, &open.head) {
         let detail = format!("GitHub would not merge {url}: {error}");
-        return escalate(tools, subject, detail);
+        return escalate(tools, subject, &target.into, detail);
     }
     let body = serde_json::from_value(serde_json::json!({ "url": url, "method": method.wire() }))
         .map_err(|error| refused(format!("pull_request_merged_unrecordable: {error}")))?;
@@ -841,7 +841,7 @@ fn stopped_merging(
     let into = target.into.as_str();
     let Subject::Task(task_id) = subject else {
         let detail = format!("the pull request {url} no longer merges into {into}");
-        return escalate(tools, subject, detail);
+        return escalate(tools, subject, &target.into, detail);
     };
     if let Err(error) = target.git.fetch_fast_forward("origin", into) {
         let detail = format!(
@@ -849,7 +849,7 @@ fn stopped_merging(
              up to the remote's: {}",
             git_words(&error)
         );
-        return escalate(tools, subject, detail);
+        return escalate(tools, subject, &target.into, detail);
     }
     // The branch already holds all of the integration branch: the forge's answer is stale, as it
     // is for a while after a push, and there is nothing to bring up to date.
@@ -877,7 +877,7 @@ fn stopped_merging(
                     "pushing {branch} after bringing it up to date failed: {}",
                     git_words(&error)
                 );
-                return escalate(tools, subject, detail);
+                return escalate(tools, subject, &target.into, detail);
             }
             append(
                 tools,
@@ -937,7 +937,7 @@ fn stopped_merging(
                          not be sent back: {}",
                         refusal_details(&refusal).join("; ")
                     );
-                    escalate(tools, subject, detail)
+                    escalate(tools, subject, &target.into, detail)
                 }
             }
         }
@@ -1006,7 +1006,7 @@ fn closed_for_the_human(
                 "the pull request {url} was closed without merging, and {branch} is not in \
                  {into}: reopen it on the forge or merge the branch, then run catervas integrate"
             );
-            let escalated = escalate(tools, subject, detail)?;
+            let escalated = escalate(tools, subject, &target.into, detail)?;
             revert_the_switch(tools, subject)?;
             Ok(escalated)
         }
@@ -1016,7 +1016,7 @@ fn closed_for_the_human(
                  {into} could not be read: {}",
                 git_words(&error)
             );
-            escalate(tools, subject, detail)
+            escalate(tools, subject, &target.into, detail)
         }
     }
 }
@@ -1035,11 +1035,11 @@ fn open(
     match target.git.has_remote("origin") {
         Ok(true) => {}
         Ok(false) => return merged_by_hand(tools, subject, target, branch, asker),
-        Err(error) => return escalate(tools, subject, git_words(&error)),
+        Err(error) => return escalate(tools, subject, &target.into, git_words(&error)),
     }
     if let Err(error) = target.git.push("origin", &format!("refs/heads/{branch}")) {
         let detail = format!("pushing {branch} to origin failed: {}", git_words(&error));
-        return escalate(tools, subject, detail);
+        return escalate(tools, subject, &target.into, detail);
     }
     let title = subject.title(tools)?;
     let body = pull_request_body(tools, subject)?;
@@ -1047,7 +1047,7 @@ fn open(
         Ok(pull_request) => pull_request,
         Err(error) => {
             let detail = format!("opening a pull request for {branch} failed: {error}");
-            return escalate(tools, subject, detail);
+            return escalate(tools, subject, &target.into, detail);
         }
     };
     match subject {
@@ -1072,7 +1072,7 @@ fn open(
                      request number",
                     pull_request.number
                 );
-                return escalate(tools, subject, detail);
+                return escalate(tools, subject, &target.into, detail);
             };
             append_stamped(
                 tools,
@@ -1118,7 +1118,7 @@ fn merged_by_hand(
         Ok(_) => Err(refused(format!(
             "not_merged: {branch} is not in {into} yet; merge it, then ask again"
         ))),
-        Err(error) => escalate(tools, subject, git_words(&error)),
+        Err(error) => escalate(tools, subject, &target.into, git_words(&error)),
     }
 }
 
@@ -1357,24 +1357,38 @@ fn file_the_rederive(tools: &ToolDeps, change: u64) -> Result<(), OrchestratorEr
     Ok(())
 }
 
-/// Appends an integration escalation, which moves nothing, and answers it. A folder change's is
-/// also said in the channel, since Today lists the escalations of tasks.
+/// Appends an integration escalation, which moves nothing, and answers it. It is also said in the
+/// channel, the task's tagged with it, since an owner who does not read the log would otherwise not
+/// learn that `into` did not take the work (ADR 0079).
 fn escalate(
     tools: &ToolDeps,
     subject: &Subject,
+    into: &str,
     detail: String,
 ) -> Result<IntegrationOutcome, OrchestratorError> {
     match subject {
-        Subject::Task(task_id) => append(
-            tools,
-            task_id,
-            None,
-            None,
-            EventBody::EscalationRaised(EscalationRaisedBody {
-                reason: EscalationRaisedBodyReason::Integration,
-                detail: detail.clone(),
-            }),
-        )?,
+        Subject::Task(task_id) => {
+            append(
+                tools,
+                task_id,
+                None,
+                None,
+                EventBody::EscalationRaised(EscalationRaisedBody {
+                    reason: EscalationRaisedBodyReason::Integration,
+                    detail: detail.clone(),
+                }),
+            )?;
+            post_system(
+                &tools.log,
+                tools.clock.as_ref(),
+                &tools.ids,
+                Some(task_id.clone()),
+                &format!(
+                    "{} could not be added to {into}: {detail}",
+                    task_id.as_str()
+                ),
+            )?;
+        }
         Subject::FolderChange(change) => {
             // The detail is cut to the event's bound; the channel says what the log keeps.
             let kept: String = detail.chars().take(4_000).collect();
@@ -3148,6 +3162,40 @@ mod tests {
         let calls = harness.gh.calls().len();
         assert_eq!(orchestrator.tick().await.expect("the tick runs"), idle());
         assert_eq!(harness.gh.calls().len(), calls);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_in_the_channel_that_a_task_could_not_be_integrated() {
+        let (harness, origin) = a_pull_request("int-pr-closed-said", true);
+        harness
+            .gh
+            .answers("view", r#"{"mergeCommit":null,"state":"CLOSED"}"#, "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let said: Vec<_> = harness
+            .events(&[EventKind::MessagePosted])
+            .into_iter()
+            .filter(|event| event.envelope.ids.task_id == Some(task("CTV-1")))
+            .filter_map(|event| match event.body {
+                EventBody::MessagePosted(body) => Some(body.text),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(
+            said[0].starts_with("CTV-1 could not be added to main: "),
+            "{}",
+            said[0]
+        );
+        assert!(
+            said[0].contains("was closed without merging"),
+            "{}",
+            said[0]
+        );
         let _ = std::fs::remove_dir_all(&origin);
     }
 

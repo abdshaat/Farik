@@ -52,7 +52,7 @@ Tests (requests.rs):
 Tests (integrate.rs):
 - `says_in_the_channel_that_a_task_could_not_be_integrated` — a task whose pull request was closed on the forge: after one tick the channel has a system line tagged with the task that contains "could not be added to main".
 
-- [ ] `fix(runtime): a task that could not be integrated is said in the channel`
+- [x] `fix(runtime): a task that could not be integrated is said in the channel`
 
 ### Task 12: `catervas open` prints a new start link
 
