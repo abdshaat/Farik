@@ -1405,6 +1405,14 @@ fn stale_twins_of(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) ->
     catervas_store::document_source::stale_twins_now(&deps.tools.git, &deps.tools.log, team, mode)
 }
 
+/// The agents "Your team" lists in a prompt: everyone not retired (ADR 0081).
+fn roster_of(team: &Team) -> Vec<&Agent> {
+    team.agents
+        .iter()
+        .filter(|agent| agent.status != AgentStatus::Retired)
+        .collect()
+}
+
 /// [`session_spec`], leaving out the custom connectors `left_out` names, as a refresh that did not
 /// finish does for this session alone.
 fn session_spec_without(
@@ -1470,11 +1478,7 @@ fn session_spec_without(
     let stale_twins = stale_twins_of(deps, team, ask);
     let (members, own_repo) = member_lines(deps, ask);
     let attached = attached_of(deps, team, ask)?;
-    let roster: Vec<&Agent> = team
-        .agents
-        .iter()
-        .filter(|agent| agent.status != AgentStatus::Retired)
-        .collect();
+    let roster = roster_of(team);
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
