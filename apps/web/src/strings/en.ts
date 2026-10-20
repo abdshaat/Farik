@@ -2633,7 +2633,6 @@ export const en = {
 	goalPlanning: "{name} is planning the next steps",
 	goalUnderWay: "{open} tasks under way, {done} done",
 	goalUnderWayOne: "1 task under way, {done} done",
-	goalWaitingOnYou: "Waiting on you ({count})",
 	goalPaused: "Paused",
 	goalNextRound: "The next steps are planned when the team is free",
 	goalPlannerOff: "{name} is {status}",

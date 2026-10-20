@@ -180,6 +180,12 @@ describe("the goal card", () => {
 		expect(screen.queryByRole("dialog")).toBeNull();
 	});
 
+	it("does_not_repeat_what_waits_on_you", async () => {
+		await drawn({ goal: { ...A_GOAL, waitingOnOwner: 1 }, lastEnded: null });
+		expect(screen.queryByText(/Waiting on you/)).toBeNull();
+		expect(screen.getByText("5 tasks under way, 3 done")).toBeTruthy();
+	});
+
 	it("shows_progress_and_asks_for_the_owners_word", async () => {
 		const { s } = await drawn({ goal: A_GOAL, lastEnded: null });
 		expect(

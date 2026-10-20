@@ -48,7 +48,7 @@ Tests:
 - `does_not_repeat_what_waits_on_you` (`pages/GoalCard.test.tsx`) — a goal with `waitingOnOwner: 1` shows no "Waiting on you".
 - `holds_suggestions_while_something_waits_on_you` (`pages/Today.test.tsx`) — with one waiting row, no "Suggested connections" heading; with none, the heading shows.
 
-- [ ] `fix(web): Today says what waits on you once, and suggests connections when nothing does`
+- [x] `fix(web): Today says what waits on you once, and suggests connections when nothing does`
 
 ### Task 19: the Team page names the real model
 

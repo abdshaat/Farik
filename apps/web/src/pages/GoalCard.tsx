@@ -336,8 +336,6 @@ function Doing({
 	let line: string;
 	if (goal.status === "paused") line = t("goalPaused");
 	else if (goal.planning) line = t("goalPlanning", { name: planner });
-	else if (goal.waitingOnOwner > 0)
-		line = t("goalWaitingOnYou", { count: goal.waitingOnOwner });
 	else if (goal.open > 0)
 		line =
 			goal.open === 1
