@@ -100,6 +100,7 @@ async function today(fields: {
 	activity?: unknown;
 	waiting?: unknown[];
 	moved?: unknown[];
+	autopilot?: unknown;
 	team?: unknown;
 	docs?: unknown;
 	plan?: unknown;
@@ -124,6 +125,8 @@ async function today(fields: {
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
 	await answerQuery(s, "moved.since", { moved: fields.moved ?? [] });
+	if (fields.autopilot)
+		await answerQuery(s, "autopilot.today", fields.autopilot);
 	if (fields.docs)
 		await answerQuery(s, "folder_doc_proposals.list", fields.docs);
 	if (fields.plan) await answerQuery(s, "product_plan.state", fields.plan);
@@ -134,6 +137,78 @@ async function today(fields: {
 
 describe("today", () => {
 	afterEach(() => vi.unstubAllGlobals());
+
+	it("shows_what_the_team_flagged_and_did_on_its_own", async () => {
+		const at = new Date().toISOString();
+		const { container } = await today({
+			autopilot: {
+				on: true,
+				flagged: [
+					{
+						title: "Take card payments",
+						needs: "a Stripe key",
+						at,
+						task_id: "CTV-3",
+						by: "mira",
+					},
+					{ title: "Launch", needs: "a decision on the name", at, goal: "g1" },
+				],
+				done: [
+					{
+						at,
+						line: "Merged the pull request for CTV-2",
+						agent_id: "ada",
+						task_id: "CTV-2",
+					},
+					{
+						at,
+						line: "Approved the plan for CTV-4",
+						agent_id: "mira",
+						reason: "It matches the request.",
+					},
+				],
+			},
+			waiting: [],
+		});
+		const flagged = await screen.findByRole("heading", {
+			name: t("flaggedTitle", { count: 2 }),
+		});
+		const waiting = screen.getByRole("heading", { name: /Waiting on you/ });
+		expect(
+			flagged.compareDocumentPosition(waiting) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy();
+		const region = within(flagged.closest("section") as HTMLElement);
+		const first = region.getByText(/Mira needs you: a Stripe key/);
+		expect(
+			within(first.closest("li") as HTMLElement)
+				.getAllByRole("link")
+				.map((a) => a.getAttribute("href")),
+		).toContain("/tasks/CTV-3");
+		const goal = region.getByText("Your goal: a decision on the name");
+		expect(
+			within(goal.closest("li") as HTMLElement).queryByRole("link"),
+		).toBeNull();
+
+		const done = within(
+			screen
+				.getByRole("heading", { name: en.doneTitle })
+				.closest("section") as HTMLElement,
+		);
+		expect(done.getByText("Merged the pull request for CTV-2")).toBeTruthy();
+		expect(done.getByText("Approved the plan for CTV-4")).toBeTruthy();
+		expect(done.getByText("Why: It matches the request.")).toBeTruthy();
+		await expectNoAxeViolations(container);
+		cleanup();
+
+		// With the switch off and nothing flagged or done, neither section shows.
+		await today({ autopilot: { on: false, flagged: [], done: [] } });
+		await screen.findByRole("heading", { name: /Waiting on you/ });
+		expect(
+			screen.queryByRole("heading", { name: /Flagged by the team/ }),
+		).toBeNull();
+		expect(screen.queryByRole("heading", { name: en.doneTitle })).toBeNull();
+	});
 
 	it("shows_the_team_band", async () => {
 		const { container } = await today({

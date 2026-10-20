@@ -1,4 +1,5 @@
 import mark from "@catervas/brand/assets/logo-mark-1254.png";
+import type { QueryName } from "@catervas/protocol-client";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -28,6 +29,7 @@ import {
 	DocumentChanges,
 	type DocumentChangesCard,
 } from "./DocumentChanges.tsx";
+import { DoneOnItsOwn, type DoneRow } from "./DoneOnItsOwn.tsx";
 import { DataPipeline, type PipelineAsk } from "./dialogs/DataPipeline.tsx";
 import { isScript, ScriptWarning } from "./dialogs/ScriptWarning.tsx";
 import {
@@ -35,6 +37,7 @@ import {
 	type ToolAsk,
 	visibly,
 } from "./dialogs/ToolApproval.tsx";
+import { FlaggedByTheTeam, type FlaggedRow } from "./FlaggedByTheTeam.tsx";
 import { GoalCard, type GoalState } from "./GoalCard.tsx";
 import { channelName, longRange, money } from "./marketing.ts";
 import { type OrderWaiting, PurchaseOrderRow } from "./OrderRow.tsx";
@@ -216,6 +219,12 @@ export function Today() {
 	// "Later" leaves a quiet card here until the owner starts the documenting work.
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
+	// While autopilot runs: what the team flagged for the owner, and what it did on its own.
+	const { data: autopilot } = useQuery<{
+		on: boolean;
+		flagged: FlaggedRow[];
+		done: DoneRow[];
+	}>("autopilot.today" as QueryName, {});
 	// The team's goal, outside what waits on the owner.
 	const { data: goal, again: askGoalAgain } = useQuery<GoalState>(
 		"goal.get",
@@ -329,6 +338,9 @@ export function Today() {
 			{documenting?.offered && (
 				<CatervaficationCard again={askDocumentingAgain} />
 			)}
+			{autopilot && (
+				<FlaggedByTheTeam rows={autopilot.flagged} agents={agents} />
+			)}
 			{waiting && (
 				<section className={styles.section} aria-labelledby="waiting-heading">
 					<h2 id="waiting-heading">
@@ -407,6 +419,13 @@ export function Today() {
 						<MovedList moved={moved.moved} agents={agents} today={today} />
 					)}
 				</section>
+			)}
+			{autopilot && (autopilot.on || autopilot.done.length > 0) && (
+				<DoneOnItsOwn
+					rows={autopilot.done}
+					agents={agents}
+					today={new Date()}
+				/>
 			)}
 			{team && waiting && nothingWaits && (
 				<SuggestedConnections

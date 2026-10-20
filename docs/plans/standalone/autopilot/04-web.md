@@ -73,7 +73,7 @@ Tests (`settings.test.tsx`):
 Tests (`Today.test.tsx`):
 - `shows_what_the_team_flagged_and_did_on_its_own` — with `autopilot.today` answering a flagged task (`by: "pm"`, `needs: "a Stripe key"`), a goal row and two done rows (one with a reason): "Flagged by the team (2)" is before "Waiting on you", the task row names Mira and links to `/tasks/CTV-3`, the goal row shows its words; "Done on its own" lists both lines, the reason as "Why: …"; with `on: false` and nothing flagged or done neither section is shown.
 
-- [ ] `feat(web): today's flagged by the team and done on its own`
+- [x] `feat(web): today's flagged by the team and done on its own`
 
 ## Verification
 
