@@ -21,6 +21,7 @@ import { Account } from "../pages/settings/Account.tsx";
 import { AllowedActions } from "../pages/settings/AllowedActions.tsx";
 import { Computer } from "../pages/settings/Computer.tsx";
 import { General } from "../pages/settings/General.tsx";
+import { Rules } from "../pages/settings/Rules.tsx";
 import { SavedTeamsPage } from "../pages/settings/SavedTeamsPage.tsx";
 import {
 	SettingsIndex,
@@ -107,6 +108,7 @@ export function App() {
 						element={<General theme={theme} onTheme={setTheme} />}
 					/>
 					<Route path="allowed-actions" element={<AllowedActions />} />
+					<Route path="rules" element={<Rules />} />
 					<Route path="spending" element={<Spending />} />
 					<Route path="work" element={<Work />} />
 					<Route path="your-app" element={<YourApp />} />

@@ -44,7 +44,7 @@ Tests (`settings.test.tsx`):
 - `lifts a shipped path, makes it read only, and adds the owner's own` — on `/settings/rules`, choosing Read only for "Secrets in .env files" (`.env`) and adding `infra/**` as Off limits saves a team whose `rules` are `{ lifted_paths: [".env"], read_only_paths: [".env"], protected_paths: ["infra/**"] }` (in wire form), and the `.env` warning is shown.
 - `keeps Catervas's own files unwritable` — the `.catervas/local/**` row offers Off limits and Read only and no Allowed.
 
-- [ ] `feat(web): the owner chooses which files agents may touch`
+- [x] `feat(web): the owner chooses which files agents may touch`
 
 ### Task 14: commands, git and remotes on the Rules page
 
@@ -52,28 +52,28 @@ Tests (`settings.test.tsx`):
 - `adds a forbidden command in plain words and git the owner allows` — adding "rm -rf" saves `forbidden_commands: ["^rm -rf"]`; adding `fetch` saves `git_subcommands: ["fetch"]`; `Fetch` cannot be added; the eight read-only subcommands show without Remove.
 - `lists the remotes agents may push to` — with `push: true`, the page shows `origin`, adding `fork` saves `push_remotes: ["origin", "fork"]`, and the last remote cannot be removed; with no agent able to push, the part is one line linking to Allowed actions.
 
-- [ ] `feat(web): commands, git and remotes on the Rules page`
+- [x] `feat(web): commands, git and remotes on the Rules page`
 
 ### Task 15: limits and session budgets on the Rules page
 
 Tests (`settings.test.tsx`):
 - `sets when work stops and how long a session runs` — setting readiness attempts to 5 and session minutes to 10 saves `policy.readiness_attempts: 5` and `budgets.session.max_wall_clock_seconds: 600`; Put back clears both from the saved team.
 
-- [ ] `feat(web): limits and session budgets on the Rules page`
+- [x] `feat(web): limits and session budgets on the Rules page`
 
 ### Task 16: an agent's own rules
 
 Tests (`team.test.tsx`):
 - `lifts a team path for one agent and adds its own` — on `/team/ada`, "Lift for Ada" on `infra/**` and adding `notes/**` as Off limits and `max_tool_calls` 50 sends `agent.replace` with `rules: { lifted_paths: ["infra/**"], protected_paths: ["notes/**"] }` and `session: { max_tool_calls: 50 }`, and the team's own rules are unchanged.
 
-- [ ] `feat(web): an agent's own rules`
+- [x] `feat(web): an agent's own rules`
 
 ### Task 17: what each connector tool does
 
 Tests (`connectors.test.tsx`):
 - `sets a tool to run, ask first, or never` — an `external_effect` tool set to Asks first saves `ask`, then Never saves `denied`, then Runs saves `external_effect`; a `paid` tool offers Asks first and Never only; a plan-marked tool shows no choice.
 
-- [ ] `feat(web): the owner sets what each connector tool does`
+- [x] `feat(web): the owner sets what each connector tool does`
 
 ## Verification
 

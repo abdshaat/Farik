@@ -69,6 +69,8 @@ export type KitService = {
 	credentialKeys: string[];
 	/** What the kit lets the user pre-approve: each spending tool with its default calls each day (ADR 0037). */
 	allowances?: { tool: string; calls: number; what: string }[];
+	/** The tools the owner's marketing plan approves (ADR 0042): the agent's page offers no choice for them. */
+	planApproved?: string[];
 	/** The service signs in through Catervas Cloud, which comes with the web launch: this build cannot connect it yet (ADR 0044). */
 	atLaunch?: true;
 };

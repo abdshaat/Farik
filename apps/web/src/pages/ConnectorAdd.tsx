@@ -7,7 +7,8 @@ import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import type { McpServer } from "./setup/TeamSetup.tsx";
 
-export type Tag = "network" | "paid" | "external_effect" | "denied";
+/** A tool's label; `ask` is the owner's choice on the agent's page, never offered when a tool is added. */
+export type Tag = "network" | "paid" | "external_effect" | "ask" | "denied";
 type Listed = { name: string; description: string; usable: boolean };
 type Key = { name: string; value: string };
 /** One of Catervas's own apps signing the user in (phase 7 step 03b): its name, the code to type, where to install it. */
@@ -145,9 +146,18 @@ export const TAGS: [Tag, keyof typeof en, keyof typeof en][] = [
 	["denied", "tagDenied", "tagDeniedNote"],
 ];
 
+/** Every label in the order `labelsSaid` counts them: the four offered, with `ask` before Never. */
+const SAID: [Tag, keyof typeof en][] = [
+	["network", "tagNetwork"],
+	["paid", "tagPaid"],
+	["external_effect", "tagExternal"],
+	["ask", "tagAsk"],
+	["denied", "tagDenied"],
+];
+
 /** "2 Only reads, 1 Never, 1 Catervas can’t use": each label's count, none left out but zeros. */
 export function labelsSaid(tags: Tag[], unusable = 0): string {
-	const said = TAGS.map(([tag, words]) => [
+	const said = SAID.map(([tag, words]) => [
 		tags.filter((x) => x === tag).length,
 		t(words),
 	])

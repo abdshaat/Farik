@@ -15,8 +15,9 @@ import { useQuery } from "../app/store.ts";
 import { type Effort, ModelFields } from "../components/ModelFields.tsx";
 import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
+import { AgentRules, ConnectorTools } from "./AgentRules.tsx";
 import { type AllowanceRow, countSaid, useAllowances } from "./allowances.tsx";
-import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
+import { ConnectorAdd, hostOf, labelsSaid, type Tag } from "./ConnectorAdd.tsx";
 import { ConnectorAllowance } from "./dialogs/ConnectorAllowance.tsx";
 import { type Editing, SkillEdit } from "./dialogs/SkillEdit.tsx";
 import { SkillRead } from "./dialogs/SkillRead.tsx";
@@ -111,6 +112,20 @@ function withPlaywright(agent: Edited, on: boolean): Edited {
 	return mcpServers.length ? { ...rest, mcpServers } : rest;
 }
 
+/** The connector `saved` with the labels of its tools the draft `drafted` chose, tool by tool. */
+function withChosenTools(saved: McpServer, drafted: McpServer | undefined) {
+	if (!saved.tools || !drafted?.tools) return saved;
+	const tools = Object.fromEntries(
+		Object.entries(saved.tools).map(([tool, label]) => [
+			tool,
+			drafted.tools?.[tool] ?? label,
+		]),
+	);
+	return JSON.stringify(tools) === JSON.stringify(saved.tools)
+		? saved
+		: { ...saved, tools };
+}
+
 /**
  * The draft's own edits laid over the agent as last read. What the page changes outside Save, a
  * custom or kit connector added or removed and the agent's status, stays as the daemon last said (I3).
@@ -121,9 +136,17 @@ function rebased(draft: Edited, saved: Edited): Edited {
 	);
 	const kept = saved.mcpServers ?? [];
 	const mcpServers = [
-		// A custom or a kit connector is as the daemon last said, whatever the draft holds.
+		// A custom or a kit connector is as the daemon last said, except for the tool choices the
+		// draft holds (ADR 0080).
 		...kept.flatMap((c) =>
-			c.source !== "builtin" ? [c] : builtins.filter((b) => b.name === c.name),
+			c.source !== "builtin"
+				? [
+						withChosenTools(
+							c,
+							draft.mcpServers?.find((d) => d.name === c.name),
+						),
+					]
+				: builtins.filter((b) => b.name === c.name),
 		),
 		...builtins.filter((b) => !kept.some((c) => c.name === b.name)),
 	];
@@ -134,6 +157,8 @@ function rebased(draft: Edited, saved: Edited): Edited {
 		model: draft.model,
 		grants: draft.grants,
 		revokes: draft.revokes,
+		rules: draft.rules,
+		session: draft.session,
 	};
 	return mcpServers.length ? { ...rest, mcpServers } : rest;
 }
@@ -348,6 +373,16 @@ function Editor({
 		}
 		setBusy(false);
 	};
+	/** The agent with the labels of `server`'s tools as chosen. */
+	const chooseTools = (server: string, tools: Record<string, Tag>) =>
+		setDraft({
+			...agent,
+			mcpServers: (agent.mcpServers ?? []).map((c) =>
+				c.name === server ? { ...c, tools } : c,
+			),
+		});
+	const draftOf = (server: string) =>
+		(agent.mcpServers ?? []).find((c) => c.name === server);
 	const browsing = (agent.mcpServers ?? []).some(
 		(c) => c.name === PLAYWRIGHT.name,
 	);
@@ -453,6 +488,12 @@ function Editor({
 					</Button>
 				</span>
 			</section>
+			<AgentRules
+				name={name}
+				team={team}
+				agent={agent}
+				onChange={(next) => setDraft(next)}
+			/>
 			<section className={styles.section} aria-labelledby="connectors-heading">
 				<div className={styles.titled}>
 					<h2 id="connectors-heading">{t("connectors")}</h2>
@@ -502,6 +543,8 @@ function Editor({
 										storedIn={stateOf(service.name)?.storedIn}
 										provider={stateOf(service.name)?.provider}
 										name={name}
+										tools={draftOf(service.name)?.tools}
+										onTools={(tools) => chooseTools(service.name, tools)}
 										made={allowanceRows(service.name)}
 										onChange={() => setChanging(service.name)}
 										onConnect={() =>
@@ -562,6 +605,8 @@ function Editor({
 										auth={stateOf(c.name)?.auth}
 										provider={provider}
 										name={name}
+										tools={draftOf(c.name)?.tools}
+										onTools={(tools) => chooseTools(c.name, tools)}
 										onAgain={() => setAdding({ again: c })}
 										onSignInAgain={() =>
 											setAdding({
@@ -749,11 +794,16 @@ function CustomRow({
 	auth,
 	provider,
 	name,
+	tools,
+	onTools,
 	onAgain,
 	onSignInAgain,
 	onRemove,
 }: {
 	server: McpServer;
+	/** The tools' labels as the page now has them, and a change of them. */
+	tools: McpServer["tools"];
+	onTools: (tools: Record<string, Tag>) => void;
 	state: ConnectorState["state"] | undefined;
 	storedIn: ConnectorState["storedIn"];
 	auth: ConnectorState["auth"];
@@ -798,6 +848,14 @@ function CustomRow({
 					</Button>
 				</span>
 			</div>
+			<ConnectorTools
+				name={name}
+				tools={tools}
+				savedTools={server.tools}
+				words={{}}
+				planMarked={[]}
+				onChange={onTools}
+			/>
 			{signedIn && state === "connected" && (
 				<p>{t("connectorSignedIn", { host: provider ?? host })}</p>
 			)}
@@ -845,11 +903,16 @@ function KitRow({
 	storedIn,
 	provider,
 	name,
+	tools,
+	onTools,
 	made,
 	onChange,
 	onConnect,
 	onRemove,
 }: {
+	/** The tools' labels as the page now has them, and a change of them. */
+	tools: McpServer["tools"];
+	onTools: (tools: Record<string, Tag>) => void;
 	service: KitService;
 	held: McpServer | undefined;
 	state: ConnectorState["state"] | undefined;
@@ -892,6 +955,16 @@ function KitRow({
 								})}
 					</p>
 				</>
+			)}
+			{connected && (
+				<ConnectorTools
+					name={name}
+					tools={tools}
+					savedTools={held?.tools}
+					words={service.labels}
+					planMarked={service.planApproved ?? []}
+					onChange={onTools}
+				/>
 			)}
 			{connected && made.length > 0 && (
 				<p>
