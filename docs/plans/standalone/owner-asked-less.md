@@ -114,7 +114,7 @@ Files: `runtime/src/orchestrator/rules.rs` (`idle`), `runtime/src/orchestrator/v
 - `says_which_task_waits_for_the_owners_acceptance` (rules.rs, ignored) — a verifying task with a passed review and an unanswered `human` criterion, and a ready task depending on it: the idle report names "CTV-2 waits for you to accept it" and "CTV-3 waits for CTV-2", not "nothing on the board needs doing".
 - `lists_a_task_waiting_for_the_owners_verdict` (daemon/gates.rs) — that verifying task appears in `waiting.list` as an `acceptance` row.
 - `heads_the_send_back_with_the_task_id` (ChangePlan test) — the heading reads "Send CTV-23 back to its plan?".
-- [ ] `fix(runtime): idle says what waits on the owner, and the send-back heading is short`
+- [x] `fix(runtime): idle says what waits on the owner, and the send-back heading is short`
 
 ## Verification
 

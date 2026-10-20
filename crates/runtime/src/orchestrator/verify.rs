@@ -131,6 +131,7 @@ pub(super) async fn verifying(
     // Only the human's answer satisfies a `human` criterion: until it is given, a session would ask
     // for a move the Definition of Done refuses.
     if contract.exit_criteria.iter().any(is_human) && !context.done.human_accepted {
+        waiting.owner_accepts.push(row.task_id.as_str().to_string());
         return Ok(ran_criteria(row, ran));
     }
     accept(
