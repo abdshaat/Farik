@@ -3,17 +3,29 @@
 //! agent put to the team, which resumes the task as the owner's answer does. They are offered to a
 //! `decide` session alone.
 
-use catervas_core::autopilot::{QuestionAbout, answerer};
-use catervas_core::contract::Role;
+use std::num::NonZeroU64;
+
+use catervas_core::autopilot::{
+    DecideChoice, DecideMove, QuestionAbout, Spent, answerer, choices_for, move_of,
+};
+use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::governor::transition_table::TransitionActor;
 use catervas_protocol::event::{EventBody, EventKind};
-use catervas_protocol::generated::event::TeamQuestionAskedBodyAbout;
+use catervas_protocol::generated::event::{
+    EscalationResolvedBody, TaskRoomGrantedBody, TeamQuestionAskedBodyAbout,
+};
 use catervas_store::EventQuery;
+use catervas_store::autopilot::{flags, team_decides, team_spent};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::refusal::Refusal;
+use super::work::ask_governor;
 use super::{Call, ToolError, failed};
+use crate::choices::{Waits, waits_of};
+use crate::goals::planner;
+use crate::transitions::{TransitionAsk, status_wire};
 
 /// `catervas_answer_question`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -23,6 +35,28 @@ pub(crate) struct AnswerQuestionInput {
     question_seq: u64,
     /// The answer, in 1 to 4000 characters: decide, and say why.
     answer: String,
+}
+
+/// `catervas_decide`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DecideInput {
+    /// The task whose wait you decide, or leave it out and name `folder_change`.
+    #[serde(default)]
+    task_id: Option<String>,
+    /// The folder change whose failed integration you decide, or leave it out and name `task_id`.
+    #[serde(default)]
+    folder_change: Option<u64>,
+    /// One of the choices the first message offers, by its name.
+    choice: String,
+    /// Why, in one or two sentences (1 to 600 characters).
+    reason: String,
+    /// For `answer_block`: the answer the task reads, in 1 to 4000 characters.
+    #[serde(default)]
+    answer: Option<String>,
+    /// For `flag`: what only the owner can give, in 1 to 300 characters.
+    #[serde(default)]
+    needs: Option<String>,
 }
 
 fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
@@ -104,12 +138,233 @@ pub(super) fn answer_question(
     Ok(json!({ "answered": seq }))
 }
 
+/// Moves `task` to `status` as the Product Manager, as the owner's resolution does (ADR 0082
+/// decision 3): the room granted first when the choice gives room, then the governor's move, then
+/// the resolution. `ask` and the resolution's message are the decision's words.
+fn move_the_task(
+    call: &Call<'_>,
+    task: &TaskId,
+    status: TaskStatus,
+    (extra_tries, extra_room): (Option<u8>, bool),
+    (ask, message): (TransitionAsk, String),
+) -> Result<(), ToolError> {
+    if extra_room {
+        let contract = call.deps().files.read_contract(task).map_err(failed)?;
+        call.append(
+            Some(task),
+            EventBody::TaskRoomGranted(TaskRoomGrantedBody {
+                sessions: contract.budget.max_sessions,
+                cost_usd: contract.budget.max_cost_usd,
+                granted_by: call.agent_id().to_string(),
+            }),
+        )?;
+    }
+    ask_governor(
+        call,
+        task.clone(),
+        status,
+        TransitionActor::ProductManager,
+        ask,
+    )?;
+    call.append(
+        Some(task),
+        EventBody::EscalationResolved(EscalationResolvedBody {
+            to: status_wire(status).map_err(failed)?,
+            message,
+            resolved_by: call.agent_id().to_string(),
+            extra_tries: extra_tries.and_then(|tries| NonZeroU64::new(u64::from(tries))),
+        }),
+    )?;
+    Ok(())
+}
+
+/// Records the decision, `team.decided`, about `task`, and, for a flag, `task.flagged` after it.
+fn record_decision(
+    call: &Call<'_>,
+    task: &TaskId,
+    (choice, reason): (DecideChoice, &str),
+    (answer, needs): (Option<String>, Option<String>),
+) -> Result<(), ToolError> {
+    let decided = serde_json::from_value(json!({
+        "choice": choice.wire(),
+        "reason": reason,
+        "decided_by": call.agent_id(),
+        "answer": answer,
+        "needs": needs,
+    }))
+    .map_err(|_| ToolError::InvalidInput {
+        detail: "the decision's words are not ones the log can hold".to_string(),
+    })?;
+    call.append(Some(task), EventBody::TeamDecided(decided))?;
+    if let Some(needs) = needs {
+        let flagged = serde_json::from_value(json!({
+            "needs": needs,
+            "flagged_by": call.agent_id(),
+        }))
+        .map_err(|_| ToolError::InvalidInput {
+            detail: "what the owner must give is not words the log can hold".to_string(),
+        })?;
+        call.append(Some(task), EventBody::TaskFlagged(flagged))?;
+    }
+    Ok(())
+}
+
 /// A role's name for a refusal an agent reads.
 fn role_name(role: Role) -> &'static str {
     match role {
         Role::Architect => "Architect",
         _ => "Product Manager",
     }
+}
+
+/// Decides what waits on the owner, in the owner's place (ADR 0082 decision 3): the choices are the
+/// owner's, offered within the team's limits, and `flag` leaves what only the owner can give on
+/// Today. The move is asked of the governor as the Product Manager, whose `Autopilot` rows open
+/// where the owner's would; a refusal records nothing and returns the gate's words. Each decision
+/// ends with `team.decided`.
+pub(super) fn decide(call: &Call<'_>, input: &DecideInput) -> Result<Value, ToolError> {
+    if !team_decides(&call.deps().log, &call.team).map_err(failed)? {
+        return Err(refused(
+            "autopilot_off",
+            "autopilot is off, so the owner decides what waits",
+        ));
+    }
+    if planner(&call.team).map(|agent| agent.id.as_str()) != Some(call.agent_id()) {
+        return Err(refused(
+            "not_yours",
+            "the Product Manager decides for the team, or the one agent when it works alone",
+        ));
+    }
+    let reason = input.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 600 {
+        return Err(refused(
+            "reason_required",
+            "say why in 1 to 600 characters: the log is where somebody reads it back",
+        ));
+    }
+    match (&input.task_id, input.folder_change) {
+        (Some(task), None) => decide_task(call, task, input, reason),
+        (None, Some(_)) => Err(refused(
+            "not_waiting_on_the_team",
+            "no folder change waits on the team",
+        )),
+        _ => Err(refused(
+            "name_one",
+            "name the task (task_id) or the folder change (folder_change) you decide, and one only",
+        )),
+    }
+}
+
+/// The wire names of `offered`, for a refusal that lists them.
+fn named(offered: &[DecideChoice]) -> String {
+    offered
+        .iter()
+        .map(|choice| choice.wire())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// A text of 1 to `most` characters, or `code`'s refusal.
+fn written(
+    text: Option<&String>,
+    most: usize,
+    code: &'static str,
+    what: &str,
+) -> Result<String, ToolError> {
+    match text.map(|text| text.trim()) {
+        Some(text) if !text.is_empty() && text.chars().count() <= most => Ok(text.to_string()),
+        _ => Err(refused(code, format!("{what} in 1 to {most} characters"))),
+    }
+}
+
+fn decide_task(
+    call: &Call<'_>,
+    task: &str,
+    input: &DecideInput,
+    reason: &str,
+) -> Result<Value, ToolError> {
+    let deps = call.deps();
+    let task: TaskId = task.parse().map_err(|_| ToolError::InvalidInput {
+        detail: format!("task_id: {task} is not a task id"),
+    })?;
+    let row = call.row(&task)?;
+    let standing = flags(&deps.log).map_err(failed)?;
+    let wait: Option<Waits> = if standing
+        .iter()
+        .any(|flag| flag.task_id.as_ref() == Some(&task))
+    {
+        None
+    } else {
+        waits_of(&deps.log, &deps.projections, &task).map_err(failed)?
+    };
+    let Some(wait) = wait else {
+        return Err(refused(
+            "not_waiting_on_the_team",
+            format!("{} waits on nothing the team decides", task.as_str()),
+        ));
+    };
+    let spent: Spent = team_spent(&deps.log, &task).map_err(failed)?;
+    let offered = choices_for(&wait.reason, wait.before, wait.blocked_from, spent);
+    let choice = DecideChoice::from_wire(&input.choice).filter(|choice| offered.contains(choice));
+    let Some(choice) = choice else {
+        return Err(refused(
+            "choice_not_offered",
+            format!(
+                "{} is not offered here; offered: {}",
+                input.choice,
+                named(&offered)
+            ),
+        ));
+    };
+    let answer = if choice == DecideChoice::AnswerBlock {
+        Some(written(
+            input.answer.as_ref(),
+            4000,
+            "answer_required",
+            "answer the block",
+        )?)
+    } else {
+        None
+    };
+    let needs = if choice == DecideChoice::Flag {
+        Some(written(
+            input.needs.as_ref(),
+            300,
+            "needs_required",
+            "say what the owner must give",
+        )?)
+    } else {
+        None
+    };
+    match move_of(choice, wait.before, wait.blocked_from) {
+        Some(DecideMove::To {
+            status,
+            extra_tries,
+            extra_room,
+        }) => {
+            let text = answer.clone().unwrap_or_else(|| reason.to_string());
+            let ask = TransitionAsk {
+                reason: Some(text.clone()),
+                grants_tries: extra_tries.is_some(),
+                blocker_resolution: (row.status == TaskStatus::Blocked).then(|| text.clone()),
+                ..TransitionAsk::default()
+            };
+            move_the_task(call, &task, status, (extra_tries, extra_room), (ask, text))?;
+        }
+        Some(DecideMove::Reopen | DecideMove::Flag) => {}
+        Some(_) | None => {
+            return Err(refused(
+                "choice_not_offered",
+                format!(
+                    "{} is not offered here; offered: {}",
+                    input.choice,
+                    named(&offered)
+                ),
+            ));
+        }
+    }
+    record_decision(call, &task, (choice, reason), (answer, needs))?;
+    Ok(json!({ "decided": choice.wire(), "task_id": task.as_str() }))
 }
 
 #[cfg(test)]

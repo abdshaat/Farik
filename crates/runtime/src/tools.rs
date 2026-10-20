@@ -281,6 +281,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Autopilot: answer a question an agent put to the team, as the owner would. Decide, and say why in the answer.",
         ),
+        tool::<decide::DecideInput>(
+            "catervas_decide",
+            Read,
+            "Autopilot: decide what waits on the owner, with one of the choices the first message offers and your reason; or flag what only the owner can give. Name the task, or the folder change.",
+        ),
         tool::<bugs::FileBugInput>(
             "catervas_file_bug",
             Read,
@@ -537,6 +542,7 @@ pub async fn call_tool(
         "catervas_file_goal_work" => goals::file_goal_work(&call, &parse(input)?),
         "catervas_record_goal_progress" => goals::record_goal_progress(&call, &parse(input)?),
         "catervas_answer_question" => decide::answer_question(&call, &parse(input)?),
+        "catervas_decide" => decide::decide(&call, &parse(input)?),
         "catervas_file_bug" => bugs::file_bug(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
@@ -915,6 +921,7 @@ mod tests {
             "catervas_file_goal_work",
             "catervas_record_goal_progress",
             "catervas_answer_question",
+            "catervas_decide",
             "catervas_file_bug",
             "catervas_write_folder_doc",
             "catervas_post_message",
@@ -964,7 +971,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..39] {
+        for tool in &tools[..40] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

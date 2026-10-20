@@ -136,7 +136,7 @@ Tests:
 - `orchestrator/autopilot.rs`: `the_product_manager_decides_an_escalation_with_the_owners_choices` — an `iterations` escalation under autopilot gets one `decide` session of the Product Manager offered exactly `DECIDE_TOOLS`, whose first message names `more_tries`, `back_to_plan`, `cancel` and `flag`; its `catervas_decide { choice: "more_tries" }` moves the task to `in_progress` as actor `product_manager` with gate `autopilot`, appends `escalation.resolved { resolved_by: "pm", extra_tries: 2 }` and `team.decided`, and the task's iteration limit grows by 2 as the owner's would; after three team grants on the task, `more_tries` is refused `choice_not_offered`.
 - `orchestrator/autopilot.rs`: `a_block_waits_an_hour_and_a_flag_holds_it_for_the_owner` — a task blocked 59 minutes ago starts no decide session, at 60 minutes one; `catervas_decide { choice: "flag", needs: "a Stripe key" }` appends `task.flagged`, and later ticks start no decide session for it and rule 4 does not escalate it; a second blocked task whose three decide sessions end without a decision is flagged by `catervas`; `answer_block` without `answer` is refused `answer_required`.
 
-- [ ] `feat(runtime): the product manager takes the owner's decisions`
+- [x] `feat(runtime): the product manager takes the owner's decisions`
 
 ### Task 11: the Product Manager approves, accepts, carries on and retries folder changes
 

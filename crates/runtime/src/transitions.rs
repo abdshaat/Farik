@@ -773,7 +773,7 @@ impl Transitions {
             design_plan_returns: crate::tools::design::returns(&history),
             solo: team.is_solo(),
             documents_stay_local: self.has_no_branch(team, &contract)?,
-            autopilot: false,
+            autopilot: catervas_store::autopilot::autopilot_on(&self.log)?,
             design_reviewer: match (review.state, review.recorded_by) {
                 (ReviewState::Failed, Some((designer, _))) => Some(designer),
                 _ => None,

@@ -1,7 +1,7 @@
 //! The first user message of each kind of session: what it is about, in words the agent reads
 //! before anything else.
 
-use catervas_core::autopilot::QuestionAbout;
+use catervas_core::autopilot::{DecideChoice, QuestionAbout};
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::folders::{DocumentFormat, with_format};
@@ -443,6 +443,14 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
                     body.answer
                 ))
             }
+            // The team's Product Manager decided in the owner's place (ADR 0082): its words are an
+            // agent's.
+            EventBody::EscalationResolved(body) if body.resolved_by != "human" => Some(format!(
+                "{} decided for the team, moving this to {}:\n{}",
+                body.resolved_by,
+                body.to,
+                untrusted_block("decision", &body.message, NOTE_CAP_BYTES)
+            )),
             EventBody::EscalationResolved(body) => Some(format!(
                 "The human, moving this to {}: {}",
                 body.to, body.message
@@ -524,6 +532,40 @@ pub(super) fn question_message(
         id = task.id.as_str(),
         title = untrusted_block("title", &task.title.to_string(), NOTE_CAP_BYTES),
         question = untrusted_block("question", question, QUESTION_CAP_BYTES),
+    )
+}
+
+/// The first message of the session in which the Product Manager decides what waits on the owner
+/// (ADR 0082 decision 3): the task, why it waits, the agents' words in untrusted blocks, what it
+/// has used, and the choices with what each does. `used` is its sessions, its sessions' limit and
+/// its dollars.
+pub(super) fn decide_message(
+    decider: &Agent,
+    contract: &TaskContract,
+    status: TaskStatus,
+    reason: &str,
+    detail: &str,
+    used: (u32, u32, f64),
+    offered: &[DecideChoice],
+) -> String {
+    let choices = offered
+        .iter()
+        .map(|choice| format!("- `{}`: {}", choice.wire(), choice.meaning()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{decider}, {id} waits on a decision the owner would make.\n\nThe task's title:\n{title}\n\nIt is {status}, and {why}. What it says:\n{detail}\n\nIt is on try {iteration}, and has used {sessions} of {most} sessions and ${spent:.2} of ${max_usd:.2}.\n\nYou may choose:\n{choices}\n\nDecide with `catervas_decide`.",
+        decider = decider.display_name.as_str(),
+        id = contract.id.as_str(),
+        title = untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
+        status = status,
+        why = catervas_store::waiting::reason_in_words(reason),
+        detail = untrusted_block("detail", detail, NOTE_CAP_BYTES),
+        iteration = contract.iteration,
+        sessions = used.0,
+        most = used.1,
+        spent = used.2,
+        max_usd = contract.budget.max_cost_usd,
     )
 }
 

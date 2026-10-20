@@ -4,20 +4,29 @@
 //! wait that cost `DECIDE_SESSIONS_PER_WAIT` sessions and is still open is flagged by Catervas, so
 //! a loop of sessions that decide nothing ends.
 
-use catervas_core::autopilot::{DECIDE_SESSIONS_PER_WAIT, answerer};
-use catervas_core::contract::Role;
+use catervas_core::autopilot::{
+    BLOCK_WAIT_MINUTES, DECIDE_SESSIONS_PER_WAIT, answerer, choices_for,
+};
+use catervas_core::contract::{Role, TaskStatus};
 use catervas_core::team::Team;
 use catervas_protocol::event::{
     EventBody, EventIds, EventKind, SessionStartedBodyPurpose, new_event,
 };
-use catervas_store::autopilot::{TeamQuestion, flags, open_team_questions, team_decides};
+use catervas_store::autopilot::{
+    TeamQuestion, flags, open_team_questions, team_decides, team_spent,
+};
 use catervas_store::{EventQuery, TaskProjection};
+use chrono::{DateTime, Duration, Utc};
 
-use super::messages::question_message;
+use super::messages::{decide_message, question_message};
 use super::rules::{Waiting, acted, day_is_spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::{OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope};
+use crate::ceremonies::open_escalations;
+use crate::choices::waits_of;
+use crate::goals::planner;
 use crate::session::SessionPurpose;
+use crate::transitions::last_move_into;
 
 /// The Catervas tools a session that answers a question is offered: the reading tools, a decision
 /// to record, a post, the notebook, and the answer.
@@ -31,6 +40,20 @@ pub(super) const DECIDE_QUESTION_TOOLS: &[&str] = &[
     "catervas_post_message",
     "catervas_write_memory",
     "catervas_answer_question",
+];
+
+/// The Catervas tools the session that decides a wait is offered: the same reading and writing
+/// tools, and `catervas_decide` in place of the answer.
+pub(super) const DECIDE_TOOLS: &[&str] = &[
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_write_decision",
+    "catervas_post_message",
+    "catervas_write_memory",
+    "catervas_decide",
 ];
 
 /// How many characters of a question the flag's words keep.
@@ -51,7 +74,179 @@ pub(super) async fn autopilot_rule(
     {
         return Ok(None);
     }
-    answer_a_question(deps, team, board, waiting).await
+    if let Some(report) = answer_a_question(deps, team, board, waiting).await? {
+        return Ok(Some(report));
+    }
+    decide_a_wait(deps, team, board, waiting).await
+}
+
+/// One thing that waits on the owner and that the Product Manager decides instead (decision 3): an
+/// open escalation, or a block that has stood for an hour.
+struct Wait {
+    /// The task.
+    row: TaskProjection,
+    /// The reason, as the log words it, or `blocked`.
+    reason: String,
+    /// What the escalation says, or what the blocker says.
+    detail: String,
+    /// When the wait began, and the seq of the event that began it.
+    began: (DateTime<Utc>, u64),
+}
+
+/// The waits on the owner that the team decides, oldest first.
+fn waits(
+    deps: &OrchestratorDeps,
+    board: &[TaskProjection],
+) -> Result<Vec<Wait>, OrchestratorError> {
+    let log = &deps.tools.log;
+    let now = deps.tools.clock.now();
+    let mut waits = Vec::new();
+    for open in open_escalations(log, &deps.tools.projections)? {
+        let Some(row) = board.iter().find(|row| row.task_id == open.task_id) else {
+            continue;
+        };
+        waits.push(Wait {
+            row: row.clone(),
+            reason: open.reason,
+            detail: open.detail,
+            began: (open.raised_at, open.raised_seq),
+        });
+    }
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Blocked && !row.waiting_on_human)
+    {
+        let moves = log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            kinds: vec![EventKind::TaskTransitioned],
+            ..EventQuery::default()
+        })?;
+        let Some(blocking) = last_move_into(&moves, TaskStatus::Blocked) else {
+            continue;
+        };
+        if now - blocking.envelope.recorded_at < Duration::minutes(BLOCK_WAIT_MINUTES) {
+            continue;
+        }
+        let detail = match &blocking.body {
+            EventBody::TaskTransitioned(body) => body.blocker.as_ref().map_or_else(
+                || "it did not say why".to_string(),
+                |blocker| format!("{} (needs: {})", blocker.description, blocker.needed),
+            ),
+            _ => String::new(),
+        };
+        waits.push(Wait {
+            row: row.clone(),
+            reason: catervas_store::waiting::BLOCKED.to_string(),
+            detail,
+            began: (blocking.envelope.recorded_at, blocking.envelope.seq),
+        });
+    }
+    waits.sort_by_key(|wait| wait.began);
+    Ok(waits)
+}
+
+/// Whether the team already decided `row`'s wait, which began at the event at `began`: its decision
+/// is in the log, and whatever it set going is not this rule's.
+fn decided_since(
+    deps: &OrchestratorDeps,
+    row: &TaskProjection,
+    began: u64,
+) -> Result<bool, OrchestratorError> {
+    Ok(!deps
+        .tools
+        .log
+        .read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            kinds: vec![EventKind::TeamDecided],
+            after_seq: Some(began),
+            ..EventQuery::default()
+        })?
+        .is_empty())
+}
+
+/// The oldest wait the Product Manager can decide now gets its `decide` session (decision 3).
+async fn decide_a_wait(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(decider) = planner(team) else {
+        return Ok(None);
+    };
+    let log = &deps.tools.log;
+    let flagged = flags(log)?;
+    for wait in waits(deps, board)? {
+        let row = &wait.row;
+        if flagged
+            .iter()
+            .any(|flag| flag.task_id.as_ref() == Some(&row.task_id))
+            || decided_since(deps, row, wait.began.1)?
+        {
+            continue;
+        }
+        if decide_sessions_since(deps, row, wait.began.1)? >= DECIDE_SESSIONS_PER_WAIT {
+            flag_by_catervas(deps, row, "a decision the team could not make")?;
+            continue;
+        }
+        if day_is_spent(deps, team, Role::from(decider.role), &mut waiting.day_spent)?
+            | unavailable(deps, decider, &mut waiting.slept)?
+        {
+            continue;
+        }
+        let Some(waits) = waits_of(log, &deps.tools.projections, &row.task_id)? else {
+            continue;
+        };
+        let offered = choices_for(
+            &waits.reason,
+            waits.before,
+            waits.blocked_from,
+            team_spent(log, &row.task_id)?,
+        );
+        let contract = deps.tools.files.read_contract(&row.task_id)?;
+        let state = crate::cost::budget_state(
+            &deps.tools.projections,
+            team,
+            contract.assignee_role,
+            contract.assignee.as_deref(),
+            Some(&contract),
+            &catervas_core::budget::SessionLedger::default(),
+            deps.tools.clock.now(),
+        )?;
+        let initial_prompt = decide_message(
+            decider,
+            &contract,
+            row.status,
+            &wait.reason,
+            &wait.detail,
+            (
+                state.task_sessions,
+                state.task_max_sessions,
+                state.task_spent_usd,
+            ),
+            &offered,
+        );
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent: decider,
+                contract: Some(&contract),
+                purpose: SessionPurpose::Decide,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: Some(DECIDE_TOOLS),
+                in_reply_to: None,
+                thread: None,
+                initial_prompt,
+            },
+        )
+        .await?;
+        return Ok(Some(acted(row, decider, "decision", &end)));
+    }
+    Ok(None)
 }
 
 /// The team's oldest open question that can be answered now gets its answerer's `decide` session.
@@ -200,12 +395,14 @@ fn flag_by_catervas(
 mod tests {
     use std::collections::BTreeSet;
 
+    use catervas_protocol::event::{EventBody, EventKind, GateWire, TransitionActorWire};
     use serde_json::json;
 
     use super::DECIDE_QUESTION_TOOLS;
     use crate::orchestrator::fixtures::Harness;
-    use crate::recorded::fixtures::{implement_stops_early, tool_calls};
+    use crate::recorded::fixtures::{ends_without_a_decision, implement_stops_early, tool_calls};
     use crate::session::SessionPurpose;
+    use crate::tools::ToolError;
     use crate::tools::fixtures::at;
 
     /// The team of three, and an Architect `ada` beside it.
@@ -332,5 +529,210 @@ mod tests {
             listed.iter().any(|row| row.question_id == Some(seq)),
             "{listed:?}"
         );
+    }
+
+    /// The offered tools of the Product Manager's session that decides a wait.
+    fn decide_tools() -> BTreeSet<&'static str> {
+        BTreeSet::from_iter(super::DECIDE_TOOLS.iter().copied())
+    }
+
+    /// CTV-`n` blocked `minutes` before the clock's now, held by `dev-a`.
+    fn blocked_minutes_ago(harness: &Harness, task: &str, minutes: i64) {
+        harness.assigned(task, "dev-a", "dev-b");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        harness
+            .project
+            .moved(task, "assigned", "in_progress", &people);
+        let mut body = people;
+        body["blocker"] = json!({ "description": "the API is down", "needed": "the API" });
+        harness.project.moved_at(
+            at() - chrono::Duration::minutes(minutes),
+            task,
+            "in_progress",
+            "blocked",
+            &body,
+        );
+    }
+
+    async fn decided(
+        harness: &Harness,
+        task: &str,
+        input: serde_json::Value,
+    ) -> Result<serde_json::Value, crate::tools::ToolError> {
+        crate::tools::call_tool(
+            &harness.project.context("pm", Some(task)),
+            "catervas_decide",
+            input,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn the_product_manager_decides_an_escalation_with_the_owners_choices() {
+        let harness = Harness::new("autopilot-escalation", |_| {});
+        harness.escalated_hours_ago("CTV-1", "iterations", 0);
+        autopilot(&harness, true);
+        let adapter = harness.recorded(vec![tool_calls(&[(
+            "catervas_decide",
+            json!({ "task_id": "CTV-1", "choice": "more_tries",
+                    "reason": "One more try is cheap; the failure was small." }),
+        )])]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].agent_id, "pm");
+        assert_eq!(started[0].purpose, SessionPurpose::Decide);
+        let offered: BTreeSet<&str> = started[0]
+            .catervas_tools
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(offered, decide_tools());
+        for choice in ["more_tries", "back_to_plan", "cancel", "flag"] {
+            assert!(
+                started[0].initial_prompt.contains(choice),
+                "{}",
+                started[0].initial_prompt
+            );
+        }
+        assert!(started[0].initial_prompt.contains("catervas_decide"));
+        assert_eq!(
+            harness.row("CTV-1").status,
+            catervas_core::contract::TaskStatus::InProgress
+        );
+        let moves = harness.events(&[EventKind::TaskTransitioned]);
+        let EventBody::TaskTransitioned(last) = &moves[moves.len() - 1].body else {
+            panic!("a move");
+        };
+        assert_eq!(last.actor, TransitionActorWire::ProductManager);
+        assert_eq!(last.gate, GateWire::Autopilot);
+        let resolved = harness.events(&[EventKind::EscalationResolved]);
+        let EventBody::EscalationResolved(body) = &resolved[0].body else {
+            panic!("a resolution");
+        };
+        assert_eq!(body.resolved_by, "pm");
+        assert_eq!(body.extra_tries.map(std::num::NonZeroU64::get), Some(2));
+        let decisions = harness.events(&[EventKind::TeamDecided]);
+        assert_eq!(decisions.len(), 1);
+
+        // After three grants from the team only the choices that change the plan are offered.
+        harness.escalated_hours_ago("CTV-2", "iterations", 0);
+        for _ in 0..3 {
+            harness.project.record_by(
+                Some("pm"),
+                at(),
+                "CTV-2",
+                "team.decided",
+                &json!({ "choice": "more_tries", "reason": "Again.", "decided_by": "pm" }),
+            );
+        }
+        match decided(
+            &harness,
+            "CTV-2",
+            json!({ "task_id": "CTV-2", "choice": "more_tries", "reason": "Once more." }),
+        )
+        .await
+        {
+            Err(ToolError::Refused { reason }) => {
+                assert!(reason.starts_with("choice_not_offered: "), "{reason}");
+                assert!(reason.contains("back_to_plan"), "{reason}");
+            }
+            other => panic!("expected choice_not_offered, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_block_waits_an_hour_and_a_flag_holds_it_for_the_owner() {
+        let harness = Harness::new("autopilot-block", |_| {});
+        autopilot(&harness, true);
+        // Blocked 59 minutes, and exactly an hour.
+        blocked_minutes_ago(&harness, "CTV-1", 59);
+        let adapter = harness.recorded(Vec::new());
+        harness
+            .orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        blocked_minutes_ago(&harness, "CTV-2", 60);
+        let adapter = harness.recorded(vec![tool_calls(&[(
+            "catervas_decide",
+            json!({ "task_id": "CTV-2", "choice": "flag", "needs": "a Stripe key",
+                    "reason": "Only the owner has the key." }),
+        )])]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1);
+        let flagged = harness.events(&[EventKind::TaskFlagged]);
+        assert_eq!(flagged.len(), 1);
+        let EventBody::TaskFlagged(body) = &flagged[0].body else {
+            panic!("a flag");
+        };
+        assert_eq!(
+            (body.needs.as_str(), body.flagged_by.as_str()),
+            ("a Stripe key", "pm")
+        );
+
+        // The flagged task gets no decide session, and rule 4 does not escalate it either.
+        blocked_minutes_ago(&harness, "CTV-3", 30 * 60);
+        harness.project.record(
+            "CTV-3",
+            "task.flagged",
+            &json!({ "needs": "a sign-in", "flagged_by": "catervas" }),
+        );
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(adapter.started().len(), 1, "{:?}", adapter.started());
+        assert_eq!(
+            harness.row("CTV-2").status,
+            catervas_core::contract::TaskStatus::Blocked
+        );
+        assert_eq!(
+            harness.row("CTV-3").status,
+            catervas_core::contract::TaskStatus::Blocked
+        );
+
+        // Three decide sessions that decide nothing end with a flag from Catervas.
+        let stuck = Harness::new("autopilot-block-stuck", |_| {});
+        autopilot(&stuck, true);
+        blocked_minutes_ago(&stuck, "CTV-1", 120);
+        let adapter = stuck.recorded(vec![
+            ends_without_a_decision(),
+            ends_without_a_decision(),
+            ends_without_a_decision(),
+        ]);
+        let orchestrator = stuck.orchestrator(adapter.clone());
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(adapter.started().len(), 3);
+        let flagged = stuck.events(&[EventKind::TaskFlagged]);
+        let EventBody::TaskFlagged(body) = &flagged[0].body else {
+            panic!("a flag");
+        };
+        assert_eq!(body.flagged_by, "catervas");
+        assert_eq!(flagged.len(), 1);
+
+        // An answer to a block needs its words.
+        let answerless = Harness::new("autopilot-block-answer", |_| {});
+        autopilot(&answerless, true);
+        blocked_minutes_ago(&answerless, "CTV-1", 120);
+        match decided(
+            &answerless,
+            "CTV-1",
+            json!({ "task_id": "CTV-1", "choice": "answer_block", "reason": "It is clear." }),
+        )
+        .await
+        {
+            Err(ToolError::Refused { reason }) => {
+                assert!(reason.starts_with("answer_required: "), "{reason}");
+            }
+            other => panic!("expected answer_required, got {other:?}"),
+        }
     }
 }

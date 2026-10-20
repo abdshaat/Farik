@@ -498,7 +498,7 @@ fn actor_for(
 }
 
 /// Asks the door, with the session's id on every event it records.
-fn ask_governor(
+pub(super) fn ask_governor(
     call: &Call<'_>,
     task_id: TaskId,
     to: TaskStatus,

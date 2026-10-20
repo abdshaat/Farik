@@ -1157,7 +1157,12 @@ fn aged(
     scope: &TickScope,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if scope.rules != TickRules::All || scope.task_id.is_some() {
+    // An escalation the team decides is not waiting on the owner, so it grows no older in the
+    // owner's sight (ADR 0082).
+    if scope.rules != TickRules::All
+        || scope.task_id.is_some()
+        || catervas_store::autopilot::team_decides(&deps.tools.log, team)?
+    {
         return Ok(None);
     }
     let already_aged: Vec<u64> = deps
@@ -1283,6 +1288,15 @@ fn blocked(
     team: &Team,
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
+    // A block the team flagged for the owner stays where it is while the team decides
+    // (ADR 0082 decision 4).
+    if catervas_store::autopilot::team_decides(&deps.tools.log, team)?
+        && catervas_store::autopilot::flags(&deps.tools.log)?
+            .iter()
+            .any(|flag| flag.task_id.as_ref() == Some(&row.task_id))
+    {
+        return Ok(None);
+    }
     let Some(blocked_at) = last_move_into(deps, &row.task_id, TaskStatus::Blocked)?
         .map(|event| event.envelope.recorded_at)
     else {
@@ -6822,6 +6836,7 @@ mod tests {
                     // session.
                     "catervas_ask_team",
                     "catervas_answer_question",
+                    "catervas_decide",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",
