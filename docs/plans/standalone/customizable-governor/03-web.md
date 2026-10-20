@@ -66,7 +66,7 @@ Tests (`settings.test.tsx`):
 Tests (`team.test.tsx`):
 - `lifts a team path for one agent and adds its own` — on `/team/ada`, "Lift for Ada" on `infra/**` and adding `notes/**` as Off limits and `max_tool_calls` 50 sends `agent.replace` with `rules: { lifted_paths: ["infra/**"], protected_paths: ["notes/**"] }` and `session: { max_tool_calls: 50 }`, and the team's own rules are unchanged.
 
-- [ ] `feat(web): an agent's own rules`
+- [x] `feat(web): an agent's own rules`
 
 ### Task 17: what each connector tool does
 

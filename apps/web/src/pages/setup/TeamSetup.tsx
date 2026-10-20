@@ -16,6 +16,15 @@ import {
 } from "./PreviewFields.tsx";
 import { slug } from "./SetupProject.tsx";
 
+/** Rules for one agent alone, laid over the team's (ADR 0080). */
+export type AgentRulesFile = {
+	protectedPaths?: string[];
+	readOnlyPaths?: string[];
+	/** Globs of the team's that do not apply to this agent. */
+	liftedPaths?: string[];
+	forbiddenCommands?: string[];
+	gitSubcommands?: string[];
+};
 export type Agent = {
 	id: string;
 	displayName: string;
@@ -29,6 +38,10 @@ export type Agent = {
 	mcpServers?: McpServer[];
 	/** The permission tiers its role lacks and the team gives it. */
 	grants?: Tier[] | undefined;
+	/** Its own rules, laid over the team's. */
+	rules?: AgentRulesFile | undefined;
+	/** Its own session limits, laid over the team's. */
+	session?: SessionLimits | undefined;
 };
 /** An agent's connector as `team.yaml` holds it: a built-in by name, or the user's own (ADR 0030). */
 export type McpServer = {

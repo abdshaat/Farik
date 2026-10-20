@@ -15,6 +15,7 @@ import { useQuery } from "../app/store.ts";
 import { type Effort, ModelFields } from "../components/ModelFields.tsx";
 import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
+import { AgentRules } from "./AgentRules.tsx";
 import { type AllowanceRow, countSaid, useAllowances } from "./allowances.tsx";
 import { ConnectorAdd, hostOf, labelsSaid } from "./ConnectorAdd.tsx";
 import { ConnectorAllowance } from "./dialogs/ConnectorAllowance.tsx";
@@ -134,6 +135,8 @@ function rebased(draft: Edited, saved: Edited): Edited {
 		model: draft.model,
 		grants: draft.grants,
 		revokes: draft.revokes,
+		rules: draft.rules,
+		session: draft.session,
 	};
 	return mcpServers.length ? { ...rest, mcpServers } : rest;
 }
@@ -453,6 +456,12 @@ function Editor({
 					</Button>
 				</span>
 			</section>
+			<AgentRules
+				name={name}
+				team={team}
+				agent={agent}
+				onChange={(next) => setDraft(next)}
+			/>
 			<section className={styles.section} aria-labelledby="connectors-heading">
 				<div className={styles.titled}>
 					<h2 id="connectors-heading">{t("connectors")}</h2>

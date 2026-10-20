@@ -665,6 +665,45 @@ describe("team page", () => {
 		expect(ada.grants).toEqual(["git_remote"]);
 	});
 
+	it("lifts_a_team_path_for_one_agent_and_adds_its_own", async () => {
+		const team = { ...TEAM, rules: { protected_paths: ["infra/**"] } };
+		const { s } = await opened("/team/ada", team);
+		const rules = within(
+			await screen.findByRole("region", {
+				name: t("agentRulesTitle", { name: "Ada" }),
+			}),
+		);
+		// The team's own off-limits file is listed, with a way to lift it for Ada alone.
+		fireEvent.click(
+			rules.getByRole("button", {
+				name: `${t("agentLift", { name: "Ada" })} infra/**`,
+			}),
+		);
+		fireEvent.change(rules.getByLabelText(en.filesAdd), {
+			target: { value: "notes/**" },
+		});
+		// The files come first, so their Add is the first.
+		fireEvent.click(
+			rules.getAllByRole("button", {
+				name: en.filesAddButton,
+			})[0] as HTMLElement,
+		);
+		fireEvent.change(rules.getByLabelText(en.sessionCalls), {
+			target: { value: "50" },
+		});
+		await validated(s, []);
+		fireEvent.click(screen.getByRole("button", { name: en.agentSave }));
+		const sentTeam = await saved(s);
+		const ada = one(sentTeam, "ada");
+		expect(ada.rules).toEqual({
+			lifted_paths: ["infra/**"],
+			protected_paths: ["notes/**"],
+		});
+		expect(ada.session).toEqual({ max_tool_calls: 50 });
+		// The team's own rules are unchanged.
+		expect(sentTeam.rules).toEqual({ protected_paths: ["infra/**"] });
+	});
+
 	it("replaces_an_agent", async () => {
 		const { s } = await opened("/team/theo");
 		fireEvent.click(

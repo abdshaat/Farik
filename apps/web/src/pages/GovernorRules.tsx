@@ -28,7 +28,7 @@ export function withRules(team: Team, patch: Partial<Team["rules"]>): Team {
 type Treatment = "off" | "read" | "allowed";
 
 /** The five globs Catervas ships as off limits, each with its plain name and what lifting it risks. */
-const SHIPPED = [
+export const SHIPPED = [
 	{ glob: ".env", name: "forbiddenSecrets", warn: "forbiddenSecretsWarn" },
 	{ glob: ".env.*", name: "forbiddenSecrets", warn: "forbiddenSecretsWarn" },
 	{ glob: "**/*.pem", name: "forbiddenKeys", warn: "forbiddenKeysWarn" },
@@ -58,8 +58,6 @@ export function ForbiddenFiles(
 	const [mine, setMine] = useState<Team>();
 	const team = mine ?? saved;
 	const { liftedPaths, readOnlyPaths, protectedPaths } = team.rules;
-	const [adding, setAdding] = useState("");
-	const [addKind, setAddKind] = useState<"off" | "read">("off");
 	const { foot } = useChange(part, team);
 
 	const treatment = (glob: string): Treatment =>
@@ -79,29 +77,6 @@ export function ForbiddenFiles(
 						: without(readOnlyPaths, glob),
 			}),
 		);
-
-	const own = [
-		...(protectedPaths ?? []).map((glob) => ({ glob, kind: "off" as const })),
-		...(readOnlyPaths ?? []).map((glob) => ({ glob, kind: "read" as const })),
-	].filter((o) => !SHIPPED_GLOBS.includes(o.glob));
-	const setOwn = (glob: string, kind: "off" | "read" | "none") =>
-		setMine(
-			withRules(team, {
-				protectedPaths:
-					kind === "off"
-						? plus(protectedPaths, glob)
-						: without(protectedPaths, glob),
-				readOnlyPaths:
-					kind === "read"
-						? plus(readOnlyPaths, glob)
-						: without(readOnlyPaths, glob),
-			}),
-		);
-	const add = () => {
-		const glob = adding.trim();
-		if (glob && !SHIPPED_GLOBS.includes(glob)) setOwn(glob, addKind);
-		setAdding("");
-	};
 
 	return (
 		<Part id="rules-files" title={t("rulesFilesTitle")}>
@@ -130,12 +105,69 @@ export function ForbiddenFiles(
 				);
 			})}
 			<h4>{t("filesOwnTitle")}</h4>
+			<OwnFiles
+				idPrefix="files"
+				protectedPaths={protectedPaths}
+				readOnlyPaths={readOnlyPaths}
+				exclude={SHIPPED_GLOBS}
+				onChange={(next) => setMine(withRules(team, next))}
+			/>
+			{foot}
+		</Part>
+	);
+}
+
+/**
+ * The owner's own globs, off limits or read only, each removable, with a field to add one. It
+ * holds no team: `onChange` gets both lists, for the Rules page and for one agent's page.
+ */
+export function OwnFiles({
+	idPrefix,
+	protectedPaths,
+	readOnlyPaths,
+	exclude = [],
+	onChange,
+}: {
+	idPrefix: string;
+	protectedPaths: string[] | undefined;
+	readOnlyPaths: string[] | undefined;
+	/** Globs listed elsewhere, such as the five shipped ones. */
+	exclude?: string[];
+	onChange: (next: {
+		protectedPaths: string[];
+		readOnlyPaths: string[];
+	}) => void;
+}) {
+	const [adding, setAdding] = useState("");
+	const [addKind, setAddKind] = useState<"off" | "read">("off");
+	const own = [
+		...(protectedPaths ?? []).map((glob) => ({ glob, kind: "off" as const })),
+		...(readOnlyPaths ?? []).map((glob) => ({ glob, kind: "read" as const })),
+	].filter((o) => !exclude.includes(o.glob));
+	const setOwn = (glob: string, kind: "off" | "read" | "none") =>
+		onChange({
+			protectedPaths:
+				kind === "off"
+					? plus(protectedPaths, glob)
+					: without(protectedPaths, glob),
+			readOnlyPaths:
+				kind === "read"
+					? plus(readOnlyPaths, glob)
+					: without(readOnlyPaths, glob),
+		});
+	const add = () => {
+		const glob = adding.trim();
+		if (glob && !exclude.includes(glob)) setOwn(glob, addKind);
+		setAdding("");
+	};
+	return (
+		<>
 			{own.length > 0 && (
 				<ul className={styles.globs}>
 					{own.map(({ glob, kind }) => (
 						<li key={glob}>
 							<Segmented
-								name={`own-${glob}`}
+								name={`${idPrefix}-own-${glob}`}
 								legend={glob}
 								options={[
 									{ value: "off", label: t("filesOffLimits") },
@@ -152,13 +184,13 @@ export function ForbiddenFiles(
 				</ul>
 			)}
 			<TextField
-				id="files-add"
+				id={`${idPrefix}-add`}
 				label={t("filesAdd")}
 				value={adding}
 				onChange={setAdding}
 			/>
 			<Segmented
-				name="files-add-kind"
+				name={`${idPrefix}-add-kind`}
 				legend={t("filesAddKind")}
 				options={[
 					{ value: "off", label: t("filesOffLimits") },
@@ -172,8 +204,7 @@ export function ForbiddenFiles(
 					{t("filesAddButton")}
 				</Button>
 			</div>
-			{foot}
-		</Part>
+		</>
 	);
 }
 
@@ -188,21 +219,26 @@ function plainWords(pattern: string): string | undefined {
 }
 
 /** "Commands agents may not run": the owner's words, or under advanced a raw pattern. */
-export function Commands(part: RulePart) {
-	const { saved } = part;
-	const [mine, setMine] = useState<string[]>();
+export function CommandList({
+	idPrefix,
+	patterns,
+	onChange,
+	raw: rawAllowed = true,
+}: {
+	idPrefix: string;
+	patterns: string[];
+	onChange: (next: string[]) => void;
+	/** Whether the list offers its own "Show advanced settings" for a raw pattern. */
+	raw?: boolean;
+}) {
 	const [adding, setAdding] = useState("");
 	const [raw, setRaw] = useState("");
 	const [advanced, setAdvanced] = useState(false);
-	const patterns = mine ?? saved.rules.forbiddenCommands ?? [];
-	const next = mine ? withRules(saved, { forbiddenCommands: mine }) : saved;
-	const { foot } = useChange(part, next);
 	const push = (pattern: string) => {
-		if (!patterns.includes(pattern)) setMine([...patterns, pattern]);
+		if (!patterns.includes(pattern)) onChange([...patterns, pattern]);
 	};
 	return (
-		<Part id="rules-commands" title={t("rulesCommandsTitle")}>
-			<p className={styles.muted}>{t("commandsLead")}</p>
+		<>
 			{patterns.length > 0 && (
 				<ul className={styles.globs}>
 					{patterns.map((pattern) => {
@@ -216,7 +252,9 @@ export function Commands(part: RulePart) {
 								)}
 								<Button
 									kind="quiet"
-									onClick={() => setMine(patterns.filter((p) => p !== pattern))}
+									onClick={() =>
+										onChange(patterns.filter((p) => p !== pattern))
+									}
 								>
 									{t("commandsRemove")}{" "}
 									<span className={setup.hidden}>{words ?? pattern}</span>
@@ -227,7 +265,7 @@ export function Commands(part: RulePart) {
 				</ul>
 			)}
 			<TextField
-				id="command-add"
+				id={`${idPrefix}-add`}
 				label={t("commandsAdd")}
 				value={adding}
 				onChange={setAdding}
@@ -243,15 +281,17 @@ export function Commands(part: RulePart) {
 					{t("commandsAddButton")}
 				</Button>
 			</div>
-			<ShowAdvanced
-				open={advanced}
-				onToggle={() => setAdvanced(!advanced)}
-				controls="command-raw"
-			/>
-			{advanced && (
-				<div id="command-raw">
+			{rawAllowed && (
+				<ShowAdvanced
+					open={advanced}
+					onToggle={() => setAdvanced(!advanced)}
+					controls={`${idPrefix}-raw`}
+				/>
+			)}
+			{rawAllowed && advanced && (
+				<div id={`${idPrefix}-raw`}>
 					<TextField
-						id="command-raw-add"
+						id={`${idPrefix}-raw-add`}
 						label={t("commandsRawAdd")}
 						hint={t("commandsRawHint")}
 						value={raw}
@@ -270,6 +310,24 @@ export function Commands(part: RulePart) {
 					</div>
 				</div>
 			)}
+		</>
+	);
+}
+
+/** "Commands agents may not run": the owner's words, or under advanced a raw pattern. */
+export function Commands(part: RulePart) {
+	const { saved } = part;
+	const [mine, setMine] = useState<string[]>();
+	const next = mine ? withRules(saved, { forbiddenCommands: mine }) : saved;
+	const { foot } = useChange(part, next);
+	return (
+		<Part id="rules-commands" title={t("rulesCommandsTitle")}>
+			<p className={styles.muted}>{t("commandsLead")}</p>
+			<CommandList
+				idPrefix="command"
+				patterns={mine ?? saved.rules.forbiddenCommands ?? []}
+				onChange={setMine}
+			/>
 			{foot}
 		</Part>
 	);
@@ -288,32 +346,40 @@ const READ_ONLY_GIT = [
 ];
 const GIT_WORD = /^[a-z][a-z0-9-]{0,39}$/;
 
-/** "Git in agents' commands": the eight that read, always allowed, and the owner's own. */
-export function Git(part: RulePart) {
-	const { saved } = part;
-	const [mine, setMine] = useState<string[]>();
+/**
+ * The git the owner lists, with a field to add one. The eight that only read are shown as always
+ * allowed on the Rules page (`always`), not on an agent's.
+ */
+export function GitList({
+	idPrefix,
+	listed,
+	always,
+	onChange,
+}: {
+	idPrefix: string;
+	listed: string[];
+	always: boolean;
+	onChange: (next: string[]) => void;
+}) {
 	const [adding, setAdding] = useState("");
-	const listed = mine ?? saved.rules.gitSubcommands ?? [];
-	const next = mine ? withRules(saved, { gitSubcommands: mine }) : saved;
-	const { foot } = useChange(part, next);
 	const word = adding.trim();
 	const wrong = word !== "" && !GIT_WORD.test(word);
 	return (
-		<Part id="rules-git" title={t("rulesGitTitle")}>
-			<p className={styles.muted}>{t("gitLead")}</p>
+		<>
 			<ul className={styles.globs}>
-				{READ_ONLY_GIT.map((sub) => (
-					<li key={sub}>
-						<code>{sub}</code>
-						<span className={styles.muted}>{t("gitAlways")}</span>
-					</li>
-				))}
+				{always &&
+					READ_ONLY_GIT.map((sub) => (
+						<li key={sub}>
+							<code>{sub}</code>
+							<span className={styles.muted}>{t("gitAlways")}</span>
+						</li>
+					))}
 				{listed.map((sub) => (
 					<li key={sub}>
 						<code>{sub}</code>
 						<Button
 							kind="quiet"
-							onClick={() => setMine(listed.filter((g) => g !== sub))}
+							onClick={() => onChange(listed.filter((g) => g !== sub))}
 						>
 							{t("gitRemove")} <span className={setup.hidden}>{sub}</span>
 						</Button>
@@ -324,7 +390,7 @@ export function Git(part: RulePart) {
 				<p className={styles.warn}>{t("gitPushNote")}</p>
 			)}
 			<TextField
-				id="git-add"
+				id={`${idPrefix}-add`}
 				label={t("gitAdd")}
 				value={adding}
 				onChange={setAdding}
@@ -335,13 +401,32 @@ export function Git(part: RulePart) {
 					disabled={word === "" || wrong}
 					onClick={() => {
 						if (!listed.includes(word) && !READ_ONLY_GIT.includes(word))
-							setMine([...listed, word]);
+							onChange([...listed, word]);
 						setAdding("");
 					}}
 				>
 					{t("gitAddButton")}
 				</Button>
 			</div>
+		</>
+	);
+}
+
+/** "Git in agents' commands": the eight that read, always allowed, and the owner's own. */
+export function Git(part: RulePart) {
+	const { saved } = part;
+	const [mine, setMine] = useState<string[]>();
+	const next = mine ? withRules(saved, { gitSubcommands: mine }) : saved;
+	const { foot } = useChange(part, next);
+	return (
+		<Part id="rules-git" title={t("rulesGitTitle")}>
+			<p className={styles.muted}>{t("gitLead")}</p>
+			<GitList
+				idPrefix="git"
+				listed={mine ?? saved.rules.gitSubcommands ?? []}
+				always
+				onChange={setMine}
+			/>
 			{foot}
 		</Part>
 	);
