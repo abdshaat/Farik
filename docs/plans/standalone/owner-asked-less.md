@@ -68,7 +68,7 @@ Files: `core/src/governor/gates.rs` (string + its test), `docs/schemas/team.sche
 Files: `runtime/src/prompt.rs`, `runtime/src/orchestrator/session.rs` (input), `runtime/src/orchestrator/human.rs` (status_effects, replace), `runtime/src/daemon/team.rs`
 - `names_the_current_team` (prompt.rs) — the prompt of a session on a team of Mira, Ada, Ivo (active) and Iris (retired) has a "Your team" section naming Mira, Ada and Ivo with their roles, not Iris, and the sentence about others having left.
 - `says_in_the_channel_who_left_and_who_replaced_them` (human.rs) — retiring Iris posts "Iris has left the team."; replacing Iris with Ivo posts "Ivo replaces Iris as UI/UX Designer."
-- [ ] `feat(runtime): every session knows the current team, and the channel says who left`
+- [x] `feat(runtime): every session knows the current team, and the channel says who left`
 
 ### Task 5: a re-plan runs once per change
 

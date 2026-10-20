@@ -16,8 +16,8 @@ use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
 use catervas_core::team::{
-    Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, changes_code,
-    custom_server, may_build, private_folder,
+    Agent, AgentStatus, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team,
+    changes_code, custom_server, may_build, private_folder,
 };
 use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -1465,6 +1465,11 @@ fn session_spec_without(
     let stale_twins = stale_twins_of(deps, team, ask);
     let (members, own_repo) = member_lines(deps, ask);
     let attached = attached_of(deps, team, ask)?;
+    let roster: Vec<&Agent> = team
+        .agents
+        .iter()
+        .filter(|agent| agent.status != AgentStatus::Retired)
+        .collect();
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1493,6 +1498,7 @@ fn session_spec_without(
         document_format: team.document_format(),
         attached: attached.as_deref(),
         documents_local: catervas_store::document_source::documents_on_disk(team, &deps.tools.log)?,
+        team: &roster,
     })?;
     let limits = session_limits_of(deps, team, ask, interviewing)?;
     Ok(SessionSpec {

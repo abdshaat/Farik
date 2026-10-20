@@ -35,7 +35,7 @@ use super::verify::{governor_results, is_mechanical, since_verifying};
 
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::catervafication::{self, Project};
-use crate::channel::{ChannelError, NewMessage, mentions_in, post};
+use crate::channel::{ChannelError, NewMessage, mentions_in, post, post_system};
 use crate::chat::{ChatError, NewChatMessage, given_request, post_chat};
 use crate::daemon::DaemonState;
 use crate::daemon::{secret_at, with_server};
@@ -2270,7 +2270,7 @@ pub(crate) fn update_agent_with(
     daemon: &DaemonState,
     agent_id: &str,
     status: AgentStatus,
-    newcomer: Option<Agent>,
+    newcomer: Option<&Agent>,
 ) -> Result<CommandReport, CommandError> {
     let _writing = daemon.team_writes();
     update_agent_held(tools, daemon, agent_id, status, newcomer)
@@ -2282,18 +2282,18 @@ pub(crate) fn update_agent_held(
     daemon: &DaemonState,
     agent_id: &str,
     status: AgentStatus,
-    newcomer: Option<Agent>,
+    newcomer: Option<&Agent>,
 ) -> Result<CommandReport, CommandError> {
     let team = with_status(
         &tools.files.read_team().map_err(failed)?,
         agent_id,
         status,
-        newcomer,
+        newcomer.cloned(),
     )?;
     tools.files.write_team(&team).map_err(failed)?;
     Ok(CommandReport {
         said: format!("{agent_id} is {status}"),
-        events: status_effects(tools, daemon, &team, agent_id, status)?,
+        events: status_effects(tools, daemon, &team, agent_id, status, newcomer)?,
     })
 }
 
@@ -2340,6 +2340,7 @@ pub(crate) fn status_effects(
     team: &Team,
     agent_id: &str,
     status: AgentStatus,
+    newcomer: Option<&Agent>,
 ) -> Result<Vec<u64>, CommandError> {
     let mut events = vec![append(
         tools,
@@ -2400,6 +2401,9 @@ pub(crate) fn status_effects(
                     },
                 )?);
             }
+            if status == AgentStatus::Retired {
+                events.extend(says_who_left(tools, team, agent_id, newcomer)?);
+            }
         }
         AgentStatus::Active => {
             for row in held.filter(|row| row.status == TaskStatus::Blocked) {
@@ -2424,6 +2428,37 @@ pub(crate) fn status_effects(
         }
     }
     Ok(events)
+}
+
+/// The channel line that tells the team who left, or who took their place (ADR 0081); its
+/// sequence number.
+fn says_who_left(
+    tools: &ToolDeps,
+    team: &Team,
+    agent_id: &str,
+    newcomer: Option<&Agent>,
+) -> Result<Option<u64>, CommandError> {
+    let Some(gone) = team
+        .agents
+        .iter()
+        .find(|agent| agent.id.as_str() == agent_id)
+    else {
+        return Ok(None);
+    };
+    let line = match newcomer {
+        Some(new) => format!(
+            "{} replaces {} as {}.",
+            new.display_name.as_str(),
+            gone.display_name.as_str(),
+            plain_role(Role::from(gone.role))
+        ),
+        None => format!("{} has left the team.", gone.display_name.as_str()),
+    };
+    post_system(&tools.log, tools.clock.as_ref(), &tools.ids, None, &line)
+        .map(Some)
+        .map_err(|error| CommandError::Failed {
+            detail: format!("{error:?}"),
+        })
 }
 
 /// Deletes the keys of each custom server an agent has in `before` and not in `after`: one taken
@@ -4806,6 +4841,7 @@ mod tests {
             [
                 (json!("agent.updated"), Value::Null),
                 (json!("task.transitioned"), json!("CTV-1")),
+                (json!("message.posted"), Value::Null),
             ]
         );
         assert_eq!(
@@ -5071,6 +5107,55 @@ mod tests {
         assert_eq!(posted[0].envelope.ids.agent_id, None);
         assert_eq!(report.events, vec![posted[0].envelope.seq]);
         assert_eq!(report.said, "posted in the channel");
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_in_the_channel_who_left_and_who_replaced_them() {
+        use catervas_core::team::fixtures::an_agent_wire;
+        let harness = Harness::new("human-team-lines", |wire| {
+            let mut iris = an_agent_wire("iris", "ui_ux_designer");
+            iris["display_name"] = json!("Iris");
+            let mut bea = an_agent_wire("bea", "marketing_specialist");
+            bea["display_name"] = json!("Bea");
+            let agents = wire["agents"].as_array_mut().expect("agents");
+            agents.push(iris);
+            agents.push(bea);
+        });
+        let orchestrator = an_orchestrator(&harness);
+        let lines = |harness: &Harness| -> Vec<String> {
+            harness
+                .events(&[EventKind::MessagePosted])
+                .iter()
+                .map(|event| match &event.body {
+                    EventBody::MessagePosted(body) => body.text.clone(),
+                    other => panic!("a message: {other:?}"),
+                })
+                .collect()
+        };
+
+        super::update_agent(&orchestrator, "bea", AgentStatus::Retired).expect("Bea retires");
+        assert_eq!(lines(&harness), ["Bea has left the team."]);
+
+        let mut ivo = an_agent_wire("ivo", "ui_ux_designer");
+        ivo["display_name"] = json!("Ivo");
+        super::update_agent_with(
+            &orchestrator.deps.tools,
+            &orchestrator.deps.daemon,
+            "iris",
+            AgentStatus::Retired,
+            serde_json::from_value::<catervas_core::team::Agent>(ivo)
+                .ok()
+                .as_ref(),
+        )
+        .expect("Iris is replaced");
+        assert_eq!(
+            lines(&harness),
+            [
+                "Bea has left the team.",
+                "Ivo replaces Iris as UI/UX Designer."
+            ]
+        );
     }
 
     #[tokio::test]
