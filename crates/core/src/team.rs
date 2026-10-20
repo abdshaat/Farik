@@ -97,6 +97,26 @@ pub fn changes_code(role: Role) -> bool {
     matches!(role, Role::SoftwareDeveloper | Role::UiUxDesigner)
 }
 
+/// Whether an agent of `agent_role` may build a task assigned to `task_role` (ADR 0077): its own
+/// role's, and the Architect a Software Developer's too. The task stays the Developer's: its
+/// branch, its review and its lane are decided by the contract's role, not the builder's.
+#[must_use]
+pub fn may_build(agent_role: Role, task_role: Role) -> bool {
+    agent_role == task_role
+        || (agent_role == Role::Architect && task_role == Role::SoftwareDeveloper)
+}
+
+/// Whether an agent of `reviewer_role` may review a task of `contract_reviewer_role` that an agent
+/// of `assignee_role` builds: the contract's reviewer role, and a Software Developer when the
+/// Architect builds a task the Architect reviews (ADR 0077), since it cannot review its own.
+#[must_use]
+pub fn may_review(reviewer_role: Role, contract_reviewer_role: Role, assignee_role: Role) -> bool {
+    reviewer_role == contract_reviewer_role
+        || (contract_reviewer_role == Role::Architect
+            && assignee_role == Role::Architect
+            && reviewer_role == Role::SoftwareDeveloper)
+}
+
 /// Whether an agent reviews the contract's result (ADR 0061): a task, not an epic, whose assignee's
 /// role changes code, and which is not a bug hunt (ADR 0063). Every other contract is accepted or rejected by the governor on the criteria
 /// Catervas runs itself. It is known when the contract is written, before any diff exists.
