@@ -74,7 +74,7 @@ Tests:
 - `claude.rs`: `denies_reads_of_off_limits_and_edits_of_read_only_paths` (extends `wires_both_hooks_and_the_protected_paths_into_the_settings`) — for agent `ada` with `.env` lifted by the team and `read_only_paths: [".env"]`, `permissions.deny` holds `Edit(.env)`, no `Read(.env)`, `Read(.catervas/local/daemon.json)`, `Read(.catervas/local/sessions/**)` and `Edit(.catervas/local/**)`.
 - `transitions.rs`: `hands_the_done_check_the_assignees_unwritable_paths` (extends `hands_the_done_check_the_teams_protected_paths`) — the evidence's `protected_paths` for a task assigned to `ada` holds the team's read-only `vendor/**` and not the `infra/**` `ada` lifted.
 
-- [ ] `feat(runtime): a session's settings and the done check follow the agent's rules`
+- [x] `feat(runtime): a session's settings and the done check follow the agent's rules`
 
 ### Task 9: an agent pushes to a remote the owner allows
 

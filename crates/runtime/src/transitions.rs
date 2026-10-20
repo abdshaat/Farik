@@ -723,7 +723,11 @@ impl Transitions {
                 completion_note,
                 review_note,
                 human_accepted: false,
-                protected_paths: team.rules().protected_paths,
+                protected_paths: contract
+                    .assignee
+                    .as_deref()
+                    .map_or_else(|| team.rules(), |agent| team.rules_for(agent))
+                    .unwritable(),
                 design_review: match review.state {
                     ReviewState::NotNeeded => DesignReviewNeed::NotNeeded,
                     ReviewState::Passed => DesignReviewNeed::Passed,
@@ -4839,6 +4843,41 @@ mod tests {
                 "{glob}: {protected:?}"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn hands_the_done_check_the_assignees_unwritable_paths() {
+        // A read-only file is not for a task to change either, and what an agent lifts for itself
+        // is lifted for its tasks (ADR 0080).
+        let project = Project::new(
+            "done-unwritable",
+            a_team(|wire| {
+                wire["rules"]["protected_paths"] = json!(["infra/**"]);
+                wire["rules"]["read_only_paths"] = json!(["vendor/**"]);
+                wire["agents"][1]["rules"] = json!({ "lifted_paths": ["infra/**"] });
+            }),
+            at(12),
+        );
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
+
+        let protected = project
+            .context(&accepting("CTV-1"), &TransitionAsk::default())
+            .done
+            .protected_paths;
+        assert!(
+            protected.contains(&"vendor/**".to_string()),
+            "{protected:?}"
+        );
+        assert!(protected.contains(&".env".to_string()), "{protected:?}");
+        assert!(
+            !protected.contains(&"infra/**".to_string()),
+            "{protected:?}"
+        );
     }
 
     #[test]
