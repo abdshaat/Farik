@@ -33,7 +33,7 @@ pub(crate) struct ExecInput {
 }
 
 /// Runs a command in the task's sandbox, after `evaluate_command` against the team's rules, which
-/// refuses git in any segment or behind any wrapper (ADR 0004) and every forbidden pattern
+/// refuses git in any segment or behind any wrapper, but its read-only subcommands (ADR 0004, ADR 0079) and every forbidden pattern
 /// (5.12). The environment is empty, the directory the workspace unless `cwd` says otherwise, and
 /// the timeout 600 seconds unless asked, 1800 at most. Each stream is cut at 64 KiB.
 pub(super) async fn exec(call: &Call<'_>, input: ExecInput) -> Result<Value, ToolError> {
@@ -172,7 +172,7 @@ mod tests {
     fn refuses_git_as_a_command() {
         let project = TestProject::new("tools-exec-git", &a_team_of_three(|_| {}));
         let recording = Arc::new(Recording::default());
-        for command in ["git status", "sudo git push"] {
+        for command in ["git push", "sudo git push"] {
             match exec(&project, recording.clone(), json!({ "command": command })) {
                 Err(ToolError::Refused { reason }) => {
                     assert!(reason.starts_with("git_via_exec: "), "{reason}");

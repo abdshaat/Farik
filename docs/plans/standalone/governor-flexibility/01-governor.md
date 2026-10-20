@@ -103,7 +103,7 @@ Files: `core/src/governor/permissions.rs`
 Tests:
 - `lets_read_only_git_through_and_refuses_the_rest` — `git ls-files src`, `git grep -n KEY`, `cd x && git log --oneline` pass; `git commit -m x`, `git ls-files && git push`, `env A=1 git reset --hard` are `GitViaExec`.
 
-- [ ] `feat(core): read-only git is not refused in exec`
+- [x] `feat(core): read-only git is not refused in exec`
 
 ### Task 7: the owner's channel message is answered, and can answer a block
 

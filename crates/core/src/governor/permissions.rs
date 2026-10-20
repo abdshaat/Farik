@@ -517,18 +517,50 @@ fn compile_patterns(patterns: &[String]) -> Result<Vec<(&String, regress::Regex)
         .collect()
 }
 
+/// The git subcommands `catervas_exec` runs: they read the repository and change nothing in it
+/// (ADR 0079), so a developer can run a contract's own criterion such as `git ls-files`.
+pub const READ_ONLY_GIT: [&str; 8] = [
+    "status",
+    "diff",
+    "log",
+    "show",
+    "ls-files",
+    "grep",
+    "rev-parse",
+    "blame",
+];
+
+/// Options of the read-only subcommands that write a file or run a program, so the command is a
+/// git call to refuse after all.
+const GIT_OPTIONS_THAT_ACT: [&str; 2] = ["--output", "--open-files-in-pager"];
+
+/// Whether the segment runs git other than by a read-only subcommand: its first git call, whose
+/// next bare word is the subcommand, is not one of `READ_ONLY_GIT`, or it carries an option that
+/// acts.
 fn runs_git(segment: &str) -> bool {
     let words: Vec<&str> = segment.split_whitespace().filter_map(bare_word).collect();
     let Some((first, rest)) = words.split_first() else {
         return false;
     };
-    if *first == "git" {
-        return true;
-    }
-    if is_assignment(first) || WRAPPERS.contains(first) {
-        return rest.contains(&"git");
-    }
-    false
+    let at = if *first == "git" {
+        0
+    } else if is_assignment(first) || WRAPPERS.contains(first) {
+        match rest.iter().position(|word| *word == "git") {
+            Some(at) => at + 1,
+            None => return false,
+        }
+    } else {
+        return false;
+    };
+    let read_only = words
+        .get(at + 1)
+        .is_some_and(|subcommand| READ_ONLY_GIT.contains(subcommand));
+    let acts = words[at + 1..].iter().any(|word| {
+        GIT_OPTIONS_THAT_ACT
+            .iter()
+            .any(|option| word.starts_with(option))
+    });
+    !read_only || acts
 }
 
 /// The word as a command name: a redirection is not one, and quotes, shell punctuation, the
@@ -1486,7 +1518,7 @@ mod tests {
     fn refuses_git_as_the_first_word_of_any_segment() {
         for command in [
             "git push",
-            "/usr/bin/git status",
+            "/usr/bin/git reset --hard",
             "ls && git commit -m x",
             "true; git push",
             "echo a | git apply",
@@ -1506,6 +1538,39 @@ mod tests {
             "! git push",
             "\"git\" push",
             "git.exe push",
+        ] {
+            assert_eq!(
+                evaluate_command(command, &TeamRules::default()),
+                Err(CommandRefusal::GitViaExec),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn lets_read_only_git_through_and_refuses_the_rest() {
+        for command in [
+            "git ls-files src",
+            "git grep -n KEY",
+            "cd x && git log --oneline",
+            "git status",
+            "env A=1 git diff HEAD~1",
+            "git grep git",
+        ] {
+            assert_eq!(
+                evaluate_command(command, &TeamRules::default()),
+                Ok(()),
+                "{command}"
+            );
+        }
+        for command in [
+            "git commit -m x",
+            "git ls-files && git push",
+            "env A=1 git reset --hard",
+            "git",
+            "git -C other status",
+            "git log --output=out.txt",
+            "git grep --open-files-in-pager=sh KEY",
         ] {
             assert_eq!(
                 evaluate_command(command, &TeamRules::default()),

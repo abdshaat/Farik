@@ -627,7 +627,8 @@ fn tools_section(input: &PromptInput<'_>) -> String {
     let shell = if offers(input, "catervas_exec") || offers(input, "catervas_git_commit") {
         Some(
             "The shell is `catervas_exec`, and git is the `catervas_git_*` tools: the program's own \
-             shell tool is never enabled, and `catervas_exec` refuses a command that runs git.",
+             shell tool is never enabled, and `catervas_exec` runs only read-only git (status, diff, \
+             log, show, ls-files, grep, rev-parse, blame) and refuses a command that runs any other.",
         )
     } else if offers(input, "catervas_git_diff") {
         Some("Git is the `catervas_git_*` tools: the program's own shell tool is never enabled.")
@@ -1149,8 +1150,9 @@ mod tests {
     #[test]
     fn names_the_shell_for_an_agent_with_either_execute_or_git_local() {
         let shell = "The shell is `catervas_exec`, and git is the `catervas_git_*` tools: the program's \
-                     own shell tool is never enabled, and `catervas_exec` refuses a command that runs \
-                     git.";
+                     own shell tool is never enabled, and `catervas_exec` runs only read-only git \
+                     (status, diff, log, show, ls-files, grep, rev-parse, blame) and refuses a \
+                     command that runs any other.";
         let mut inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
         let mut wire = an_agent_wire("maya-chen", "software_developer");
         wire["revokes"] = json!(["git_local"]);

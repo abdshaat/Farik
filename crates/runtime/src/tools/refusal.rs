@@ -423,7 +423,8 @@ fn command(refusal: &CommandRefusal) -> (&'static str, String) {
     match refusal {
         CommandRefusal::GitViaExec => (
             "git_via_exec",
-            "use catervas_git_status, catervas_git_diff, catervas_git_commit, or catervas_git_push"
+            "use catervas_git_status, catervas_git_diff, catervas_git_commit, or catervas_git_push; \
+             only git status, diff, log, show, ls-files, grep, rev-parse and blame run here"
                 .to_string(),
         ),
         CommandRefusal::ForbiddenCommand { pattern } => (
