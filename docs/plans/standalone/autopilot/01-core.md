@@ -2,7 +2,7 @@
 
 Status: ready
 Branch: `feat/autopilot`
-Spec and decisions: see `README.md`; ADR 0082 decisions 1 to 8, 10
+Spec and decisions: see `README.md`; ADR 0082 decisions 1 to 8, 10, 12
 
 Signatures, not bodies; test names and what each asserts (ADR 0008). Paths are under `crates/` unless they start with `docs/`. `catervas-core` does no I/O (hard rule 5).
 
@@ -31,6 +31,7 @@ Signatures, not bodies; test names and what each asserts (ADR 0008). Paths are u
 - The `Autopilot` gate opens when `TransitionContext.autopilot` is true, the task is `blocked` or `escalated` (decision 3's scope: an escalation or a block), and at least one `Human` row of the same move opens its own gate as if the human asked (`check_gate(row.gate, Human, to, context)`). Rejected: a gate that checks autopilot alone, which would let a Product Manager clear a block without a resolution, or cancel any task in any session.
 - An assignment past the limit: `AssignmentInput.past_limit_allowed: bool`; `over_the_limit` gives nothing when it is true. The runtime sets it (plan 3) when autopilot is on and the assignee has no session running (decision 8). The limit of zero ("takes no work") is held whatever the flag: an owner who set zero meant it.
 - A connector call under autopilot: `evaluate_connector_call` gains `autopilot: bool`; a `paid` or `ask` tool that is not plan-marked passes with `ConnectorPass.autopilot_approved: true` and no approval or allowance, after `InputTooLarge` (the input is recorded whole) and before the grant. A grant or allowance is never used up under autopilot. A plan-marked tool still needs an active plan; `denied` stays denied.
+- The rate of paid calls (decision 12) is a pure function, `rate_limit`, beside the constants in `core/src/autopilot.rs`: the runtime hands it the agent's recent autopilot-approved calls (`RecentCall`: server, tool, `input_sha256`, time, read from `tool.approved` by plan 3) and the clock's now, and it counts only the calls of the past hour (`at > now - 1h`). It checks, in this order, and answers the first that holds: the same server, tool and `input_sha256` made `SAME_INPUT_CALLS_PER_HOUR` (3) times (`RateLimit::SameInput`: a loop, so it is named before the counts); the same server and tool made `per_tool_calls_per_hour(per_hour)` times, a third of the team's figure rounded down, at least 1 (`ThisTool`); any calls made `per_hour` times (`AllTools`). "Has made n" refuses the call after the n-th, so a count equal to the limit refuses. `RateLimited.frees_at` is when the call that keeps the count at the limit leaves the hour: with the counted calls oldest first and the limit `l`, the time of the `count - l`-th (0-based) plus one hour, after which one more call is allowed. Chose a function of its own over a further argument to `evaluate_connector_call`: only a call that function already passed with `autopilot_approved` needs the log read, and the hook reads it only then. `per_hour` comes from `Team::paid_calls_per_hour()` (`core/src/team.rs`, beside `readiness_attempts`): the schema's `policy.paid_calls_per_hour`, integer 1 to 1000 with `default` 30, so the generated field is a `NonZeroU64` with no `Option`, as `escalation_age_hours` is, and the accessor returns its `get()` as `u32`.
 - The log's answers live in `catervas-store` (`crates/store/src/autopilot.rs`), as `merging_allowed` does (ADR 0073): core does no I/O. A flag lasts until the task's next `task.transitioned`, `escalation.resolved`, `task.integrated`, `human.accepted`, or `team.decided` other than `flag` (decision 4: "when the owner acts, the task resumes as now"); no projection column, so no migration. A folder change has no task, so its flag is a `team.decided { choice: flag, folder_change }` and lasts until that change's next `folder_change.opened` or `folder_change.integrated`, or a later `team.decided { choice: retry_folder_change }` of it.
 - A failed folder change is tried again by the tick when a `team.decided { choice: retry_folder_change, folder_change }` follows its `folder_change.escalated`: `store/src/folder_docs.rs` `folder_docs` (near 300) adds `team.decided` to the kinds it reads and sets that change's `escalated` back to false, which is what `integrate.rs` `escalated_since_accepted` reads for a folder change (decision 11).
 - A team question holds its task as the owner's does: `team.question_asked` raises `open_questions` and `team.question_answered` lowers it, in `projections.rs` `apply_wait_counts`; an owner's `question.answered` naming a team question lowers it the same.
@@ -46,6 +47,9 @@ core/src/governor/transition_table.rs modifies: GateId::Autopilot, seven rows; t
 core/src/governor/transition.rs       modifies: TransitionContext.autopilot, the gate; tests (T3)
 core/src/governor/gates.rs            modifies: AssignmentInput.past_limit_allowed, over_the_limit; tests (T4)
 core/src/governor/permissions.rs      modifies: evaluate_connector_call(autopilot), ConnectorPass.autopilot_approved; tests (T5)
+core/src/autopilot.rs                 modifies: RecentCall, RateLimit, RateLimited, rate_limit, per_tool_calls_per_hour, three constants; tests (T5)
+docs/schemas/team.schema.json         modifies: policy.paid_calls_per_hour (T5)
+core/src/team.rs                      modifies: Team::paid_calls_per_hour; the full fixture and the bounds test (T5)
 runtime/src/transitions.rs, runtime/src/daemon/hooks.rs  modifies: the new fields set false at each construction (T3, T4, T5)
 store/src/autopilot.rs                creates: the log's answers; tests (T6)
 store/src/lib.rs                      modifies: pub mod autopilot (T6)
@@ -67,6 +71,9 @@ pub const DECIDE_SESSIONS_PER_WAIT: u32 = 3;
 pub const BLOCK_WAIT_MINUTES: i64 = 60;
 pub const SELLER_MESSAGES_PER_DAY: usize = 50;
 pub const DONE_DAYS: i64 = 7;
+pub const PAID_CALLS_PER_HOUR: u32 = 30;             // decision 12, the default of policy.paid_calls_per_hour
+pub const SAME_INPUT_CALLS_PER_HOUR: usize = 3;      // decision 12
+pub const RATE_LIMITED_PER_SESSION: u32 = 3;         // decision 12: the third refusal ends the session
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DecideChoice { MoreTries, MoreRoom, BackToPlan, TryReadinessAgain, ReopenIntegration, AnswerBlock, Cancel,
     ApprovePlan, AcceptResult, CarryOn, RetryFolderChange, Flag }
@@ -85,6 +92,17 @@ pub enum DecideMove { To { status: TaskStatus, extra_tries: Option<u8>, extra_ro
 pub fn choices_for(reason: &str, before: Option<TaskStatus>, blocked_from: Option<TaskStatus>, spent: Spent) -> Vec<DecideChoice>;
 pub fn move_of(choice: DecideChoice, before: Option<TaskStatus>, blocked_from: Option<TaskStatus>) -> Option<DecideMove>;
 pub fn answerer(about: QuestionAbout, asker: Role, has_architect: bool) -> Role;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecentCall { pub server: String, pub tool: String, pub input_sha256: String, pub at: DateTime<Utc> }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RateLimit { SameInput, ThisTool, AllTools }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RateLimited { pub limit: RateLimit, pub calls: u32, pub frees_at: DateTime<Utc> } // calls: the limit's figure
+pub const fn per_tool_calls_per_hour(per_hour: u32) -> u32;                         // max(per_hour / 3, 1)
+pub fn rate_limit(recent: &[RecentCall], server: &str, tool: &str, input_sha256: &str, per_hour: u32,
+    now: DateTime<Utc>) -> Result<(), RateLimited>;
+// core/src/team.rs
+impl Team { pub fn paid_calls_per_hour(&self) -> u32; }                              // policy.paid_calls_per_hour, 30 left out
 // core/src/governor/transition_table.rs
 pub enum GateId { /* existing */ Autopilot }
 pub static TRANSITION_TABLE: [TransitionRow; 40];
@@ -155,14 +173,16 @@ Tests (`gates.rs` `mod tests`):
 
 - [ ] `feat(core): an idle agent takes work past its limit under autopilot`
 
-### Task 5: a paid or asking call runs under autopilot
+### Task 5: a paid or asking call runs under autopilot, within its rate
 
-Files: `core/src/governor/permissions.rs`, `runtime/src/daemon/hooks.rs` (the one call passes `false`)
-Produces: `evaluate_connector_call(.., autopilot)`, `ConnectorPass.autopilot_approved`.
-Tests (`permissions.rs` `mod tests`):
+Files: `core/src/governor/permissions.rs`, `runtime/src/daemon/hooks.rs` (the one call passes `false`), `core/src/autopilot.rs`, `docs/schemas/team.schema.json`, `core/src/team.rs`
+Produces: `evaluate_connector_call(.., autopilot)`, `ConnectorPass.autopilot_approved`; `RecentCall`, `RateLimit`, `RateLimited`, `rate_limit`, `per_tool_calls_per_hour`, the three constants of decision 12; `policy.paid_calls_per_hour`, `Team::paid_calls_per_hour`.
+Tests (`permissions.rs` `mod tests`, `autopilot.rs` `mod tests`, `team.rs` `mod tests`):
 - `a_paid_or_ask_call_runs_under_autopilot_and_says_so` — with `autopilot: true` and no grant or allowance, a `paid` and an `ask` tool pass with `autopilot_approved: true`, `approval: None`, `allowance: None`; a grant is not used (`approval: None`); an input over `MAX_APPROVAL_INPUT` is still `InputTooLarge`; a `denied` tool is `ToolDenied`; a plan-marked tool with no active plan is `NoActivePlan`; with `autopilot: false` the existing answers hold (`ApprovalNeeded`).
+- `autopilot.rs`: `rate_limits_an_agents_paid_calls_by_tool_by_all_tools_and_by_repeated_input` — with `per_hour` 30 and `now` 12:00, every input distinct unless said: 9 calls of `exa/search` in the hour and a 10th at 10:59 (outside it) pass; 10 in the hour refuse `ThisTool` with `calls: 10` and `frees_at` one hour after the oldest of the ten; 29 calls spread over five tools, none at 10, pass and 30 refuse `AllTools` with `calls: 30`; 3 calls of `exa/search` with one `input_sha256` refuse `SameInput` with `calls: 3` and `frees_at` one hour after the first of the three, while the same three pass for a call of another tool or with another input; with `per_hour` 3 the same three still answer `SameInput`, not `ThisTool` or `AllTools`; `per_tool_calls_per_hour` is 10 for 30, 1 for 1 and for 2, 333 for 1000.
+- `team.rs`: `refuses_a_number_outside_what_a_rule_allows` (extended) — `/policy/paid_calls_per_hour` 0 and 1001 are refused; `defaults_the_memory_cap` (renamed `defaults_the_memory_cap_and_the_paid_call_rate`) — a team without the key gives `paid_calls_per_hour()` 30, and `a_full_team_wire` carries `paid_calls_per_hour: 12`, which reads back 12.
 
-- [ ] `feat(core): a paid or asking call runs under autopilot`
+- [ ] `feat(core): a paid or asking call runs under autopilot, within its rate`
 
 ### Task 6: the log's answers
 
