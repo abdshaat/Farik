@@ -177,14 +177,151 @@ pub fn is_plan_of(path: &str, epic: &str) -> bool {
     stem_of(path).is_some_and(|stem| stem == plan_stem(epic))
 }
 
-/// Whether a path is a human document: the product's `spec` and `roadmap`, or a marketing plan
-/// `plans/MP-<n>`, `n` decimal digits not starting with `0`, each as `.md` or `.html`. Each has an
-/// agent twin.
+/// What an attached document is about, which decides the folder it is filed under.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttachKind {
+    /// A spec or a description of the product, kept by the Product Manager.
+    Product,
+    /// A description of the architecture, kept by the Architect.
+    Architecture,
+}
+
+impl AttachKind {
+    /// The folder the kind's documents go under, which its role owns.
+    #[must_use]
+    pub fn folder(self) -> &'static str {
+        match self {
+            Self::Product => "docs/catervas/product",
+            Self::Architecture => "docs/catervas/architecture",
+        }
+    }
+
+    /// The role that owns the kind's folder, and writes the agent version.
+    #[must_use]
+    pub fn role(self) -> Role {
+        match self {
+            Self::Product => Role::ProductManager,
+            Self::Architecture => Role::Architect,
+        }
+    }
+
+    /// The kind on the wire: `product` or `architecture`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "product" => Some(Self::Product),
+            "architecture" => Some(Self::Architecture),
+            _ => None,
+        }
+    }
+}
+
+const ATTACHED_DIR: &str = "attached/";
+const ATTACHED_SLUG_MAX: usize = 60;
+
+/// The slug of an attached file's name: its last extension dropped, lower-case letters and digits
+/// kept, every other run of characters one `-`, at most 60 characters with no `-` at either end;
+/// `document` when nothing is left.
+#[must_use]
+pub fn attached_slug(file_name: &str) -> String {
+    let stem = file_name
+        .rsplit_once('.')
+        .map_or(file_name, |(stem, _)| stem);
+    let mut slug = String::new();
+    for c in stem.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c.to_ascii_lowercase());
+        } else if !slug.is_empty() && !slug.ends_with('-') {
+            slug.push('-');
+        }
+    }
+    slug.truncate(ATTACHED_SLUG_MAX);
+    let slug = slug.trim_end_matches('-');
+    if slug.is_empty() {
+        "document".to_string()
+    } else {
+        slug.to_string()
+    }
+}
+
+/// The path of an attached document of the kind: `<folder>/attached/<slug>.md`.
+#[must_use]
+pub fn attached_path(kind: AttachKind, slug: &str) -> String {
+    format!("{}/{ATTACHED_DIR}{slug}.md", kind.folder())
+}
+
+/// The attached path for a file name that `taken` does not hold: the slug's own, else the slug
+/// with `-2`, `-3` and so on.
+#[must_use]
+pub fn free_attached_path(
+    kind: AttachKind,
+    file_name: &str,
+    taken: impl Fn(&str) -> bool,
+) -> String {
+    let slug = attached_slug(file_name);
+    let first = attached_path(kind, &slug);
+    if !taken(&first) {
+        return first;
+    }
+    let mut n: usize = 2;
+    loop {
+        let path = attached_path(kind, &format!("{slug}-{n}"));
+        if !taken(&path) {
+            return path;
+        }
+        n += 1;
+    }
+}
+
+/// Whether a path is an attached document: `.md` or `.html` directly inside `attached/` of the
+/// product or architecture folder, its name a slug, and not an agent version.
+#[must_use]
+pub fn is_attached_path(path: &str) -> bool {
+    let Some(path) = normalise(path) else {
+        return false;
+    };
+    [AttachKind::Product, AttachKind::Architecture]
+        .iter()
+        .any(|kind| {
+            path.strip_prefix(kind.folder())
+                .and_then(|rest| rest.strip_prefix('/'))
+                .and_then(|rest| rest.strip_prefix(ATTACHED_DIR))
+                .is_some_and(|name| {
+                    DocumentFormat::of(name)
+                        .and_then(|_| name.rsplit_once('.'))
+                        .is_some_and(|(slug, _)| is_slug(slug))
+                })
+        })
+}
+
+/// Whether the text is `[a-z0-9]+(-[a-z0-9]+)*`.
+fn is_slug(s: &str) -> bool {
+    !s.is_empty()
+        && s.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+/// Whether the owner approves a human document where it is written: the product plan's stems, and
+/// every attached document, which the owner supplies.
+fn owner_accepts(path: &str, stem: &str) -> bool {
+    OWNER_ACCEPTED_STEMS.contains(&stem) || is_attached_path(path)
+}
+
+/// Whether a path is a human document: the product's `spec` and `roadmap`, a marketing plan
+/// `plans/MP-<n>`, `n` decimal digits not starting with `0`, or an attached document (see
+/// [`is_attached_path`]), each as `.md` or `.html`. Each has an agent twin.
 #[must_use]
 pub fn is_human_document(path: &str) -> bool {
     let Some(path) = normalise(path) else {
         return false;
     };
+    if is_attached_path(&path) {
+        return true;
+    }
     let Some(stem) = stem_of(&path) else {
         return false;
     };
@@ -299,7 +436,7 @@ pub fn check_folder_doc_path(
     if stem.ends_with(TWIN_MARK) {
         return Err(FolderDocPathRefusal::AgentTwin);
     }
-    let owner_accepted = OWNER_ACCEPTED_STEMS.contains(&stem);
+    let owner_accepted = owner_accepts(&path, stem);
     if is_human_document(&path) && !owner_accepted {
         return Err(FolderDocPathRefusal::MarketingPlan);
     }
@@ -588,7 +725,7 @@ pub fn check_owner_edit(path: &str, text_bytes: usize) -> Result<String, OwnerEd
     if stem.ends_with(TWIN_MARK) {
         return Err(OwnerEditRefusal::AgentTwin);
     }
-    if is_human_document(&path) && !OWNER_ACCEPTED_STEMS.contains(&stem) {
+    if is_human_document(&path) && !owner_accepts(&path, stem) {
         return Err(OwnerEditRefusal::MarketingPlan);
     }
     if text_bytes > OWNER_EDIT_LIMIT_BYTES {
@@ -1684,6 +1821,47 @@ mod tests {
             human_of_twin(&cat("product/spec.agent.md")),
             Some(cat("product/spec.md"))
         );
+    }
+
+    #[test]
+    fn attached_documents_are_pairs_under_their_kinds_folder() {
+        use super::{AttachKind, attached_slug, free_attached_path, is_attached_path};
+        assert_eq!(
+            attached_slug("Product Spec v2 (final).PDF"),
+            "product-spec-v2-final"
+        );
+        assert_eq!(attached_slug("???.docx"), "document");
+        let long = attached_slug(&format!("{}.md", "ab-".repeat(40)));
+        assert_eq!(long.len(), 59);
+        assert!(!long.ends_with('-'));
+        assert_eq!(attached_slug(&format!("{}.md", "a".repeat(100))).len(), 60);
+        assert_eq!(
+            free_attached_path(AttachKind::Product, "spec.md", |p| p
+                .ends_with("attached/spec.md")),
+            "docs/catervas/product/attached/spec-2.md"
+        );
+        assert_eq!(
+            AttachKind::parse("architecture"),
+            Some(AttachKind::Architecture)
+        );
+        assert_eq!(AttachKind::parse("engineering"), None);
+        assert_eq!(AttachKind::Architecture.role(), Role::Architect);
+        let api = "docs/catervas/architecture/attached/api.md";
+        let twin = "docs/catervas/architecture/attached/api.agent.md";
+        assert!(is_human_document(api) && is_attached_path(api));
+        for path in [
+            twin,
+            "docs/catervas/architecture/attached/sub/api.md",
+            "docs/catervas/engineering/attached/api.md",
+        ] {
+            assert!(
+                !is_human_document(path) && !is_attached_path(path),
+                "{path}"
+            );
+        }
+        assert_eq!(agent_twin(api).as_deref(), Some(twin));
+        assert_eq!(check_owner_edit(api, 10), Ok(api.to_string()));
+        assert_eq!(check_owner_edit(twin, 10), Err(OwnerEditRefusal::AgentTwin));
     }
 
     #[test]

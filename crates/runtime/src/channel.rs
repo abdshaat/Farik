@@ -10,7 +10,7 @@ use catervas_core::text::tokens;
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
     CatervasEvent, EventBody, EventIds, EventKind, MessageKind, MessagePostedBody,
-    SessionEndedBodyReason, SessionStartedBodyPurpose, Thread, new_event,
+    SessionEndedBodyReason, SessionStartedBodyPurpose, Thread, attachment_paths, new_event,
 };
 use catervas_store::files::{FilesError, ProjectFiles};
 use catervas_store::{EventLog, EventQuery, StoreError};
@@ -68,6 +68,9 @@ pub struct NewMessage {
     pub in_reply_to: Option<u64>,
     /// The session it was said from, when it was said from one.
     pub session_id: Option<String>,
+    /// The documents the owner attached (ADR 0076), checked with
+    /// [`crate::chat::check_attachments`] by whoever takes the owner's words; empty otherwise.
+    pub attachments: Vec<String>,
 }
 
 /// Why a message was not posted.
@@ -250,6 +253,11 @@ pub fn post(
         mentions: message.mentions,
         thread: message.thread,
         in_reply_to: message.in_reply_to.and_then(NonZeroU64::new),
+        attachments: attachment_paths(&message.attachments).map_err(|reason| {
+            ChannelError::Refused {
+                reason: format!("attachments_invalid: {reason}"),
+            }
+        })?,
     });
     let event = new_event(body, clock.now(), ids).map_err(|error| ChannelError::Refused {
         reason: format!("the message cannot be recorded: {error:?}"),
@@ -292,6 +300,7 @@ pub fn post_system(
             thread: None,
             in_reply_to: None,
             session_id: ids.session_id.clone(),
+            attachments: Vec::new(),
         },
     )
 }
@@ -356,6 +365,7 @@ mod tests {
                 thread: None,
                 in_reply_to: None,
                 session_id: None,
+                attachments: Vec::new(),
             },
         )
         .expect("posted");
@@ -392,6 +402,7 @@ mod tests {
                 thread: None,
                 in_reply_to: None,
                 session_id: None,
+                attachments: Vec::new(),
             },
         )
         .expect("posted")

@@ -45,6 +45,8 @@ export type FileRead = {
 	editable: boolean;
 	askable: boolean;
 	waiting: { change: number; branch: string } | null;
+	/** The name of the file the owner attached this document from, when they did. */
+	attached: { name: string } | null;
 };
 
 /** Where the team's folders are in the project, which a document's route leaves out. */

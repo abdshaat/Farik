@@ -70,6 +70,7 @@ pub fn create(
             ..EventIds::default()
         },
         None,
+        &[],
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => {

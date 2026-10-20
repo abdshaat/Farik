@@ -527,6 +527,9 @@
           "$ref": "#/$defs/filesSaveRequest"
         },
         {
+          "$ref": "#/$defs/documentAttachRequest"
+        },
+        {
           "$ref": "#/$defs/repoAddRequest"
         },
         {
@@ -2656,6 +2659,38 @@
         "branch": { "type": ["string", "null"] }
       }
     },
+    "documentAttachRequest": {
+      "title": "Document Attach Request",
+      "description": "The owner attaches a file (docs/SPEC.md 5.17, ADR 0076): data_base64 (standard base64, at most 10 MiB decoded) is turned into Markdown and committed as the owner's own folder change at docs/catervas/<kind>/attached/<slug>.md, recorded as folder_doc.edited then document.attached, and the integrated change files the task that writes its agent version. With the documents kept on this computer (ADR 0074) the file is written on disk instead, recorded as local_documents.written then document.attached, the agent version's task filed at once, and change is null. Answers the document's path and the change. Refused with -32005 and data.errors, each with path, message and code, in this order: no_folder_owner (/kind: no active agent of the kind's role), unreadable (/data_base64: not base64), unsupported_type, no_text, unreadable and too_large (/data_base64: the file or its text), then documents_switching, file_busy, is_a_link and change_waiting (/name).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "document.attach" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "kind", "data_base64"],
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "kind": { "enum": ["product", "architecture"] },
+            "data_base64": { "type": "string", "maxLength": 14000000 }
+          }
+        }
+      }
+    },
+    "documentAttachResult": {
+      "description": "The attached document's path and the folder change that holds it, null when the documents are kept on this computer (ADR 0074).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "change"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "change": { "type": ["integer", "null"], "minimum": 1 }
+      }
+    },
     "documentsSetLocalRequest": {
       "title": "Documents Set Local Request",
       "description": "The owner chooses where the team's documents are kept (docs/SPEC.md 5.17, ADR 0074): local true keeps docs/catervas/ on this computer, out of the repository, and false puts it back. Turning it on makes one folder change that takes the documents out of the integration branch and keeps the files on disk, ignored through the repository's info/exclude; turning it off makes one that adds what is on disk. Both are pull requests the owner merges, and until then no document can be changed. The same value as now answers the current mode and changes nothing. Refused with -32005 and data.errors, each with path /local, message and code, in this order: project_folder (a project folder's documents never leave the computer), documents_switching (a switch is already moving), documents_in_flight (a task that changes documents has a worktree or awaits integration; the message names the tasks), change_waiting (a folder change is neither integrated nor escalated), documents_busy (turning on: the checkout has an uncommitted change under docs/catervas) and is_a_link (docs or docs/catervas is a symbolic link).",
@@ -2966,8 +3001,15 @@
       "description": "document and its twin (null when it has none that is a file) as the integration branch holds them, except that while the owner's own saved change to the document waits to be added (waiting: its folder change and branch) they are read from that branch, with by_you true. stale: the twin is behind the document (read from git; an owner's change not yet added makes nothing stale). rederiving: a task that brings the twin up to date is neither accepted nor cancelled. editable: false for a marketing plan, which changes through a new version on its page. askable: false for a document under docs/catervas/delivery/, which the Scrum Master alone writes, otherwise equal to editable.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["document", "twin", "stale", "rederiving", "editable", "askable", "waiting"],
+      "required": ["document", "twin", "stale", "rederiving", "editable", "askable", "waiting", "attached"],
       "properties": {
+        "attached": {
+          "description": "For a document the owner attached (ADR 0076), the name of the file it came from; null for any other.",
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["name"],
+          "properties": { "name": { "type": "string" } }
+        },
         "document": { "$ref": "#/$defs/fileVersion" },
         "twin": { "oneOf": [{ "$ref": "#/$defs/fileVersion" }, { "type": "null" }] },
         "stale": { "type": "boolean" },
@@ -3039,6 +3081,11 @@
               "minimum": 1,
               "maximum": 18446744073709551615,
               "description": "The seq of the agent's chat reply whose proposed request this is: the reply must carry a request not already sent, or the daemon refuses with a sentence. task.created records it."
+            },
+            "attachments": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "The documents the owner attached (docs/SPEC.md 5.17, ADR 0076): up to five attached documents a document.attached recorded, which task.created records. Refused with -32005 and data.errors: too_many_attachments (/attachments: more than five) and not_attached (/attachments/<i>: a path no document.attached recorded)."
             }
           },
           "required": [
@@ -6265,6 +6312,16 @@
                   }
                 ]
               },
+              "attachments": {
+                "type": "array",
+                "description": "The documents the owner attached to the message, each with the file's name from its document.attached; the key is absent when there are none.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "name"],
+                  "properties": { "path": { "type": "string" }, "name": { "type": "string" } }
+                }
+              },
               "sent_as": {
                 "oneOf": [
                   { "type": "null" },
@@ -6371,6 +6428,16 @@
                     "pattern": "^CTV-[0-9]{1,6}$"
                   }
                 ]
+              },
+              "attachments": {
+                "type": "array",
+                "description": "The documents the owner attached to the message, each with the file's name from its document.attached; the key is absent when there are none.",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["path", "name"],
+                  "properties": { "path": { "type": "string" }, "name": { "type": "string" } }
+                }
               }
             }
           }

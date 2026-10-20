@@ -1192,6 +1192,38 @@ fn session_spec(
     session_spec_without(deps, team, ask, &BTreeSet::new())
 }
 
+/// The section of the documents the owner attached to what `ask`'s session answers (ADR 0076): a
+/// task's triage, refine and implement sessions are shown those its `task.created` names, a chat
+/// session those of the newest message of the user's in its chat, a conversation those of the
+/// newest pending post that names any. Read from the integration branch, else from the branch of
+/// the folder change that waits.
+fn attached_of(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    ask: &SessionAsk<'_>,
+) -> Result<Option<String>, OrchestratorError> {
+    let log = &deps.tools.log;
+    let paths = match (ask.purpose, ask.contract) {
+        (
+            SessionPurpose::Triage | SessionPurpose::Refine | SessionPurpose::Implement,
+            Some(contract),
+        ) => crate::chat::task_attachments(log, contract.id.as_str())?,
+        (SessionPurpose::Chat, None) => crate::chat::chat_attachments(log, ask.agent.id.as_str())?,
+        (SessionPurpose::Conversation, None) => {
+            crate::channel::pending_mentions(log, ask.agent.id.as_str())?
+                .iter()
+                .rev()
+                .map(crate::chat::post_attachments)
+                .find(|paths| !paths.is_empty())
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
+    Ok(crate::prompt::attached_section(
+        &crate::chat::read_attached(log, &deps.tools.git, team, &paths),
+    ))
+}
+
 /// What `From the human` holds for `ask`'s session. A session about no task has no human message,
 /// and the whole log is not read for one; a chat's is its chat, which no other session of the
 /// agent is shown, and an interview's is the owner's paragraph with the chat.
@@ -1353,6 +1385,7 @@ fn session_spec_without(
     // there once it has one.
     let stale_twins = stale_twins_of(deps, team, ask);
     let (members, own_repo) = member_lines(deps, ask);
+    let attached = attached_of(deps, team, ask)?;
     let system_prompt = assemble_system_prompt(&PromptInput {
         role: &role,
         agent: ask.agent,
@@ -1379,6 +1412,7 @@ fn session_spec_without(
         members: &members,
         own_repo,
         document_format: team.document_format(),
+        attached: attached.as_deref(),
         documents_local: catervas_store::document_source::documents_on_disk(team, &deps.tools.log)?,
     })?;
     let limits = session_limits_of(deps, team, ask, interviewing)?;
@@ -3613,6 +3647,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded")
@@ -3839,6 +3874,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded");
@@ -3953,6 +3989,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("recorded");
@@ -6111,5 +6148,189 @@ mod tests {
         assert!(prompt.contains("only this"), "{prompt}");
         let decided = &witness.decided()[0];
         assert!(decided[0].allow, "{decided:?}");
+    }
+
+    /// A Markdown document of about `size` bytes that begins with `mark`.
+    fn long_document(mark: &str, size: usize) -> Vec<u8> {
+        let mut text = format!("# {mark}\n\n");
+        while text.len() < size {
+            text.push_str("A paragraph of the owner's words about the trip.\n\n");
+        }
+        text.into_bytes()
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one test, the three sessions, the two branches, the budget and the interview"
+    )]
+    fn the_answering_session_reads_the_attached_documents() {
+        use base64::Engine as _;
+        use catervas_protocol::command::Command;
+
+        use crate::daemon::fixtures::rpc;
+
+        const TRIP_SPEC: &str = "docs/catervas/product/attached/trip-spec.md";
+        const BIG_A: &str = "docs/catervas/product/attached/big-a.md";
+        const BIG_B: &str = "docs/catervas/product/attached/big-b.md";
+
+        let harness = Harness::new("session-attached", |_| {});
+        harness.started();
+        let attach = |name: &str, bytes: &[u8]| {
+            let reply = rpc(
+                &harness.daemon,
+                "document.attach",
+                &json!({
+                    "name": name,
+                    "kind": "product",
+                    "data_base64": base64::engine::general_purpose::STANDARD.encode(bytes),
+                }),
+            );
+            assert!(reply["error"].is_null(), "{reply}");
+        };
+        attach("Trip spec.md", b"# Trips\n\nPlan a trip with the cove.\n");
+
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let handle = |command: Command| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime")
+                .block_on(orchestrator.handle(command))
+                .expect("the command is taken");
+        };
+        // The three ways the owner can name the document.
+        harness.project.filed_extra(
+            "CTV-1",
+            ("draft", "task", None),
+            &json!({ "attachments": [TRIP_SPEC] }),
+            None,
+            |_| {},
+        );
+        harness.file("CTV-2", "draft", |_| {});
+        handle(Command::ChatMessagePost {
+            agent_id: "pm".to_string(),
+            text: "Please read the trip spec.".to_string(),
+            as_task: false,
+            attachments: vec![TRIP_SPEC.to_string()],
+        });
+        handle(Command::MessagePost {
+            text: "@pm the trip spec is attached".to_string(),
+            attachments: vec![TRIP_SPEC.to_string()],
+        });
+
+        let prompt_of = |who: &str, task: Option<&str>, purpose: SessionPurpose| {
+            let contract = task.map(|task| {
+                deps.tools
+                    .files
+                    .read_contract(&task.parse().expect("a task id"))
+                    .expect("the contract")
+            });
+            session_spec(
+                deps,
+                &team,
+                &SessionAsk {
+                    agent: agent(&team, who),
+                    contract: contract.as_ref(),
+                    purpose,
+                    cwd: deps.tools.files.root().to_path_buf(),
+                    executor: None,
+                    read_only: false,
+                    only_tool: None,
+                    tools: None,
+                    in_reply_to: None,
+                    thread: None,
+                    initial_prompt: String::new(),
+                },
+            )
+            .expect("the spec")
+            .system_prompt
+        };
+        let heading = "## Documents the owner attached";
+        let text = "Plan a trip with the cove.";
+        let sessions = || {
+            [
+                prompt_of("pm", Some("CTV-1"), SessionPurpose::Refine),
+                prompt_of("pm", None, SessionPurpose::Chat),
+                prompt_of("pm", None, SessionPurpose::Conversation),
+            ]
+        };
+        let holds = |prompt: &str, path: &str, text: &str| {
+            let at = prompt.find(heading).expect("the section");
+            let section = &prompt[at..];
+            let block = section
+                .find("<untrusted source=")
+                .expect("an untrusted block");
+            let end = section.find("</untrusted>").expect("its end");
+            section[..end].contains(text) && block < end && section.contains(path)
+        };
+
+        // Before it is integrated the text is read from the folder change's branch.
+        for prompt in sessions() {
+            assert!(holds(&prompt, TRIP_SPEC, text), "{prompt}");
+        }
+        // A task without documents, and a chat before any, are given no section.
+        assert!(!prompt_of("pm", Some("CTV-2"), SessionPurpose::Refine).contains(heading));
+        assert!(!prompt_of("dev-a", None, SessionPurpose::Chat).contains(heading));
+
+        // After it is integrated, from the integration branch: the change's branch is gone.
+        let root = harness.project.repo.path.clone();
+        let branch = catervas_store::git::fixtures::git_output_in(
+            &root,
+            &["branch", "--list", "docs/*", "--format=%(refname:short)"],
+        );
+        harness.merge_branch_by_hand(&branch);
+        handle(Command::FolderChangeIntegrate { change: 1 });
+        catervas_store::git::fixtures::git_in(&root, &["branch", "-D", &branch]);
+        for prompt in sessions() {
+            assert!(holds(&prompt, TRIP_SPEC, text), "{prompt}");
+        }
+
+        // The interview names the document attached at setup, at the end of its first paragraph.
+        let interview = crate::chat::interview(&deps.tools.log, "pm", 16 * 1024)
+            .expect("the log reads")
+            .expect("the project started");
+        assert_eq!(
+            interview.split("\n\n").next().expect("a paragraph"),
+            format!(
+                "When they started the project, the owner wrote:\n{}\nThey attached: {TRIP_SPEC}.",
+                "A bakery that sells cakes online and bakes to order."
+            ),
+            "{interview}"
+        );
+
+        // Two documents of 40 KiB share 64 KiB: the second is named, not read.
+        attach("Big A.md", &long_document("FIRST-DOC", 40 * 1024));
+        attach("Big B.md", &long_document("SECOND-DOC", 40 * 1024));
+        handle(Command::ChatMessagePost {
+            agent_id: "pm".to_string(),
+            text: "Read both.".to_string(),
+            as_task: false,
+            attachments: vec![BIG_A.to_string(), BIG_B.to_string()],
+        });
+        let prompt = prompt_of("pm", None, SessionPurpose::Chat);
+        assert!(holds(&prompt, BIG_A, "FIRST-DOC"), "the first is read");
+        assert!(!prompt.contains("SECOND-DOC"), "the second is not read");
+        assert!(
+            prompt.contains(&format!("`{BIG_B}`: read it from the folder.")),
+            "{}",
+            &prompt[prompt.find(heading).expect("the section")..][..200]
+        );
+
+        // Every document attached, in log order.
+        let interview = crate::chat::interview(&deps.tools.log, "pm", 16 * 1024)
+            .expect("the log reads")
+            .expect("the project started");
+        let first = interview.split("\n\n").next().expect("a paragraph");
+        assert!(
+            first.ends_with(
+                "They attached: docs/catervas/product/attached/trip-spec.md, \
+                 docs/catervas/product/attached/big-a.md, docs/catervas/product/attached/big-b.md."
+            ),
+            "{interview}"
+        );
     }
 }

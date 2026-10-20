@@ -394,7 +394,7 @@ impl TestProject {
     }
 
     /// `filed_given_to`'s ground: a task whose `task.created` body also holds `extra`.
-    fn filed_extra(
+    pub(crate) fn filed_extra(
         &self,
         task: &str,
         (status, kind, parent): (&str, &str, Option<&str>),

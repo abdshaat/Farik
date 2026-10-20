@@ -81,6 +81,7 @@ pub(super) fn chat_reply(call: &Call<'_>, input: ChatReplyInput) -> Result<Value
             heard: input.heard,
             session_id: Some(context.session_id.clone()),
             as_task: false,
+            attachments: Vec::new(),
         },
     )
     .map_err(|error| match error {
@@ -178,6 +179,7 @@ pub(super) fn take_task(call: &Call<'_>, input: &TakeTaskInput) -> Result<Value,
         seq,
         deps.clock.now(),
         &call.ids(None),
+        &[],
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => match reason.strip_prefix("was already sent, as ") {
@@ -228,6 +230,7 @@ mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the question is recorded");
@@ -305,6 +308,7 @@ mod tests {
                 heard: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the owner's message is recorded");
@@ -382,6 +386,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("the question is recorded");
@@ -438,6 +443,7 @@ mod tests {
                     request: None,
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("the owner's message is recorded")

@@ -68,6 +68,9 @@ pub struct PromptInput<'a> {
     pub own_repo: Option<OwnRepo>,
     /// The format the team writes new documents in, for the Team rules' line about it.
     pub document_format: DocumentFormat,
+    /// The section of the documents the owner attached to what the session answers, whole with its
+    /// heading, as [`attached_section`] writes it; it follows `From the human`.
+    pub attached: Option<&'a str>,
     /// Whether the team's documents are read from this computer's folder (ADR 0074), for the Team
     /// rules' line about finding them.
     pub documents_local: bool,
@@ -272,15 +275,52 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
             })
             .map(str::to_string),
     ];
-    Ok(PROMPT_SECTIONS
+    let mut sections = Vec::new();
+    for (at, (title, body)) in PROMPT_SECTIONS.iter().zip(bodies).enumerate() {
+        // The attached documents come after the human's words and before the session's closing.
+        if at == PROMPT_SECTIONS.len() - 1
+            && let Some(attached) = input.attached
+        {
+            sections.push(format!("{}\n", attached.trim_end()));
+        }
+        if let Some(body) = body.filter(|body| !body.trim().is_empty()) {
+            sections.push(format!("## {title}\n\n{}\n", body.trim_end()));
+        }
+    }
+    Ok(sections.join("\n"))
+}
+
+/// The most the documents the owner attached add to a prompt, in bytes, shared in order.
+pub const ATTACHED_BYTES: usize = 64 * 1024;
+
+/// The title of the section of the documents the owner attached.
+const ATTACHED_TITLE: &str = "Documents the owner attached";
+
+/// The section of the documents the owner attached to what the session answers (ADR 0076), with its
+/// heading: each `(path, text)` in the order given, its text, when it was read, inside an
+/// untrusted block named `attached_document` under the path; the texts share [`ATTACHED_BYTES`],
+/// and a document whose text was not read, or does not fit in what is left, is named by its path
+/// alone: "`<path>`: read it from the folder." `None` for no documents.
+#[must_use]
+pub fn attached_section(documents: &[(String, Option<String>)]) -> Option<String> {
+    if documents.is_empty() {
+        return None;
+    }
+    let mut left = ATTACHED_BYTES;
+    let entries: Vec<String> = documents
         .iter()
-        .zip(bodies)
-        .filter_map(|(title, body)| {
-            body.filter(|body| !body.trim().is_empty())
-                .map(|body| format!("## {title}\n\n{}\n", body.trim_end()))
+        .map(|(path, text)| match text {
+            Some(text) if text.len() <= left => {
+                left -= text.len();
+                format!(
+                    "`{path}`:\n{}",
+                    untrusted_block("attached_document", text, ATTACHED_BYTES)
+                )
+            }
+            _ => format!("`{path}`: read it from the folder."),
         })
-        .collect::<Vec<_>>()
-        .join("\n"))
+        .collect();
+    Some(format!("## {ATTACHED_TITLE}\n\n{}", entries.join("\n\n")))
 }
 
 /// Text an agent or a repository wrote, marked as data (8.6, ADR 0011): wrapped in
@@ -748,6 +788,7 @@ mod tests {
                 members: &[],
                 own_repo: None,
                 document_format: DocumentFormat::Html,
+                attached: None,
                 documents_local: false,
             }
         }

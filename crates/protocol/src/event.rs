@@ -11,6 +11,11 @@ use serde_json::Value;
 
 pub use catervas_core::contract::{TaskId, ValidationError};
 
+/// What `task.created`, `chat_message.posted` and `message.posted` record of the documents the
+/// owner attached (ADR 0076): the paths, or none when there are none; at most five.
+pub use crate::generated::event::AttachmentPaths;
+/// The body of `document.attached`, the owner attaching a file.
+pub use crate::generated::event::DocumentAttachedBody;
 pub use crate::generated::event::{
     AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
     BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervaficationStartedBody,
@@ -55,6 +60,28 @@ pub use crate::generated::event::{
     BlockerWire, GateId as GateWire, RejectionWire, TaskStatus as TaskStatusWire,
     TransitionActor as TransitionActorWire,
 };
+
+/// `paths` as the `attachments` of an event body: `None` for none, so that nothing is written.
+///
+/// # Errors
+///
+/// A sentence when a path is no document's path.
+pub fn attachment_paths(paths: &[String]) -> Result<Option<AttachmentPaths>, String> {
+    use crate::generated::event::FolderDocPath;
+
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let parsed = paths
+        .iter()
+        .map(|path| {
+            FolderDocPath::try_from(path.as_str())
+                .map_err(|_| format!("{path:?} is no document's path"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(AttachmentPaths::from(parsed)))
+}
+
 /// The bodies of the four `data_pipeline.` kinds, with the vocabularies they repeat.
 pub use crate::generated::event::{
     DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
@@ -261,6 +288,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::FolderDocApproved => "folderDocApprovedBody",
         EventKind::FolderDocReturned => "folderDocReturnedBody",
         EventKind::FolderDocEdited => "folderDocEditedBody",
+        EventKind::DocumentAttached => "documentAttachedBody",
         EventKind::FolderChangeOpened => "folderChangeOpenedBody",
         EventKind::FolderChangeIntegrated => "folderChangeIntegratedBody",
         EventKind::FolderChangeEscalated => "folderChangeEscalatedBody",
@@ -495,6 +523,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::FolderDocApproved(_)
         | EventBody::FolderDocReturned(_)
         | EventBody::FolderDocEdited(_)
+        | EventBody::DocumentAttached(_)
         | EventBody::FolderChangeOpened(_)
         | EventBody::FolderChangeIntegrated(_)
         | EventBody::FolderChangeEscalated(_)
@@ -524,7 +553,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 133] = [
+pub const EVERY_KIND: [EventKind; 134] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -632,6 +661,7 @@ pub const EVERY_KIND: [EventKind; 133] = [
     EventKind::FolderDocApproved,
     EventKind::FolderDocReturned,
     EventKind::FolderDocEdited,
+    EventKind::DocumentAttached,
     EventKind::FolderChangeOpened,
     EventKind::FolderChangeIntegrated,
     EventKind::FolderChangeEscalated,
@@ -1020,6 +1050,9 @@ pub enum EventBody {
     /// The owner saved a document on the Files page, which Catervas committed as a folder change.
     #[serde(rename = "folder_doc.edited")]
     FolderDocEdited(FolderDocEditedBody),
+    /// The owner attached a file, which Catervas turned into a document of a role's folder.
+    #[serde(rename = "document.attached")]
+    DocumentAttached(DocumentAttachedBody),
     /// Catervas opened a pull request for a folder change.
     #[serde(rename = "folder_change.opened")]
     FolderChangeOpened(FolderChangeOpenedBody),
@@ -1213,6 +1246,7 @@ impl EventBody {
             Self::FolderDocApproved(_) => EventKind::FolderDocApproved,
             Self::FolderDocReturned(_) => EventKind::FolderDocReturned,
             Self::FolderDocEdited(_) => EventKind::FolderDocEdited,
+            Self::DocumentAttached(_) => EventKind::DocumentAttached,
             Self::FolderChangeOpened(_) => EventKind::FolderChangeOpened,
             Self::FolderChangeIntegrated(_) => EventKind::FolderChangeIntegrated,
             Self::FolderChangeEscalated(_) => EventKind::FolderChangeEscalated,
@@ -2265,7 +2299,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 133);
+        assert_eq!(EVERY_KIND.len(), 134);
     }
 
     #[test]
@@ -2294,7 +2328,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 133);
+        assert_eq!(EVERY_KIND.len(), 134);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2387,6 +2421,7 @@ mod tests {
             EventKind::FolderDocApproved,
             EventKind::FolderDocReturned,
             EventKind::FolderDocEdited,
+            EventKind::DocumentAttached,
             EventKind::FolderChangeOpened,
             EventKind::FolderChangeIntegrated,
             EventKind::FolderChangeEscalated,
@@ -2421,6 +2456,12 @@ mod tests {
             ),
             (EventKind::FolderDocWritten, "change", json!(0)),
             (EventKind::FolderDocEdited, "change", json!(0)),
+            (EventKind::DocumentAttached, "name", json!("")),
+            (
+                EventKind::DocumentAttached,
+                "media_type",
+                json!("image/png"),
+            ),
             (EventKind::FolderDocApproved, "proposals", json!([])),
             (EventKind::FolderDocApproved, "proposals", json!([2, 2])),
             (EventKind::FolderDocApproved, "proposals", json!([0])),
@@ -2774,7 +2815,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 133);
+        assert_eq!(EVERY_KIND.len(), 134);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2915,7 +2956,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 133);
+        assert_eq!(EVERY_KIND.len(), 134);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3230,7 +3271,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 133);
+        assert_eq!(EVERY_KIND.len(), 134);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

@@ -2679,4 +2679,21 @@ export const en = {
 	refuseGoalValue: "Give a number of 0 or more.",
 	toldTidied:
 		"Catervas put back files a tool changed outside this task: {files}.",
+	attachButton: "Attach a document",
+	attachKindQuestion: "What is it about?",
+	attachKindProduct: "The product (a spec or a description)",
+	attachKindArchitecture: "The architecture",
+	attachSend: "Attach",
+	attachRemove: "Take {name} off this message",
+	attachReading: "Adding {name}",
+	attachedList: "Attached documents",
+	attachedFrom: "Attached by you from {name}",
+	attach_unsupported_type: "Catervas reads Markdown, text, PDF and Word files.",
+	attach_no_text: "This PDF has no text Catervas can read. It may be a scan.",
+	attach_unreadable: "Catervas could not open this file.",
+	attach_too_large:
+		"This file is too large. Catervas takes up to 10 MB, and up to 256 KB of text.",
+	attach_no_folder_owner:
+		"No one on the team keeps these documents. Add a Product Manager or an Architect.",
+	attach_too_many: "A message holds up to five documents.",
 };

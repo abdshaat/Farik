@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useConnection } from "../../app/connection.tsx";
+import { pendingSetupFiles } from "../../components/Attach.tsx";
 import { en } from "../../strings/en.ts";
 import type { FakeSocket } from "../../test/fake-socket.ts";
 import {
@@ -763,6 +764,88 @@ describe("setup", () => {
 		expect(
 			await screen.findByRole("heading", { name: "Your team is ready" }),
 		).toBeTruthy();
+	});
+
+	it("attaches_the_setups_documents_once_the_team_exists", async () => {
+		pendingSetupFiles.length = 0;
+		const first = await renderApp("/setup/project");
+		const p = first.socket as FakeSocket;
+		await answerStatus(p, false, 1, NO_PROJECT);
+		fireEvent.click(await screen.findByRole("radio", { name: /^No, start/ }));
+		const pick = async (file: File, about?: "architecture") => {
+			const input = first.container.querySelector('input[type="file"]');
+			if (!input) throw new Error("no file input");
+			fireEvent.change(input, { target: { files: [file] } });
+			const dialog = await screen.findByRole("dialog", {
+				name: en.attachKindQuestion,
+			});
+			if (about)
+				fireEvent.click(
+					within(dialog).getByRole("radio", {
+						name: en.attachKindArchitecture,
+					}),
+				);
+			fireEvent.click(
+				within(dialog).getByRole("button", { name: en.attachSend }),
+			);
+		};
+		await pick(new File(["one"], "spec.pdf"));
+		await pick(new File(["two"], "design.md"), "architecture");
+		await pick(new File(["three"], "extra.txt"));
+		const chips = await screen.findByRole("list", { name: en.attachedList });
+		expect(within(chips).getByText("spec.pdf")).toBeTruthy();
+		expect(within(chips).getByText("design.md")).toBeTruthy();
+		// Taking a chip off takes the file off the list; nothing is sent from this screen.
+		fireEvent.click(
+			within(chips).getByRole("button", {
+				name: en.attachRemove.replace("{name}", "extra.txt"),
+			}),
+		);
+		expect(pendingSetupFiles.map((f) => [f.file.name, f.kind])).toEqual([
+			["spec.pdf", "product"],
+			["design.md", "architecture"],
+		]);
+		expect(p.calls("document.attach")).toHaveLength(0);
+		cleanup();
+
+		// Start the team: each file once, in order, then the start; a refused one is said and does not stop it.
+		const { socket } = await renderApp("/setup/finish");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "team.propose", {
+			team: { ...TEAM, policy: { integration: "auto_merge" } },
+			criteria: { criteria: [] },
+		});
+		await answerStatus(s, false, 1, { setup_pending: true });
+		fireEvent.click(await screen.findByRole("button", { name: en.startTeam }));
+		const one = await sent(s, "document.attach");
+		expect(one.params).toEqual({
+			name: "spec.pdf",
+			kind: "product",
+			data_base64: btoa("one"),
+		});
+		expect(s.calls("team.start")).toHaveLength(0);
+		await s.reply(one, {
+			path: "docs/catervas/product/attached/spec.pdf",
+			change: 1,
+		});
+		await waitFor(() => expect(s.calls("document.attach")).toHaveLength(2));
+		const two = s.calls("document.attach")[1];
+		if (!two) throw new Error("no second attach");
+		expect(two.params).toEqual({
+			name: "design.md",
+			kind: "architecture",
+			data_base64: btoa("two"),
+		});
+		await s.fail(two, -32005, "refused", {
+			errors: [{ path: "/data_base64", message: "no text", code: "no_text" }],
+		});
+		const start = await sent(s, "team.start");
+		expect((await screen.findByRole("alert")).textContent).toContain(
+			en.attach_no_text,
+		);
+		expect(s.calls("document.attach")).toHaveLength(2);
+		expect(pendingSetupFiles).toHaveLength(0);
+		await s.reply(start, {});
 	});
 
 	it("joins_names_as_the_lead_does", () => {

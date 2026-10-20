@@ -7072,6 +7072,7 @@ mod tests {
                 thread: None,
                 in_reply_to: None,
                 session_id: None,
+                attachments: Vec::new(),
             },
         )
         .expect("posted")
@@ -7407,6 +7408,7 @@ mod tests {
                     thread: None,
                     in_reply_to: None,
                     session_id: None,
+                    attachments: Vec::new(),
                 },
             )
             .expect("posted");
@@ -7815,6 +7817,7 @@ mod tests {
                 heard: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the greeting is recorded");
@@ -9008,6 +9011,7 @@ mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the chat message is recorded")

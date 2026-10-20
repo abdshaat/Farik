@@ -796,6 +796,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::FolderDocApproved(_)
         | EventBody::FolderDocReturned(_)
         | EventBody::FolderDocEdited(_)
+        | EventBody::DocumentAttached(_)
         | EventBody::FolderChangeOpened(_)
         | EventBody::FolderChangeIntegrated(_)
         | EventBody::FolderChangeEscalated(_)

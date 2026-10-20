@@ -736,6 +736,7 @@ pub(crate) fn file_due(
             deps.clock.now(),
             &deps.ids,
             None,
+            &[],
         )?;
         deps.projections.catch_up()?;
         filed.push(contract.id);

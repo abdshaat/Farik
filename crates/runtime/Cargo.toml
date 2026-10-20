@@ -28,6 +28,8 @@ keyring.workspace = true
 lettre.workspace = true
 mail-parser.workspace = true
 oauth2.workspace = true
+pdf-extract.workspace = true
+quick-xml.workspace = true
 reqwest.workspace = true
 rmcp.workspace = true
 rust-embed.workspace = true
@@ -42,6 +44,7 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "
 tokio-rustls.workspace = true
 tokio-util.workspace = true
 url.workspace = true
+zip.workspace = true
 
 [build-dependencies]
 sha2.workspace = true

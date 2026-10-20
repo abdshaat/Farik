@@ -43,6 +43,7 @@ pub(super) fn post_message(call: &Call<'_>, input: PostMessageInput) -> Result<V
                 .then_some(call.context.in_reply_to)
                 .flatten(),
             session_id: Some(call.context.session_id.clone()),
+            attachments: Vec::new(),
         },
     )
     .map_err(|error| match error {
@@ -240,6 +241,7 @@ mod tests {
                 thread: None,
                 in_reply_to: None,
                 session_id: Some("session-0".to_string()),
+                attachments: Vec::new(),
             },
         )
         .expect("posted");

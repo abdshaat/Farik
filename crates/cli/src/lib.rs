@@ -1547,6 +1547,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
             "say",
             Command::MessagePost {
                 text: text.join(" "),
+                attachments: Vec::new(),
             },
         ),
         Commands::Chat { agent, text } => (
@@ -1555,6 +1556,7 @@ fn humans(command: &Commands) -> Result<(&'static str, Command), String> {
                 agent_id: agent.clone(),
                 text: text.join(" "),
                 as_task: false,
+                attachments: Vec::new(),
             },
         ),
         Commands::Marketing {

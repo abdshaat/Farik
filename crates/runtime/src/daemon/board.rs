@@ -136,20 +136,25 @@ fn channel_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         })
         .map_err(|e| internal(&e))?;
     page.reverse();
+    let names = attached_names(deps)?;
     let messages: Vec<Value> = page
         .iter()
         .filter_map(|event| match &event.body {
-            EventBody::MessagePosted(body) => Some(json!({
-                "seq": event.envelope.seq,
-                "at": event.envelope.recorded_at,
-                "author": body.author,
-                "kind": body.kind,
-                "text": body.text,
-                "mentions": body.mentions,
-                "thread": body.thread,
-                "in_reply_to": body.in_reply_to,
-                "task_id": event.envelope.ids.task_id,
-            })),
+            EventBody::MessagePosted(body) => {
+                let mut message = json!({
+                    "seq": event.envelope.seq,
+                    "at": event.envelope.recorded_at,
+                    "author": body.author,
+                    "kind": body.kind,
+                    "text": body.text,
+                    "mentions": body.mentions,
+                    "thread": body.thread,
+                    "in_reply_to": body.in_reply_to,
+                    "task_id": event.envelope.ids.task_id,
+                });
+                with_attachments(&mut message, body.attachments.as_ref(), &names);
+                Some(message)
+            }
             _ => None,
         })
         .collect();
@@ -186,22 +191,27 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
             _ => None,
         })
         .collect();
+    let names = attached_names(deps)?;
     let messages: Vec<Value> = page
         .iter()
         .filter_map(|event| match &event.body {
-            EventBody::ChatMessagePosted(body) => Some(json!({
-                "seq": event.envelope.seq,
-                "at": event.envelope.recorded_at,
-                "author": body.author,
-                "text": body.text,
-                "in_reply_to": body.in_reply_to,
-                "request": body.request,
-                "heard": body.heard,
-                "sent_as": sent
-                    .iter()
-                    .find(|(seq, _)| *seq == event.envelope.seq)
-                    .map(|(_, task_id)| task_id),
-            })),
+            EventBody::ChatMessagePosted(body) => {
+                let mut message = json!({
+                    "seq": event.envelope.seq,
+                    "at": event.envelope.recorded_at,
+                    "author": body.author,
+                    "text": body.text,
+                    "in_reply_to": body.in_reply_to,
+                    "request": body.request,
+                    "heard": body.heard,
+                    "sent_as": sent
+                        .iter()
+                        .find(|(seq, _)| *seq == event.envelope.seq)
+                        .map(|(_, task_id)| task_id),
+                });
+                with_attachments(&mut message, body.attachments.as_ref(), &names);
+                Some(message)
+            }
             _ => None,
         })
         .collect();
@@ -219,6 +229,47 @@ fn chat_messages(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
         _ => json!({ "because": waiting.because() }),
     });
     Ok(json!({ "messages": messages, "waiting": waiting }))
+}
+
+/// The name of each file the owner attached, by its path, from each path's newest
+/// `document.attached`.
+fn attached_names(deps: &ToolDeps) -> Result<BTreeMap<String, String>, Failure> {
+    let mut names = BTreeMap::new();
+    for event in deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::DocumentAttached],
+            newest_first: true,
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?
+    {
+        if let EventBody::DocumentAttached(body) = event.body {
+            names
+                .entry(body.path.to_string())
+                .or_insert_with(|| body.name.to_string());
+        }
+    }
+    Ok(names)
+}
+
+/// Sets `message`'s `attachments` to `[{ path, name }]`, and leaves the key out when it names none.
+fn with_attachments(
+    message: &mut Value,
+    paths: Option<&catervas_protocol::event::AttachmentPaths>,
+    names: &BTreeMap<String, String>,
+) {
+    let chips: Vec<Value> = paths
+        .into_iter()
+        .flat_map(|paths| paths.iter())
+        .map(|path| {
+            let path = path.as_str();
+            json!({ "path": path, "name": names.get(path).map_or(path, String::as_str) })
+        })
+        .collect();
+    if !chips.is_empty() {
+        message["attachments"] = Value::Array(chips);
+    }
 }
 
 /// `{ seq, at, author, text }` of a message in the channel or in a chat.
@@ -792,6 +843,84 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn answers_each_messages_attachments() {
+        let harness = Harness::new("board-attachments", |_| {});
+        let spec = "docs/catervas/product/attached/spec.md";
+        let design = "docs/catervas/architecture/attached/design.md";
+        for (path, name) in [(spec, "Spec.docx"), (design, "Plan.pdf")] {
+            put(
+                &harness,
+                &json!({
+                    "seq": 1, "recorded_at": at().to_rfc3339(), "team_id": "catervas",
+                    "project_id": "catervas", "kind": "document.attached",
+                    "body": { "path": path, "name": name, "media_type": "text/markdown" },
+                }),
+            );
+        }
+        let plain = said(&harness, "human", "human", "Plain.", &json!({}));
+        let with = said(
+            &harness,
+            "human",
+            "human",
+            "Both.",
+            &json!({ "body": { "attachments": [spec, design] } }),
+        );
+        let channel = query(
+            &harness.daemon,
+            "channel.messages",
+            &json!({ "limit": 2 }),
+            "channelMessagesResult",
+        )["messages"]
+            .clone();
+        assert_eq!(channel[0]["seq"], plain);
+        assert!(channel[0].get("attachments").is_none(), "{channel}");
+        assert_eq!(channel[1]["seq"], with);
+        assert_eq!(
+            channel[1]["attachments"],
+            json!([
+                { "path": spec, "name": "Spec.docx" },
+                { "path": design, "name": "Plan.pdf" },
+            ])
+        );
+
+        let deps = &harness.project.deps;
+        let post = |text: &str, attachments: Vec<String>| {
+            crate::chat::post_chat(
+                &deps.log,
+                deps.clock.as_ref(),
+                &deps.ids,
+                crate::chat::NewChatMessage {
+                    heard: None,
+                    chat: "dev-a".to_string(),
+                    author: "human".to_string(),
+                    text: text.to_string(),
+                    in_reply_to: None,
+                    request: None,
+                    session_id: None,
+                    as_task: false,
+                    attachments,
+                },
+            )
+            .expect("the chat message is recorded")
+        };
+        post("No file.", Vec::new());
+        post("A file.", vec![design.to_string()]);
+        let chat = query(
+            &harness.daemon,
+            "chat.messages",
+            &json!({ "agent_id": "dev-a" }),
+            "chatMessagesResult",
+        )["messages"]
+            .clone();
+        assert!(chat[0].get("attachments").is_none(), "{chat}");
+        assert_eq!(
+            chat[1]["attachments"],
+            json!([{ "path": design, "name": "Plan.pdf" }])
+        );
+    }
+
     /// A chat message in `agent`'s chat by `author`, answering `in_reply_to` when it is a reply.
     fn chatted(
         harness: &Harness,
@@ -814,6 +943,7 @@ mod tests {
                 request: None,
                 session_id: None,
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the chat message is recorded")
@@ -858,6 +988,7 @@ mod tests {
                 }),
                 session_id: Some("session-1".to_string()),
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the reply is recorded");
@@ -965,6 +1096,7 @@ mod tests {
                 }),
                 session_id: Some("session-1".to_string()),
                 as_task: false,
+                attachments: Vec::new(),
             },
         )
         .expect("the reply is recorded");
@@ -1052,6 +1184,7 @@ mod tests {
                     }),
                     session_id: None,
                     as_task: false,
+                    attachments: Vec::new(),
                 },
             )
             .expect("the reply is recorded")

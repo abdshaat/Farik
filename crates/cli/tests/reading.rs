@@ -601,6 +601,7 @@ fn shows_a_tasks_events_cost_and_children() {
         at(),
         &ids,
         None,
+        &[],
     )
     .expect("the child is filed");
     project::record_as(

@@ -197,6 +197,7 @@ pub(crate) fn file_pipeline_request(
         deps.clock.now(),
         ids,
         None,
+        &[],
     )
     .map_err(|error| match error {
         RequestError::Refused { reason } => format!("the request {reason}"),
