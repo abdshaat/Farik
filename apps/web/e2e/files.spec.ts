@@ -16,6 +16,8 @@ const shots = (page: Page, name: string) => screenshots(page, name, 1440);
  * takes the whole right side at a wide window, so this is only the page's own padding (16 px).
  */
 async function shortOfRight(page: Page, el: Locator): Promise<number> {
+	// A page opened by address shows "Opening Catervas…" until Catervas answers.
+	await expect(el).toBeVisible();
 	const content = await page.getByRole("main").boundingBox();
 	const box = await el.boundingBox();
 	if (!content || !box) throw new Error("the page or the element is not drawn");
