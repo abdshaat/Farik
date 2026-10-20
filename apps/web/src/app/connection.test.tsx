@@ -73,6 +73,47 @@ describe("connection", () => {
 		expect(location.pathname).toBe("/connect");
 	});
 
+	it("redeems_a_link_opened_in_the_same_tab", async () => {
+		history.replaceState(null, "", "/connect");
+		const fetch = vi.fn(
+			fakeFetch({ "POST /connect": 204, "GET /session": 401 }),
+		);
+		vi.stubGlobal("fetch", fetch);
+		render(
+			<ConnectionProvider socketFactory={socketsMade().factory}>
+				<Status />
+			</ConnectionProvider>,
+		);
+		await waitFor(() => expect(status()).toBe("no_session"));
+		expect(fetch).not.toHaveBeenCalledWith("/connect", expect.anything());
+		// A second link, opened in this tab: only the hash changes.
+		act(() => {
+			location.hash = CODE;
+			dispatchEvent(new HashChangeEvent("hashchange"));
+		});
+		await waitFor(() =>
+			expect(fetch).toHaveBeenCalledWith(
+				"/connect",
+				expect.objectContaining({
+					method: "POST",
+					body: JSON.stringify({ code: CODE }),
+				}),
+			),
+		);
+	});
+
+	it("shows_opening_while_it_connects", async () => {
+		vi.stubGlobal("fetch", () => new Promise(() => {}));
+		render(
+			<ConnectionProvider socketFactory={socketsMade().factory}>
+				<BrowserRouter>
+					<App />
+				</BrowserRouter>
+			</ConnectionProvider>,
+		);
+		expect(screen.getByText(en.openingCatervas)).toBeTruthy();
+	});
+
 	it("sends_a_used_link_home_when_the_browser_has_a_session", async () => {
 		vi.useFakeTimers();
 		history.replaceState(null, "", `/connect#${CODE}`);

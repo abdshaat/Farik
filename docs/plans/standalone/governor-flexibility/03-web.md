@@ -23,7 +23,7 @@ Tests:
 - `redeems_a_link_opened_in_the_same_tab` (`app/connection.test.tsx`) — mounted at `/connect` with no hash and a 401 session; setting `location.hash` to a 64-hex code and dispatching `hashchange` posts `/connect` with that code.
 - `shows_opening_while_it_connects` (`app/connection.test.tsx` or `shell/Shell.test.tsx`) — before `serve.status` answers, the page shows "Opening Catervas…".
 
-- [ ] `fix(web): a start link opened in the same tab works, and the app says it is opening`
+- [x] `fix(web): a start link opened in the same tab works, and the app says it is opening`
 
 ### Task 16: an answer must say something, to the agent who asked
 

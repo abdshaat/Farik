@@ -13,6 +13,7 @@ import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
 import { type ServeStatus, useQuery } from "../app/store.ts";
 import { ChangeProject } from "../pages/ChangeProject.tsx";
+import { Opening } from "../pages/Opening.tsx";
 import type { Team } from "../pages/setup/TeamSetup.tsx";
 import { t } from "../strings/t.ts";
 import { PauseControl } from "./PauseControl.tsx";
@@ -71,7 +72,7 @@ export function Shell() {
 	// The chats fill the window and scroll inside it, so the window itself does not.
 	const filled = path === "/channel" || path.startsWith("/channel/");
 	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.
-	if (!data) return null;
+	if (!data) return <Opening />;
 	// During setup, every path goes where "/" would.
 	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;
 	// Files and Settings sit under Team on a phone (web-ui.md), so the bar has five places.

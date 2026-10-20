@@ -26,7 +26,7 @@ export const en = {
 	noPage: "No page here",
 	noPageHome: "Go to the start page",
 	linkUsed:
-		"This start link was already used. Each link works once, so run catervas serve again for a new one.",
+		"This start link was already used. In your project folder, run catervas open for a new one.",
 	noSessionTitle: "Open Catervas from its start link",
 	noSessionBody:
 		"For your safety, this page only works when opened from the link Catervas gives you. Each link works once, so an old one from your history will not open it.",
@@ -196,6 +196,7 @@ export const en = {
 	browserNote:
 		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Catervas makes the folder and sets up git for you.",
 	opening: "Opening your project…",
+	openingCatervas: "Opening Catervas…",
 	changeProject: "Change project…",
 	changeShort: "Change",
 	projectWord: "project",
