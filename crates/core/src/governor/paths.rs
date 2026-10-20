@@ -72,9 +72,32 @@ pub fn check_protected_paths(
 ) -> Result<(), PathRefusal> {
     let protected = compile(protected_globs, true)?;
     refuse(paths.iter().filter(|path| {
-        normalise(path)
-            .is_none_or(|path| protected.is_match(&path) || protected.is_match(format!("{path}/x")))
+        normalise(path).is_none_or(|path| {
+            if is_env_template(&path) {
+                return named_exactly(&path, protected_globs);
+            }
+            protected.is_match(&path) || protected.is_match(format!("{path}/x"))
+        })
     }))
+}
+
+/// The names of a project's env template, which lists the keys with empty values and holds no
+/// secret (ADR 0078): a glob such as `.env.*` does not protect it, only a glob that is its path.
+const ENV_TEMPLATES: [&str; 3] = [".env.example", ".env.sample", ".env.template"];
+
+/// Whether `path`'s file name is an env template's, in any letter case.
+fn is_env_template(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    ENV_TEMPLATES
+        .iter()
+        .any(|template| name.eq_ignore_ascii_case(template))
+}
+
+/// Whether one of `globs` is `path` itself, in any letter case.
+fn named_exactly(path: &str, globs: &[String]) -> bool {
+    globs
+        .iter()
+        .any(|glob| normalise(glob).is_some_and(|glob| glob.eq_ignore_ascii_case(path)))
 }
 
 /// The path with backslashes as `/` and `.` segments dropped, or `None` when it is empty,
@@ -466,6 +489,33 @@ mod tests {
                 "certs/server.pem",
                 ".catervas/local/settings.json"
             ]))
+        );
+    }
+
+    #[test]
+    fn leaves_an_env_template_to_the_team_unless_named_exactly() {
+        let shipped = strings(&[".env", ".env.*", "**/.env.*"]);
+        assert_eq!(
+            check_protected_paths(
+                &strings(&[
+                    ".env.example",
+                    ".env.sample",
+                    ".env.template",
+                    "apps/web/.ENV.Example"
+                ]),
+                &shipped
+            ),
+            Ok(())
+        );
+        // The real files stay protected.
+        assert_eq!(
+            check_protected_paths(&strings(&[".env.local", ".env.example.local"]), &shipped),
+            Err(violations(&[".env.local", ".env.example.local"]))
+        );
+        // A team that names a template protects it.
+        assert_eq!(
+            check_protected_paths(&strings(&[".env.example"]), &strings(&[".env.example"])),
+            Err(violations(&[".env.example"]))
         );
     }
 

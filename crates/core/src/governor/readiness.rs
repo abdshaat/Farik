@@ -5,8 +5,8 @@ use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::paths::{
-    GlobError, PathRefusal, check_allowed_paths, could_overlap, reaches_the_catervas_directory,
-    reaches_the_folder,
+    GlobError, PathRefusal, check_allowed_paths, check_protected_paths, could_overlap, normalise,
+    reaches_the_catervas_directory, reaches_the_folder,
 };
 use super::team_rules::TeamRules;
 use crate::contract::{
@@ -72,6 +72,8 @@ pub enum ReadinessRule {
     FolderOwned,
     /// No allowed path reaches under `.catervas/`, whose files change only through Catervas's tools.
     NoCatervasPaths,
+    /// No allowed path is a protected path, which no tool may write (ADR 0078).
+    ProtectedPathAllowed,
     /// A task for a role with a private folder works only there: every allowed path lies within
     /// the folder, no criterion is a `command` or a `test`, an `artifact` criterion names a
     /// workbook in the folder and searches no text, and the task has no parent epic.
@@ -161,7 +163,7 @@ pub struct ReadinessFailure {
 
 type Check = fn(&TaskContract, &ReadinessContext) -> Option<ReadinessFailure>;
 
-const CHECKS: [Check; 29] = [
+const CHECKS: [Check; 30] = [
     intent_present,
     criteria_present,
     criteria_methods_valid,
@@ -181,6 +183,7 @@ const CHECKS: [Check; 29] = [
     document_paths_only,
     folder_owned,
     no_catervas_paths,
+    protected_path_allowed,
     private_folder_task,
     private_folder_reviewer,
     budget_within_team_max,
@@ -816,6 +819,34 @@ fn folder_owned(contract: &TaskContract, context: &ReadinessContext) -> Option<R
 /// glob such as `.c\atervas/**` reads its first segment as `.c`, missing the directory it in fact
 /// matches once escaped. The one exception is a task in a private folder (6.6), which may name
 /// paths within its own folder.
+fn protected_path_allowed(
+    contract: &TaskContract,
+    context: &ReadinessContext,
+) -> Option<ReadinessFailure> {
+    // A path under `.catervas/`, a private folder among them, or that climbs is another rule's.
+    let protected: Vec<&str> = contract
+        .allowed_paths
+        .iter()
+        .filter(|path| normalise(path).is_some() && !reaches_the_catervas_directory(path))
+        .filter(|path| {
+            check_protected_paths(std::slice::from_ref(*path), &context.rules.protected_paths)
+                .is_err()
+        })
+        .map(String::as_str)
+        .collect();
+    if protected.is_empty() {
+        return None;
+    }
+    Some(failure(
+        ReadinessRule::ProtectedPathAllowed,
+        format!(
+            "allowed paths {} are protected, and no tool may write a protected path: take them out \
+             of the contract and its criteria, or ask the owner to change the team's protected paths",
+            protected.join(", ")
+        ),
+    ))
+}
+
 fn no_catervas_paths(contract: &TaskContract, _: &ReadinessContext) -> Option<ReadinessFailure> {
     let backslashed: Vec<&str> = contract
         .allowed_paths
@@ -1512,6 +1543,27 @@ mod tests {
             failed_rules(&contract, &context),
             [R::AllowedPathsWithinCeiling]
         );
+    }
+
+    #[test]
+    fn refuses_an_allowed_path_that_is_protected() {
+        // No tool may write a protected path, so a task that lists one could never be done.
+        let task = a_task_for(
+            Role::SoftwareDeveloper,
+            &["src/**", ".env.local", "certs/a.pem"],
+        );
+        assert_eq!(
+            failed_rules(&task, &a_ready_context()),
+            [R::ProtectedPathAllowed]
+        );
+        let message = message_of(&task, &a_ready_context(), R::ProtectedPathAllowed);
+        assert!(
+            message.contains(".env.local") && message.contains("certs/a.pem"),
+            "{message}"
+        );
+        // An env template holds no secret, and is the task's to write.
+        let task = a_task_for(Role::SoftwareDeveloper, &["src/**", ".env.example"]);
+        assert_eq!(evaluate_readiness(&task, &a_ready_context()), Ok(()));
     }
 
     #[test]
