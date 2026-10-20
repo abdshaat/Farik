@@ -16,7 +16,7 @@ use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, 
 use catervas_core::folders::human_of_twin;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
-use catervas_core::governor::escalation::EscalationReason;
+use catervas_core::governor::escalation::{EscalationReason, READINESS_ATTEMPT_LIMIT};
 use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
     FolderWork, ReassignmentInput, Rejection, WorkState, check_reassignment,
@@ -738,6 +738,7 @@ impl Transitions {
             children: children_of(&board, id),
             readiness,
             readiness_failed_attempts: readiness_failed_attempts(&history),
+            readiness_attempt_limit: READINESS_ATTEMPT_LIMIT,
             assignment,
             assignee_results: results,
             work,

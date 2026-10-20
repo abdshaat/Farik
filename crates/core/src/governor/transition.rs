@@ -19,8 +19,8 @@ use crate::governor::done::{
     CriterionResult, DoneEvidence, catervas_verifies_alone, evaluate_done,
 };
 use crate::governor::escalation::{
-    BlockedAge, EscalationReason, READINESS_ATTEMPT_LIMIT, ReadinessOutcome, RejectionOutcome,
-    evaluate_blocked_age, evaluate_readiness_attempts, evaluate_rejection,
+    BlockedAge, EscalationReason, ReadinessOutcome, RejectionOutcome, evaluate_blocked_age,
+    evaluate_readiness_attempts, evaluate_rejection,
 };
 use crate::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, GateResult, Rejection, WorkState,
@@ -69,6 +69,9 @@ pub struct TransitionContext {
     /// contract fails the Definition of Ready now, so a counter nobody reset cannot escalate a
     /// contract that has since been fixed.
     pub readiness_failed_attempts: u32,
+    /// How many failures the team allows before the task escalates: `Team::readiness_attempts`
+    /// (ADR 0080 decision 8), `READINESS_ATTEMPT_LIMIT` unless the owner set it.
+    pub readiness_attempt_limit: u32,
     /// Whether this contract is waiting for the human, and whether the human has answered.
     /// The pair of agents an assignment would name, when the move is an assignment.
     pub assignment: Option<AssignmentInput>,
@@ -519,12 +522,14 @@ fn readiness_exhausted(context: &TransitionContext) -> GateResult {
         ]);
     }
     open_or(
-        evaluate_readiness_attempts(context.readiness_failed_attempts)
-            == ReadinessOutcome::Escalate,
+        evaluate_readiness_attempts(
+            context.readiness_failed_attempts,
+            context.readiness_attempt_limit,
+        ) == ReadinessOutcome::Escalate,
         || {
             format!(
-                "the contract has failed the Definition of Ready {} times, and it is refined again until {READINESS_ATTEMPT_LIMIT}",
-                context.readiness_failed_attempts
+                "the contract has failed the Definition of Ready {} times, and it is refined again until {}",
+                context.readiness_failed_attempts, context.readiness_attempt_limit
             )
         },
     )
@@ -716,6 +721,7 @@ mod tests {
     use crate::generated::task_contract::CatervasTaskContractKind as Kind;
     use crate::generated::task_contract::CatervasTaskContractRisk as Risk;
     use crate::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
+    use crate::governor::escalation::READINESS_ATTEMPT_LIMIT;
     use crate::governor::escalation::{
         DEFAULT_BLOCKED_LIMIT, EscalationReason as Why, RejectionOutcome,
     };
@@ -788,6 +794,7 @@ mod tests {
             children: Vec::new(),
             readiness: a_ready_context(),
             readiness_failed_attempts: 1,
+            readiness_attempt_limit: READINESS_ATTEMPT_LIMIT,
             assignment: Some(an_assignment()),
             assignee_results: vec![a_result(RunBy::Assignee)],
             work: WorkState {
@@ -1184,10 +1191,11 @@ mod tests {
     }
 
     #[test]
-    fn escalates_a_contract_that_has_failed_the_definition_of_ready_three_times() {
+    fn escalates_a_contract_that_has_failed_the_definition_of_ready_the_limit_times() {
         let mut context = a_context();
         context.contract.status = TaskStatus::Refining;
-        context.readiness_failed_attempts = 3;
+        context.readiness_attempt_limit = 2;
+        context.readiness_failed_attempts = 2;
         // The row is about a contract that fails the Definition of Ready, so this one does.
         context.contract.intent = " "
             .repeat(24)
@@ -1200,7 +1208,7 @@ mod tests {
         );
         // Below the limit, all three of the governor's rows into `escalated` are tried, in table
         // order, and each says what it is waiting for.
-        context.readiness_failed_attempts = 2;
+        context.readiness_failed_attempts = 1;
         let failures = gates(&request, &context);
         assert_eq!(
             failures
@@ -1216,7 +1224,7 @@ mod tests {
         assert_eq!(
             failures[0].details,
             vec![
-                "the contract has failed the Definition of Ready 2 times, and it is refined again until 3"
+                "the contract has failed the Definition of Ready 1 times, and it is refined again until 2"
                     .to_string()
             ]
         );

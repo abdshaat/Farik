@@ -107,7 +107,7 @@ Tests:
 - `escalation.rs`: `retries_readiness_until_the_limit_and_escalates_at_it` (replaces `retries_readiness_twice_and_escalates_on_the_third_failure`) — asserts `Retry` for 0..4 and `Escalate` at 5 with limit 5, and `Escalate` at 1 with limit 1.
 - `transition.rs`: the existing readiness-escalation test sets `readiness_attempt_limit: 2` and asserts escalation after two failures. Every other `TransitionContext` built in tests sets `READINESS_ATTEMPT_LIMIT`.
 
-- [ ] `feat(core): the owner sets the readiness attempts before escalation`
+- [x] `feat(core): the owner sets the readiness attempts before escalation`
 
 ### Task 6: a connector tool may ask first
 
