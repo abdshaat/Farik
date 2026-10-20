@@ -19,7 +19,7 @@ The v2 build ran from 06:22 UTC. CTV-22 was accepted and merged and CTV-12 start
 
 Files: `apps/web/src/pages/TaskDetail.tsx`, `TaskDetail.test.tsx`, `strings/en.ts`
 - `opens_a_task_that_has_no_branch_yet` — `task.diff` answers an error, every other query answers; the page shows the task's title and, on the Changes tab, "No changes yet".
-- [ ] `fix(web): a task with no branch yet opens`
+- [x] `fix(web): a task with no branch yet opens`
 
 ### Task 27: the owner sends a ready task back to its plan
 

@@ -180,7 +180,10 @@ export function TaskDetail() {
 	const { data: plan } = useQuery<{ contract: Detail }>("contract.get", task);
 	const { data: history } = useQuery<{ events: Event[] }>("task.history", task);
 	const { data: checked } = useQuery<{ checks: Check[] }>("task.checks", task);
-	const { data: diff } = useQuery<Diff>("task.diff", task);
+	const { data: shownDiff, error: diffError } = useQuery<Diff>(
+		"task.diff",
+		task,
+	);
 	const { data: tries } = useQuery<Tries>("task.tries", task);
 	const { data: waiting } = useQuery<{ waiting: Waiting[] }>(
 		"waiting.list",
@@ -204,7 +207,7 @@ export function TaskDetail() {
 		!plan ||
 		!history ||
 		!checked ||
-		!diff ||
+		(!shownDiff && !diffError) ||
 		!tries ||
 		!waiting ||
 		!activity ||
@@ -222,6 +225,9 @@ export function TaskDetail() {
 			</div>
 		);
 
+	// A task with no branch yet answers `task.diff` with an error: its page opens all the same.
+	const noBranch = !shownDiff;
+	const diff: Diff = shownDiff ?? { diff: "", files: [], added: 0, removed: 0 };
 	const contract = plan.contract;
 	const events = history.events;
 	const agents = team.team.agents;
@@ -597,6 +603,11 @@ export function TaskDetail() {
 						<li key={file}>{file}</li>
 					))}
 				</ul>
+			</>
+		) : noBranch ? (
+			<>
+				<h2>{t("tabChanges")}</h2>
+				<p>{t("taskNoBranchYet")}</p>
 			</>
 		) : (
 			<>

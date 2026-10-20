@@ -1045,6 +1045,7 @@ export const en = {
 	taskRisk: "Risk",
 	taskLimit: "Spending limit",
 	taskLimitFor: "{usd} for this task",
+	taskNoBranchYet: "No changes yet: the work starts when it is assigned.",
 	taskChangesLine: "{size}, on the branch {branch}.",
 	privateChanges:
 		"This task changed the {role}’s private files, which are not shown in the browser. Its reviewer reads each changed file beside the copy taken when the task started.",

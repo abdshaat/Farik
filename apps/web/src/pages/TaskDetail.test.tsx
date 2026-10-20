@@ -93,8 +93,9 @@ const opened = (
 	contract: object = CONTRACT,
 	waiting: object[] = [],
 	overrides: Record<string, unknown> = {},
+	names: string[] = PAGE,
 ) =>
-	openedGate("/tasks/CTV-1", PAGE, contract, waiting, {
+	openedGate("/tasks/CTV-1", names, contract, waiting, {
 		"task.checks": {
 			checks: [
 				{ criterion_id: "C1", text: "", passed: true, evidence: "3 passed" },
@@ -112,6 +113,26 @@ describe("task detail", () => {
 		cleanup();
 		vi.unstubAllGlobals();
 		vi.useRealTimers();
+	});
+
+	it("opens_a_task_that_has_no_branch_yet", async () => {
+		// `task.diff` answers an error for a task with no branch; every other query answers.
+		const { s } = await opened(
+			CONTRACT,
+			[],
+			{},
+			PAGE.filter((n) => n !== "task.diff"),
+		);
+		await waitFor(() =>
+			expect(s.calls("query").some((f) => f.params.name === "task.diff")).toBe(
+				true,
+			),
+		);
+		const asked = s.calls("query").filter((f) => f.params.name === "task.diff");
+		for (const frame of asked) await s.fail(frame, -32602, "no branch yet");
+		fireEvent.click(await screen.findByRole("tab", { name: "Code changes" }));
+		expect(await screen.findByText(/No changes yet/)).toBeTruthy();
+		expect(screen.getAllByText("Gift cards").length).toBeGreaterThan(0);
 	});
 
 	it("a_finance_tasks_changes_tab_says_where_its_books_are", async () => {
