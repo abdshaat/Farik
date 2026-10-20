@@ -177,6 +177,27 @@ describe("board", () => {
 			expect(asked).not.toContain(name);
 	});
 
+	it("shows_what_a_to_do_card_waits_on", async () => {
+		media.set(WIDE, true);
+		await board([
+			task(1, "An old idea", "cancelled"),
+			task(2, "Ready two", "ready"),
+			task(3, "Waiting three", "ready", {
+				waits_on: [{ task_id: "CTV-1", status: "cancelled" }],
+			}),
+		]);
+		const todo = screen.getByRole("region", { name: en.statusToDo });
+		const card = within(todo)
+			.getByRole("link", { name: "Waiting three" })
+			.closest("li") as HTMLElement;
+		const meta = within(card).getByText("Waits on CTV-1 (cancelled)");
+		expect(meta.className).toContain(styles.meta);
+		const other = within(todo)
+			.getByRole("link", { name: "Ready two" })
+			.closest("li") as HTMLElement;
+		expect(within(other).queryByText(/Waits on/)).toBeNull();
+	});
+
 	it("shows_each_row_with_its_mark", async () => {
 		media.set(WIDE, true);
 		const { container } = await board();

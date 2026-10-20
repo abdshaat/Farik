@@ -20,6 +20,8 @@ export type TaskRow = {
 	assigneeId?: string;
 	/** A UI change in review: where its design review stands (step 12). */
 	designReviewState?: string;
+	/** The dependencies not yet accepted, for a card that waits on them (ADR 0079). */
+	waitsOn?: { taskId: string; status: TaskStatus }[];
 };
 
 /** The board's lanes, in the mockup's order. */

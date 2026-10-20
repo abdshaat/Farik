@@ -910,6 +910,7 @@ export const en = {
 	filterCancelled: "Show cancelled",
 	laneTabs: "Lanes",
 	laneEmpty: "Nothing here right now.",
+	boardWaitsOn: "Waits on {tasks}",
 	boardShowAll: "Show all {count}",
 	boardShowFewer: "Show fewer",
 	boardThinking: "{name} · {role} — thinking",

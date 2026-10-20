@@ -833,6 +833,26 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 {
                     wire["design_review_state"] = json!(review.state);
                 }
+                // What a task not yet started waits on, for its card; a contract that cannot be
+                // read leaves only its card without it.
+                if !matches!(task.status, TaskStatus::Accepted | TaskStatus::Cancelled)
+                    && let Ok(contract) = deps.files.read_contract(&task.task_id)
+                {
+                    let waits_on: Vec<Value> = contract
+                        .dependencies
+                        .iter()
+                        .filter_map(|dependency| {
+                            board
+                                .iter()
+                                .find(|row| row.task_id.as_str() == dependency.as_str())
+                        })
+                        .filter(|row| row.status != TaskStatus::Accepted)
+                        .map(|row| json!({ "task_id": row.task_id, "status": row.status }))
+                        .collect();
+                    if !waits_on.is_empty() {
+                        wire["waits_on"] = json!(waits_on);
+                    }
+                }
                 tasks.push(wire);
             }
             Ok(json!({ "tasks": tasks }))
@@ -2226,6 +2246,38 @@ pub(super) mod tests {
         // A UI change in review says where its design review stands, so the board need not ask.
         assert_eq!(row("CTV-2")["design_review_state"], "waiting", "{listed}");
         assert_eq!(row("CTV-1").get("design_review_state"), None, "{listed}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lists_what_a_task_waits_on() {
+        let harness = Harness::new("rpc-board-waits-on", |_| {});
+        harness.file("CTV-1", "ready", |_| {});
+        harness
+            .project
+            .moved("CTV-1", "ready", "cancelled", &json!({}));
+        harness.accepted("CTV-2");
+        harness.file("CTV-3", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1", "CTV-2"]);
+        });
+        let (handle, mut socket) = driven(&harness).await;
+        let listed = query(&mut socket, 1, "tasks.list", &json!({}), "tasksListResult").await;
+        let row = |id: &str| {
+            listed["tasks"]
+                .as_array()
+                .and_then(|tasks| tasks.iter().find(|task| task["task_id"] == id))
+                .cloned()
+                .unwrap_or_else(|| panic!("{id} is listed: {listed}"))
+        };
+        // The accepted dependency is no wait; the cancelled one is, with its status.
+        assert_eq!(
+            row("CTV-3")["waits_on"],
+            json!([{ "task_id": "CTV-1", "status": "cancelled" }]),
+            "{listed}"
+        );
+        assert_eq!(row("CTV-2").get("waits_on"), None, "{listed}");
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }

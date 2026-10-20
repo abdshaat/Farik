@@ -68,7 +68,7 @@ Tests:
 - `lists_what_a_task_waits_on` (web.rs) — `tasks.list` for CTV-3 depending on CTV-1 `cancelled` and CTV-2 `accepted` has `waits_on: [{task_id: "CTV-1", status: "cancelled"}]`.
 - `shows_what_a_to_do_card_waits_on` (Board.test.tsx) — the CTV-3 card's meta reads "Waits on CTV-1 (cancelled)".
 
-- [ ] `feat(web): a To do card says what it waits on`
+- [x] `feat(web): a To do card says what it waits on`
 
 ### Task 14: Files names the writer and keeps table words whole; Costs shows cancelled spend
 
