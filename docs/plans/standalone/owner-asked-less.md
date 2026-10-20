@@ -106,7 +106,7 @@ Files: `docs/SPEC.md` (5.5, 5.9, 5.16, 8.3, 8.6, the rpc and team file formats, 
 Files: `runtime/src/sandbox/docker.rs`, `runtime/src/sandbox.rs` (if `create` needs the store), `runtime/src/orchestrator.rs` (`held_sandbox` passes the store for agents as for checks)
 - `mounts_the_git_store_for_an_agent` (docker.rs, unit on `run_args`) — an agent sandbox's `docker run` arguments mount the git store read-only at its own path, as the checks' do.
 - `an_agent_reads_git_in_its_sandbox` (orchestrator.rs or tests/docker_sandbox.rs, ignored: docker) — in an agent sandbox on a linked worktree, `git log -1 --format=%s` prints the branch's last subject.
-- [ ] `fix(runtime): git reads work in an agent's sandbox`
+- [x] `fix(runtime): git reads work in an agent's sandbox`
 
 ### Task 11: idle names what waits on the owner; the send-back heading is short
 

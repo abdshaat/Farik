@@ -359,7 +359,7 @@ fn image_with_git() -> String {
 
 #[test]
 #[ignore = "needs docker and the git program"]
-fn a_check_reads_git_and_an_agent_does_not() {
+fn an_agent_reads_git_in_its_sandbox() {
     use catervas_store::git::fixtures::TempRepo;
 
     let repository = TempRepo::new("docker-git-store");
@@ -409,15 +409,24 @@ fn a_check_reads_git_and_an_agent_does_not() {
     assert_eq!(head(&repository.path), before, "the store is unchanged");
     checking.discard().expect("the container is removed");
 
+    // An agent's sandbox is made with the store too (ADR 0081; this test once asserted the
+    // opposite, that git failed there), so `git log` prints the branch's last subject.
     let agent = factory
-        .create(&project, &task(), &worktree, false, &[], &[])
+        .create_checking(&project, &task(), &worktree, false, &[], &[], &store)
         .unwrap_or_else(|error| panic!("the agent's sandbox could not be made: {error}"));
-    let status = run(agent.as_ref(), "git status");
-    assert_eq!(status.exit_code, 128, "{}", status.stderr);
-    assert!(
-        status.stderr.contains("not a git repository"),
-        "{}",
-        status.stderr
-    );
+    let subject = String::from_utf8_lossy(
+        &Command::new("git")
+            .args(["log", "-1", "--format=%s", "catervas/CTV-1"])
+            .current_dir(&repository.path)
+            .output()
+            .expect("git runs")
+            .stdout,
+    )
+    .trim()
+    .to_owned();
+    assert!(!subject.is_empty());
+    let log = run(agent.as_ref(), "git log -1 --format=%s");
+    assert_eq!(log.exit_code, 0, "{}", log.stderr);
+    assert_eq!(log.stdout.trim(), subject);
     agent.discard().expect("the container is removed");
 }
