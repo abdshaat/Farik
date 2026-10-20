@@ -42,4 +42,4 @@ Files: `crates/runtime/src/orchestrator/messages.rs`
 ### Task 25: the spec and the ADR say it
 
 Files: `docs/SPEC.md` (5.7 and the 0.134 revision line), `docs/decisions/0079-the-governor-gets-out-of-the-way.md` is already amended by the planner.
-- [ ] `docs(spec): room needs no note, reviews start up to date, answers stay with the task`
+- [x] `docs(spec): room needs no note, reviews start up to date, answers stay with the task`
