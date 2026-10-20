@@ -685,6 +685,8 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         ),
         EventBody::QuestionAsked(_)
         | EventBody::QuestionAnswered(_)
+        | EventBody::TeamQuestionAsked(_)
+        | EventBody::TeamQuestionAnswered(_)
         | EventBody::EscalationRaised(_)
         | EventBody::ToolApprovalRequested(_)
         | EventBody::ToolApprovalGranted(_)
@@ -727,8 +729,6 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::MergePermissionWithdrawn(_)
         | EventBody::PullRequestMerged(_)
         | EventBody::AutopilotChanged(_)
-        | EventBody::TeamQuestionAsked(_)
-        | EventBody::TeamQuestionAnswered(_)
         | EventBody::TeamDecided(_)
         | EventBody::TaskFlagged(_)
         | EventBody::ToolApproved(_)
@@ -939,13 +939,13 @@ fn apply_wait_counts(
     seq: i64,
 ) -> Result<(), StoreError> {
     match body {
-        EventBody::QuestionAsked(_) => update(
+        EventBody::QuestionAsked(_) | EventBody::TeamQuestionAsked(_) => update(
             transaction,
             "UPDATE task_projections SET open_questions = open_questions + 1, updated_seq = ?2
              WHERE task_id = ?1",
             (id, seq),
         ),
-        EventBody::QuestionAnswered(_) => update(
+        EventBody::QuestionAnswered(_) | EventBody::TeamQuestionAnswered(_) => update(
             transaction,
             "UPDATE task_projections SET open_questions = max(0, open_questions - 1),
                  updated_seq = ?2
@@ -1972,6 +1972,49 @@ mod tests {
             "one question is still open"
         );
         record(&log, &projections, &answer(&second));
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
+    }
+
+    #[test]
+    fn a_team_question_holds_its_task_until_answered() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let asked = |log: &EventLog, projections: &Projections| {
+            record(
+                log,
+                projections,
+                &with_body(
+                    EventKind::TeamQuestionAsked,
+                    "CTV-1",
+                    json!({ "question": "Which database?", "asked_by": "linus", "about": "technical" }),
+                ),
+            )
+        };
+        let first = asked(&log, &projections);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
+        record(
+            &log,
+            &projections,
+            &with_body(
+                EventKind::TeamQuestionAnswered,
+                "CTV-1",
+                json!({ "question_seq": first.envelope.seq, "answer": "SQLite.", "answered_by": "grace" }),
+            ),
+        );
+        assert!(!row_of(&projections, "CTV-1").waiting_on_human);
+
+        // The owner may answer it too, naming the team question's seq.
+        let second = asked(&log, &projections);
+        assert!(row_of(&projections, "CTV-1").waiting_on_human);
+        record(
+            &log,
+            &projections,
+            &with_body(
+                EventKind::QuestionAnswered,
+                "CTV-1",
+                json!({ "question_id": second.envelope.seq, "answer": "Yes.", "answered_by": "human" }),
+            ),
+        );
         assert!(!row_of(&projections, "CTV-1").waiting_on_human);
     }
 

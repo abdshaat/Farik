@@ -194,7 +194,7 @@ Tests:
 - `autopilot.rs`: `a_flag_stands_until_the_task_moves_and_acts_are_listed_for_seven_days` — a `task.flagged` stands in `flags`, and is gone after the task's next `task.transitioned`; `team_spent` counts two `more_tries` and one `reopen_integration`; a `team.decided { choice: flag, folder_change: 4 }` stands as a flag of change 4 until a later `retry_folder_change` of it, which also leaves change 4 not `escalated` in `folder_docs`; `done_on_its_own` lists a `team.decided` of six days ago with its reason and not one of eight days ago, a `pull_request.merged` recorded while autopilot was on and not one recorded before it was turned on, newest first.
 - `projections.rs`: `a_team_question_holds_its_task_until_answered` — `waiting_on_human` is true after `team.question_asked` about `CTV-1`, false after `team.question_answered` naming it, and the same with the owner's `question.answered` naming it.
 
-- [ ] `feat(store): autopilot's state, flags and acts from the log`
+- [x] `feat(store): autopilot's state, flags and acts from the log`
 
 ## Verification
 
