@@ -294,6 +294,10 @@ fn print_acted(printer: &mut Printer<'_, '_>, report: &TickReport) {
                 &json!({ "agent_id": agent_id, "what": what }),
             );
         }
+        TickReport::Goal { goal_id, what } => printer.line(
+            &format!("{goal_id}: {what}"),
+            &json!({ "goal": goal_id, "what": what }),
+        ),
         TickReport::FolderChange { change, what } => printer.line(
             &format!("folder-{change}: {what}"),
             &json!({ "folder_change": change, "what": what }),

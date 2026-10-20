@@ -279,22 +279,35 @@ impl Harness {
         agent: &str,
         change: impl FnOnce(&mut Value),
     ) {
-        self.project.filed_given_to(task, status, agent, |wire| {
-            wire["assignee_role"] = json!("software_developer");
-            wire["reviewer_role"] = json!("software_developer");
-            wire["allowed_paths"] = json!(["done.txt"]);
-            wire["exit_criteria"] = json!([{
-                "id": "C1",
-                "text": "done.txt exists.",
-                "satisfies": ["R1"],
-                "verification": {
-                    "method": "command",
-                    "command": "test -f done.txt",
-                    "expect": { "exit_code": 0 }
-                }
-            }]);
-            change(wire);
-        });
+        self.file_given_with(task, status, agent, &json!({}), change);
+    }
+
+    /// `file_given`, the `task.created` body also holding `more`.
+    pub(crate) fn file_given_with(
+        &self,
+        task: &str,
+        status: &str,
+        agent: &str,
+        more: &Value,
+        change: impl FnOnce(&mut Value),
+    ) {
+        self.project
+            .filed_given_with(task, status, agent, more, |wire| {
+                wire["assignee_role"] = json!("software_developer");
+                wire["reviewer_role"] = json!("software_developer");
+                wire["allowed_paths"] = json!(["done.txt"]);
+                wire["exit_criteria"] = json!([{
+                    "id": "C1",
+                    "text": "done.txt exists.",
+                    "satisfies": ["R1"],
+                    "verification": {
+                        "method": "command",
+                        "command": "test -f done.txt",
+                        "expect": { "exit_code": 0 }
+                    }
+                }]);
+                change(wire);
+            });
     }
 
     /// Files a request titled `title`, as the human does through `file_request`: step 11's CTV-1

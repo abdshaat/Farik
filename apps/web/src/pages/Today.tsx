@@ -30,6 +30,7 @@ import {
 	type ToolAsk,
 	visibly,
 } from "./dialogs/ToolApproval.tsx";
+import { GoalCard, type GoalState } from "./GoalCard.tsx";
 import { channelName, longRange, money } from "./marketing.ts";
 import { type OrderWaiting, PurchaseOrderRow } from "./OrderRow.tsx";
 import type { OrderAsk } from "./orders.ts";
@@ -210,6 +211,11 @@ export function Today() {
 	// "Later" leaves a quiet card here until the owner starts the documenting work.
 	const { data: documenting, again: askDocumentingAgain } =
 		useQuery<Catervafication>("catervafication.get", {});
+	// The team's goal, outside what waits on the owner.
+	const { data: goal, again: askGoalAgain } = useQuery<GoalState>(
+		"goal.get",
+		{},
+	);
 	// While the provider refuses the key the team is paused, and one row says so first.
 	const { data: account } = useQuery<{ keyRefused?: boolean }>(
 		"account.status",
@@ -309,6 +315,9 @@ export function Today() {
 						: undefined
 				}
 			/>
+			{goal && team && (
+				<GoalCard state={goal} team={team.team} again={askGoalAgain} />
+			)}
 			{documenting?.offered && (
 				<CatervaficationCard again={askDocumentingAgain} />
 			)}

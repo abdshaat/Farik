@@ -197,6 +197,7 @@ fn embedded_skills(role: Role) -> EmbeddedSkills {
             "prioritising-the-backlog",
             "scoping-a-release",
             "using-product-sources",
+            "working-towards-the-goal",
             "catervafying-the-repository",
         ),
         Role::ScrumMaster => embedded!("scrum_master":
@@ -2230,6 +2231,22 @@ mod tests {
                 "using-product-sources",
             ]
         );
+        assert_eq!(
+            names[5..],
+            ["working-towards-the-goal", "catervafying-the-repository"]
+        );
+        let goal = kit
+            .skills
+            .iter()
+            .find(|skill| skill.name == "working-towards-the-goal")
+            .expect("the goal skill");
+        assert!(
+            goal.description
+                .starts_with("Use when a goal session asks you for the next steps"),
+            "{}",
+            goal.description
+        );
+        assert!(goal.description.contains("catervas_file_goal_work"));
         for skill in &kit.skills {
             assert!(
                 skill.session_files.contains_key("SKILL.md"),
@@ -2296,7 +2313,7 @@ mod tests {
             assert!(kit.skills.len() <= 30, "{role}");
         }
         for (role, count) in [
-            (Role::ProductManager, 6),
+            (Role::ProductManager, 7),
             (Role::ScrumMaster, 3),
             (Role::Architect, 7),
             (Role::SoftwareDeveloper, 8),

@@ -43,6 +43,8 @@ pub mod exec;
 pub mod forge;
 /// Catervas's own server over the central banks' exchange rates (ADR 0038).
 pub mod fx;
+/// The owner's goal: its book, its planner and reader, and the owner's commands (ADR 0075).
+pub mod goals;
 /// Catervas's own Google Ads connector: the client for Google's API and what each tool sends (ADR
 /// 0038, ADR 0042).
 #[cfg(unix)]

@@ -483,6 +483,7 @@ fn gives_connectors(ask: &SessionAsk<'_>) -> bool {
             | SessionPurpose::Explore
             | SessionPurpose::Implement
             | SessionPurpose::Verify
+            | SessionPurpose::Goal
     ) && ask.only_tool.is_none()
 }
 
@@ -985,6 +986,9 @@ const PROPOSE_MARKETING_PLAN_TOOL: &str = "catervas_propose_marketing_plan";
 /// The tool a bug hunt's assignee files a bug with, offered in the implement session of a hunt
 /// alone (ADR 0063).
 const FILE_BUG_TOOL: &str = "catervas_file_bug";
+/// The tools a goal session files and records with, offered in a goal session alone (ADR 0075).
+const FILE_GOAL_WORK_TOOL: &str = "catervas_file_goal_work";
+const RECORD_GOAL_PROGRESS_TOOL: &str = "catervas_record_goal_progress";
 /// The tool that schedules a social post, the Marketing Specialist's alone (ADR 0042).
 const SCHEDULE_POST_TOOL: &str = "catervas_schedule_post";
 
@@ -1056,6 +1060,11 @@ fn offered_tools(deps: &OrchestratorDeps, team: &Team, ask: &SessionAsk<'_>) -> 
         // A chat's reply is its session's alone (ADR 0026).
         .filter(|tool| tool.name != CHAT_REPLY_TOOL || ask.purpose == SessionPurpose::Chat)
         .filter(|tool| tool.name != TAKE_TASK_TOOL || ask.purpose == SessionPurpose::Chat)
+        // What a goal session files and records is its own (ADR 0075).
+        .filter(|tool| {
+            (tool.name != FILE_GOAL_WORK_TOOL && tool.name != RECORD_GOAL_PROGRESS_TOOL)
+                || ask.purpose == SessionPurpose::Goal
+        })
         // A bug is filed in the implement session of a hunt (ADR 0063).
         .filter(|tool| {
             tool.name != FILE_BUG_TOOL

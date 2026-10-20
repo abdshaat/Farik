@@ -227,6 +227,31 @@ pub(super) fn refine_message(
 /// `{name}` is the agent's display name and `{role}` its role's wire name.
 pub(super) const GIVEN_TASK_LEAD: &str = "{name}, the owner gave you this task in your one-to-one chat, and you write its contract yourself, as the Product Manager would. Its intent is their words: keep it, and set its scope, requirements, exit criteria, allowed paths and budget. Its assignee_role stays {role}: you do the work once it is ready. Only a code change is reviewed; a task that changes no code is checked by its command, test and artifact criteria alone. Ask the owner first with catervas_ask_human only if you cannot write it without an answer.";
 
+/// What the agent that filed a task towards the owner's goal is told before the refine message
+/// (ADR 0075). `{name}` is the agent's display name, `{goal}` the goal's words and `{role}` the
+/// agent's role's wire name.
+pub(super) const GOAL_TASK_LEAD: &str = "{name}, you filed this task working towards the owner's goal \u{201c}{goal}\u{201d}, and you write its contract yourself, as the Product Manager would. Its intent is the request you filed: keep it, and set its scope, requirements, exit criteria, allowed paths and budget. Its assignee_role stays {role}: you do the work once it is ready. Only a code change is reviewed; a task that changes no code is checked by its command, test and artifact criteria alone. Ask the owner first with catervas_ask_human only if you cannot write it without an answer.";
+
+/// The refine session's message for a task `agent` filed towards the goal whose words are `goal`:
+/// `GOAL_TASK_LEAD`, a blank line, then [`refine_message`].
+pub(super) fn goal_task_message(
+    contract: &TaskContract,
+    agent: &Agent,
+    goal: &str,
+    first: bool,
+    failures: &[String],
+    stuck: Option<&Blocker>,
+) -> String {
+    format!(
+        "{}\n\n{}",
+        GOAL_TASK_LEAD
+            .replace("{name}", agent.display_name.as_str())
+            .replace("{goal}", goal)
+            .replace("{role}", &agent.role.to_string()),
+        refine_message(contract, first, failures, stuck)
+    )
+}
+
 /// The refine session's message for a task given to `agent` in its chat: `GIVEN_TASK_LEAD`, a
 /// blank line, then [`refine_message`].
 pub(super) fn given_task_message(

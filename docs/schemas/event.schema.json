@@ -179,6 +179,12 @@
         "worktree.tidied",
         "pull_request.conflicted",
         "pull_request.refreshed",
+        "goal.set",
+        "goal.paused",
+        "goal.resumed",
+        "goal.ended",
+        "goal.measured",
+        "goal.planned",
         "document_storage.changed",
         "local_documents.written",
         "merge_permission.granted",
@@ -302,6 +308,11 @@
         { "$ref": "#/$defs/worktreeTidiedBody" },
         { "$ref": "#/$defs/pullRequestConflictedBody" },
         { "$ref": "#/$defs/pullRequestRefreshedBody" },
+        { "$ref": "#/$defs/goalSetBody" },
+        { "$ref": "#/$defs/goalIdBody" },
+        { "$ref": "#/$defs/goalEndedBody" },
+        { "$ref": "#/$defs/goalMeasuredBody" },
+        { "$ref": "#/$defs/goalPlannedBody" },
         { "$ref": "#/$defs/documentStorageChangedBody" },
         { "$ref": "#/$defs/localDocumentsWrittenBody" },
         { "$ref": "#/$defs/mergePermissionBody" },
@@ -357,6 +368,10 @@
           "maxLength": 512,
           "pattern": "^docs/catervas/.+\\.agent\\.(md|html)$",
           "description": "The .agent.md or .agent.html twin this request brings up to date with the owner's change to the document beside it (docs/SPEC.md 5.17); Catervas files it, so created_by is catervas."
+        },
+        "goal": {
+          "$ref": "#/$defs/goalId",
+          "description": "The owner's goal this request was filed towards (docs/SPEC.md 5.18; ADR 0075); written by catervas_file_goal_work alone. Such a request is triaged at filing."
         },
         "filed_as": {
           "type": "string",
@@ -458,7 +473,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model_id", "usage", "cost_usd"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal"] },
         "model_id": { "type": "string", "minLength": 1 },
         "usage": { "$ref": "#/$defs/tokenUsage" },
         "cost_usd": { "type": "number", "minimum": 0 },
@@ -2038,6 +2053,73 @@
         "paths": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
       }
     },
+    "goalId": {
+      "type": "string",
+      "pattern": "^goal-[1-9][0-9]*$",
+      "description": "The owner's goal, counted from 1 in the project's log (docs/SPEC.md 5.18)."
+    },
+    "goalSetBody": {
+      "title": "Goal Set Body",
+      "description": "The owner set a goal, or edited the standing one: an edit records this again with the same goal (docs/SPEC.md 5.18; ADR 0075). target and unit come together; server is the connector an active agent reads the number from, and only a goal with a target has one. It names no agent and no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "words"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "words": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "target": { "type": "number", "exclusiveMinimum": 0 },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "goalIdBody": {
+      "title": "Goal Id Body",
+      "description": "The body of goal.paused and goal.resumed. paused: the owner paused the goal, so no round and no reading runs until it resumes. resumed: the owner resumed it, or told a stalled one to keep going, which is the owner's word and clears a stall (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal"],
+      "properties": { "goal": { "$ref": "#/$defs/goalId" } }
+    },
+    "goalEndedBody": {
+      "title": "Goal Ended Body",
+      "description": "The owner ended the goal: reached, or dropped. Only the owner marks a goal reached (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "outcome"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "outcome": { "type": "string", "enum": ["reached", "dropped"] }
+      }
+    },
+    "goalMeasuredBody": {
+      "title": "Goal Measured Body",
+      "description": "The goal's number was read: by an agent from the goal's connector (source connector, with the server and the agent and session on the envelope), or told by the owner (source owner, no agent). note is the agent's own words on what it counted (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "value", "source"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "value": { "type": "number", "minimum": 0 },
+        "source": { "type": "string", "enum": ["connector", "owner"] },
+        "server": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "note": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "goalPlannedBody": {
+      "title": "Goal Planned Body",
+      "description": "A planning round ended: filed names the requests it filed towards the goal, none when it found nothing more to plan. Catervas records it; the envelope names the planner and the session (docs/SPEC.md 5.18).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goal", "filed"],
+      "properties": {
+        "goal": { "$ref": "#/$defs/goalId" },
+        "filed": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" }
+        }
+      }
+    },
     "pullRequestRefreshedBody": {
       "title": "Pull Request Refreshed Body",
       "description": "An accepted task's pull request stopped merging, and Catervas brought its branch up to date with a clean merge and pushed it (ADR 0069, docs/SPEC.md 5.14): url is the pull request, sha the merge commit now at the branch's tip. It is about one task and names no actor.",
@@ -2193,7 +2275,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal"] },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
