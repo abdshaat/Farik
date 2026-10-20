@@ -78,5 +78,5 @@ Tests:
 - `sums_today_spend_on_cancelled_tasks` (board.rs) — cost records today of $1.50 on a cancelled task and $2 on an accepted one give `cancelled_today_usd: 1.5`.
 - `says_what_cancelled_work_cost` (Costs.test.tsx) — with `cancelledTodayUsd: 1.5` the page shows "$1.50 of it went to cancelled tasks".
 
-- [ ] `fix(runtime): Files names who wrote a pending document and keeps table words whole` (first two tests)
+- [x] `fix(runtime): Files names who wrote a pending document and keeps table words whole` (first two tests)
 - [ ] `feat(web): Costs says what cancelled work cost` (last two tests)
