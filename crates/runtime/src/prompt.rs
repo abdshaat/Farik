@@ -1229,6 +1229,8 @@ mod tests {
         let mut inputs = a_product_manager();
         inputs.rules = TeamRules {
             protected_paths: vec![".env".to_string(), "**/*.pem".to_string()],
+            read_only_paths: Vec::new(),
+            git_subcommands: Vec::new(),
             allowed_paths_ceiling: Vec::new(),
             required_criteria: Vec::new(),
             require_new_tests: false,
@@ -1252,6 +1254,8 @@ mod tests {
 
         inputs.rules = TeamRules {
             protected_paths: vec![".env".to_string()],
+            read_only_paths: Vec::new(),
+            git_subcommands: Vec::new(),
             allowed_paths_ceiling: vec!["src/**".to_string(), "docs/**".to_string()],
             required_criteria: vec!["test".to_string()],
             require_new_tests: true,

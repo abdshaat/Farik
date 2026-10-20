@@ -366,6 +366,17 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
     }
 }
 
+/// A generated list of strings, as the wire writes it: typify gives an enum or a wrapper to a
+/// list the schema constrains, and neither is `Display`. An optional list left out is empty.
+fn wire_strings<T: serde::Serialize>(list: &T) -> Vec<String> {
+    serde_json::from_value::<Option<Vec<String>>>(
+        // A derived `Serialize` on a list of strings and string enums cannot fail.
+        serde_json::to_value(list).expect("a generated list of strings serialises"),
+    )
+    .expect("a generated list of strings is strings")
+    .unwrap_or_default()
+}
+
 /// The globs an agent lifts that nobody set (ADR 0080 decision 5): one that is in neither the five
 /// `catervas-core` ships nor the team's `protected_paths` or `read_only_paths` would silently do
 /// nothing, which is a typo the owner should hear about.
@@ -1305,13 +1316,18 @@ impl Team {
     /// The rules the governor applies, with what the team left out filled in from what
     /// `catervas-core` ships (`docs/SPEC.md` section 5.12).
     ///
-    /// The shipped protected paths are kept whatever the team writes, and the team's are added to
-    /// them: 5.12 says rules only narrow what a tier allows, and a team that could delete `.env`
-    /// from the list would be widening one.
+    /// The shipped protected paths are kept unless the team's `rules.lifted_paths` names them
+    /// (ADR 0080 decision 2), and the team's own are added after. A file written before that
+    /// lists only its additions, so an upgrade loosens no team.
     #[must_use]
     pub fn rules(&self) -> TeamRules {
         let shipped = TeamRules::default();
-        let mut protected_paths = shipped.protected_paths;
+        let lifted = wire_strings(&self.rules.lifted_paths);
+        let mut protected_paths: Vec<String> = shipped
+            .protected_paths
+            .into_iter()
+            .filter(|path| !lifted.contains(path))
+            .collect();
         for path in &self.rules.protected_paths {
             let path = path.to_string();
             if !protected_paths.contains(&path) {
@@ -1320,6 +1336,13 @@ impl Team {
         }
         TeamRules {
             protected_paths,
+            read_only_paths: self
+                .rules
+                .read_only_paths
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
+            git_subcommands: wire_strings(&self.rules.git_subcommands),
             allowed_paths_ceiling: self
                 .rules
                 .allowed_paths_ceiling
@@ -1361,6 +1384,53 @@ impl Team {
                 .map(|glob| glob.to_string())
                 .collect(),
         }
+    }
+
+    /// The rules for one agent (ADR 0080 decision 5): the team's, with the agent's paths,
+    /// forbidden commands and git subcommands added, and every glob its `lifted_paths` names,
+    /// exactly as written, taken out of the protected and read-only paths. An id no agent has
+    /// gets the team's rules.
+    #[must_use]
+    pub fn rules_for(&self, agent_id: &str) -> TeamRules {
+        let mut rules = self.rules();
+        let Some(own) = self
+            .agents
+            .iter()
+            .find(|agent| agent.id.as_str() == agent_id)
+            .and_then(|agent| agent.rules.as_ref())
+        else {
+            return rules;
+        };
+        let add = |target: &mut Vec<String>, globs: Vec<String>| {
+            for glob in globs {
+                if !target.contains(&glob) {
+                    target.push(glob);
+                }
+            }
+        };
+        add(
+            &mut rules.protected_paths,
+            own.protected_paths.iter().map(|g| g.to_string()).collect(),
+        );
+        add(
+            &mut rules.read_only_paths,
+            own.read_only_paths.iter().map(|g| g.to_string()).collect(),
+        );
+        add(
+            &mut rules.forbidden_commands,
+            own.forbidden_commands
+                .iter()
+                .map(|p| p.to_string())
+                .collect(),
+        );
+        add(
+            &mut rules.git_subcommands,
+            wire_strings(&own.git_subcommands),
+        );
+        let lifted: Vec<String> = own.lifted_paths.iter().map(|g| g.to_string()).collect();
+        rules.protected_paths.retain(|glob| !lifted.contains(glob));
+        rules.read_only_paths.retain(|glob| !lifted.contains(glob));
+        rules
     }
 
     /// The agents that take work. A paused agent keeps what it holds and is given nothing new; a
@@ -2055,6 +2125,67 @@ mod tests {
                 .count(),
             1,
             "and a path the team repeated is still one path"
+        );
+    }
+
+    #[test]
+    fn lifts_a_shipped_path_and_keeps_the_others() {
+        let mut wire = a_team_wire();
+        wire["rules"]["lifted_paths"] = json!([".env"]);
+        wire["rules"]["protected_paths"] = json!(["infra/**"]);
+        assert_eq!(
+            team(&wire).rules().protected_paths,
+            [
+                ".env.*",
+                "**/*.pem",
+                "**/*.key",
+                ".catervas/local/**",
+                "infra/**"
+            ]
+        );
+
+        // A file written before ADR 0080 lists only its additions and keeps the shipped five.
+        let mut before = a_team_wire();
+        before["rules"]["protected_paths"] = json!(["infra/**"]);
+        let kept = team(&before).rules().protected_paths;
+        for shipped in DEFAULT_PROTECTED_PATHS {
+            assert!(kept.contains(&shipped.to_string()), "{shipped} is kept");
+        }
+    }
+
+    #[test]
+    fn applies_an_agents_rules_on_top_of_the_teams() {
+        let mut wire = a_team_wire();
+        wire["rules"]["protected_paths"] = json!(["infra/**"]);
+        wire["rules"]["read_only_paths"] = json!(["vendor/**"]);
+        wire["rules"]["forbidden_commands"] = json!(["^curl"]);
+        wire["rules"]["git_subcommands"] = json!(["fetch"]);
+        wire["agents"][0]["rules"] = json!({
+            "lifted_paths": ["infra/**", "vendor/**"],
+            "protected_paths": ["notes/**"],
+            "forbidden_commands": ["^wget"],
+            "git_subcommands": ["merge"]
+        });
+        let team = team(&wire);
+        let ada = team.rules_for("ada");
+        assert!(ada.protected_paths.contains(&"notes/**".to_string()));
+        assert!(!ada.protected_paths.contains(&"infra/**".to_string()));
+        assert!(!ada.read_only_paths.contains(&"vendor/**".to_string()));
+        assert_eq!(ada.forbidden_commands, ["^curl", "^wget"]);
+        assert_eq!(ada.git_subcommands, ["fetch", "merge"]);
+        assert_eq!(team.rules_for("linus"), team.rules());
+        assert_eq!(team.rules_for("nobody"), team.rules());
+        assert_eq!(
+            team.rules().unwritable(),
+            [
+                ".env",
+                ".env.*",
+                "**/*.pem",
+                "**/*.key",
+                ".catervas/local/**",
+                "infra/**",
+                "vendor/**"
+            ]
         );
     }
 

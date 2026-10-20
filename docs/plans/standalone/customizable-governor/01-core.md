@@ -78,7 +78,7 @@ Tests (`team.rs` `mod tests`):
 - `lifts_a_shipped_path_and_keeps_the_others` — asserts that `lifted_paths: [".env"]` with `protected_paths: ["infra/**"]` gives `rules().protected_paths == [".env.*", "**/*.pem", "**/*.key", ".catervas/local/**", "infra/**"]`, and that a team writing only `protected_paths: ["infra/**"]` (a file from before ADR 0080) still has all five shipped globs.
 - `applies_an_agents_rules_on_top_of_the_teams` — asserts, for a team with `protected_paths: ["infra/**"]`, `read_only_paths: ["vendor/**"]`, `forbidden_commands: ["^curl"]`, `git_subcommands: ["fetch"]` and agent `ada` with `rules: { lifted_paths: ["infra/**", "vendor/**"], protected_paths: ["notes/**"], forbidden_commands: ["^wget"], git_subcommands: ["merge"] }`: `rules_for("ada")` has `notes/**` and no `infra/**` in `protected_paths`, no `vendor/**` in `read_only_paths`, both patterns, both subcommands; `rules_for("theo")` equals `rules()`; `rules_for("nobody")` equals `rules()`.
 
-- [ ] `feat(core): an agent's rules are the team's with its own applied`
+- [x] `feat(core): an agent's rules are the team's with its own applied`
 
 ### Task 3: read-only paths and Catervas's floor
 
