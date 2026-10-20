@@ -27,6 +27,14 @@ Files: `crates/runtime/src/orchestrator/session.rs` (and the explore/implement p
 - `builds_without_a_preview_before_the_first_commit` (session.rs, next to the tests asserting `EscalationRaisedBodyReason::Preview`) — a designer task with no commits on its branch and a failing prepare: the session runs, no `escalation.raised` is recorded, and its prompt contains "The preview did not start". The same with one commit on the branch escalates as before.
 - [x] `fix(runtime): a designer's first try starts without a preview that cannot exist yet`
 
+### Task 33: a merge from main is not the designer's first commit
+
+Found live at 07:10: decision 1 merged main into CTV-14's branch before its implement session (`chore: bring up to date with main`), and R9 counted that merge as the task's own commit, so the preview failure escalated. Decision: R9 counts only commits of the task's own, `git rev-list --count --no-merges <base>..<branch>`; merges (from the start, or bringing it up to date) do not count.
+
+Files: `crates/store/src/git.rs` (a `commit_count_no_merges` or a flag on `commit_count`), `crates/runtime/src/orchestrator/session.rs`
+- `a_merge_from_main_is_not_the_first_commit` (session.rs, beside `builds_without_a_preview_before_the_first_commit`) — a designer task whose branch holds only a merge commit from main and a failing preview start: the session runs without escalating; the same branch with one ordinary commit escalates.
+- [ ] `fix(runtime): a merge from main is not a designer's first commit`
+
 ### Task 32: the spec says it
 
 Files: `docs/SPEC.md` (the preview section of 5.x and the 0.134 line)
