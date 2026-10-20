@@ -567,6 +567,9 @@
           "$ref": "#/$defs/mergingSetRequest"
         },
         {
+          "$ref": "#/$defs/autopilotSetRequest"
+        },
+        {
           "$ref": "#/$defs/teamSaveRequest"
         },
         {
@@ -1054,6 +1057,10 @@
             }
           }
         },
+        "autopilot": {
+          "type": "boolean",
+          "description": "Whether autopilot is on: the newest autopilot.changed in this project's log says so (ADR 0082). Never read from team.yaml."
+        },
         "merging_allowed": {
           "type": "boolean",
           "description": "Whether Catervas may merge its pull requests once GitHub's checks pass: policy.merge_when_checks_pass is true and the newest of merge_permission.granted and merge_permission.withdrawn in this project's log is the grant (ADR 0073). A clone whose team file says true answers false until its owner confirms the warning here."
@@ -1233,6 +1240,7 @@
         "members_present",
         "documents_mode",
         "online",
+        "autopilot",
         "merging_allowed",
         "requested_connections"
       ]
@@ -2835,6 +2843,36 @@
             "confirmed": { "type": "boolean" }
           }
         }
+      }
+    },
+    "autopilotSetRequest": {
+      "title": "Autopilot Set Request",
+      "description": "The owner turns autopilot on or off (docs/SPEC.md 5.2, ADR 0082), on this computer. Turning on records autopilot.changed { on: true }; turning off records { on: false }; a call that changes nothing records nothing; team.yaml is never written. Answers autopilotSetResult. Refused with -32005 and data.errors: autopilot_unconfirmed at /autopilot (on without confirmed true: the web app sends it only from the dialog's Turn on) and daily_limit_required at /budgets/daily_usd (on while the team has no daily spending limit).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "autopilot.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["on"],
+          "properties": {
+            "on": { "type": "boolean" },
+            "confirmed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "autopilotSetResult": {
+      "description": "Whether autopilot is on now.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["autopilot"],
+      "properties": {
+        "autopilot": { "type": "boolean" }
       }
     },
     "mergingSetResult": {
@@ -6539,6 +6577,8 @@
             "integration_branch_missing",
             "merge_warning_unconfirmed",
             "merging_offline",
+            "autopilot_unconfirmed",
+            "daily_limit_required",
             "too_few",
             "solo_one_agent",
             "solo_role",

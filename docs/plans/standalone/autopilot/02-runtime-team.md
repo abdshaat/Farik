@@ -105,7 +105,7 @@ Files: `docs/schemas/rpc.schema.json`, `daemon/team.rs`
 Tests (`daemon/team.rs` `mod tests`):
 - `autopilot_turns_on_only_confirmed_and_with_a_daily_limit` (the guarantee of decision 1) — on a team with no `daily_usd`, `{ on: true, confirmed: true }` is refused `daily_limit_required` at `/budgets/daily_usd` and nothing is appended; with `daily_usd: 5`, `{ on: true }` is refused `autopilot_unconfirmed` at `/autopilot`; `{ on: true, confirmed: true }` appends one `autopilot.changed { on: true }`, leaves `team.yaml`'s bytes unchanged and makes `team.get` answer `autopilot: true`; a `team.save` without `daily_usd` is then refused `daily_limit_required`; `{ on: false }` appends `{ on: false }`, and a second `{ on: false }` appends nothing.
 
-- [ ] `feat(runtime): the owner turns autopilot on with a daily limit`
+- [x] `feat(runtime): the owner turns autopilot on with a daily limit`
 
 ### Task 8: under autopilot agents ask the team, not the owner
 

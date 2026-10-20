@@ -21,7 +21,7 @@ use catervas_core::team::{
 use catervas_protocol::command::{Command, CommandReply};
 use catervas_protocol::event::{EventBody, new_event};
 use catervas_protocol::generated::event::{
-    CriteriaUpdatedBody, MergePermissionBody, TeamUpdatedBody,
+    AutopilotChangedBody, CriteriaUpdatedBody, MergePermissionBody, TeamUpdatedBody,
 };
 use catervas_roles::{Kit, KitConnector, load_role};
 use catervas_store::repos::repo_present;
@@ -40,9 +40,10 @@ use crate::session::session_model;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 20] = [
+pub(super) const METHODS: [&str; 21] = [
     "team.save",
     "merging.set",
+    "autopilot.set",
     "agent.replace",
     "team.start",
     "criteria.save",
@@ -110,6 +111,9 @@ pub(super) fn query(
                     .wire()
             );
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
+            answer["autopilot"] = json!(
+                catervas_store::autopilot::autopilot_on(&deps.log).map_err(|e| internal(&e))?
+            );
             answer["merging_allowed"] = json!(
                 catervas_store::merging::merging_allowed(&deps.log, &team)
                     .map_err(|e| internal(&e))?
@@ -1755,6 +1759,10 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["policy", "merge_when_checks_pass"] if message.starts_with("merging_offline") => {
             "merging_offline"
         }
+        ["autopilot"] if message.starts_with(AUTOPILOT_UNCONFIRMED_CODE) => {
+            AUTOPILOT_UNCONFIRMED_CODE
+        }
+        ["budgets", "daily_usd"] if message.starts_with(DAILY_LIMIT_CODE) => DAILY_LIMIT_CODE,
         _ => "invalid",
     }
 }
@@ -1812,6 +1820,16 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
         }
     }
     errors.extend(integration_branch_errors(deps, &before, &after)?);
+    // Autopilot's stop is the daily limit (ADR 0082 decision 1): while it is on, a save keeps one.
+    if after.budgets.daily_usd.is_none()
+        && catervas_store::autopilot::autopilot_on(&deps.log)
+            .map_err(|e| Refused::Failed(internal(&e)))?
+    {
+        errors.push(ValidationError {
+            path: DAILY_LIMIT_PATH.to_string(),
+            message: AUTOPILOT_NEEDS_LIMIT.to_string(),
+        });
+    }
     if errors.is_empty() {
         Ok((before, after))
     } else {
@@ -1829,6 +1847,17 @@ const MERGE_UNCONFIRMED: &str =
     "merge_warning_unconfirmed: Turning merging on needs the warning confirmed.";
 const MERGING_OFFLINE: &str =
     "merging_offline: Catervas can merge only when your project is on GitHub.";
+
+/// `autopilot.set`'s two refusals (ADR 0082), their path and their words, which `code_of` reads.
+const AUTOPILOT_PATH: &str = "/autopilot";
+const AUTOPILOT_UNCONFIRMED_CODE: &str = "autopilot_unconfirmed";
+const AUTOPILOT_UNCONFIRMED: &str =
+    "autopilot_unconfirmed: Turning autopilot on needs its confirmation.";
+const DAILY_LIMIT_PATH: &str = "/budgets/daily_usd";
+const DAILY_LIMIT_CODE: &str = "daily_limit_required";
+const NEEDS_A_DAILY_LIMIT: &str = "daily_limit_required: Autopilot needs a daily spending limit.";
+const AUTOPILOT_NEEDS_LIMIT: &str = "daily_limit_required: Autopilot is on, and it needs a daily \
+     spending limit: turn autopilot off first.";
 
 /// The refusals of a new integration branch (ADR 0069): a name git would not allow, and a name no
 /// local branch of the project has. A branch already saved is not asked again, and a project of
@@ -2066,6 +2095,38 @@ fn set_merging(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<b
     allowed(&after)
 }
 
+/// `autopilot.set { on, confirmed }` (ADR 0082), under the lock that writes the team: turning it
+/// on needs its confirmation and a daily spending limit and records `autopilot.changed`; turning
+/// it off records it too. A call that changes nothing records nothing, and `team.yaml` is never
+/// written, so only this computer's log says it is on. Answers whether it is on afterwards.
+fn set_autopilot(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<bool, Failure> {
+    let _writing = state.team_writes();
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let is_on = catervas_store::autopilot::autopilot_on(&deps.log).map_err(|e| internal(&e))?;
+    let refuse = |path: &str, message: &str| {
+        Failure::from(Refused::Errors(vec![ValidationError {
+            path: path.to_string(),
+            message: message.to_string(),
+        }]))
+    };
+    let wants = params["on"].as_bool().unwrap_or(false);
+    if wants {
+        if params["confirmed"].as_bool() != Some(true) {
+            return Err(refuse(AUTOPILOT_PATH, AUTOPILOT_UNCONFIRMED));
+        }
+        if team.budgets.daily_usd.is_none() {
+            return Err(refuse(DAILY_LIMIT_PATH, NEEDS_A_DAILY_LIMIT));
+        }
+    }
+    if wants != is_on {
+        append(
+            deps,
+            EventBody::AutopilotChanged(AutopilotChangedBody { on: wants }),
+        )?;
+    }
+    Ok(wants)
+}
+
 /// Appends `body` as the human's and projects it.
 pub(super) fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
     let event = new_event(body, deps.clock.now(), deps.ids.clone())
@@ -2241,6 +2302,14 @@ pub(super) async fn call(
                 state.wakes().notify_one();
             }
             Ok(json!({ "merging_allowed": allowed }))
+        }
+        "autopilot.set" => {
+            let holder = Arc::clone(state);
+            let on = off_the_worker(move || set_autopilot(&deps, &holder, &params)).await?;
+            if on {
+                state.wakes().notify_one();
+            }
+            Ok(json!({ "autopilot": on }))
         }
         "agent.replace" => {
             // Retiring deletes the agent's keys (ADR 0030): Google Ads' campaigns are paused first.
@@ -3257,6 +3326,116 @@ pub(super) mod tests {
         );
         assert_eq!(code, -32005);
         assert!(message.starts_with("merging_offline"), "{message}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn autopilot_turns_on_only_confirmed_and_with_a_daily_limit() {
+        let harness = Harness::new("autopilot-set", |_| {});
+        let autopilot = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["autopilot"].clone()
+        };
+        let team_bytes = |harness: &Harness| {
+            std::fs::read(
+                harness
+                    .project
+                    .deps
+                    .files
+                    .root()
+                    .join(".catervas/team.yaml"),
+            )
+            .expect("the team file reads")
+        };
+        let changed = |harness: &Harness| {
+            kinds(harness)
+                .into_iter()
+                .filter(|kind| *kind == EventKind::AutopilotChanged)
+                .count()
+        };
+        let errors = |harness: &Harness, params: &Value| {
+            let reply = rpc(&harness.daemon, "autopilot.set", params);
+            assert_eq!(reply["error"]["code"], json!(-32005), "{reply}");
+            reply["error"]["data"]["errors"][0].clone()
+        };
+        assert_eq!(autopilot(&harness), json!(false));
+
+        // With no daily limit it is refused, confirmed or not, and nothing is recorded.
+        let mut unlimited = team_file(&harness);
+        unlimited["budgets"]
+            .as_object_mut()
+            .expect("budgets")
+            .remove("daily_usd");
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": unlimited }),
+            "emptyResult",
+        );
+        let refusal = errors(&harness, &json!({ "on": true, "confirmed": true }));
+        assert_eq!(refusal["path"], json!("/budgets/daily_usd"));
+        assert_eq!(refusal["code"], json!("daily_limit_required"));
+        assert_eq!(changed(&harness), 0);
+
+        let mut sent = team_file(&harness);
+        sent["budgets"]["daily_usd"] = json!(5);
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": sent }),
+            "emptyResult",
+        );
+        let refusal = errors(&harness, &json!({ "on": true }));
+        assert_eq!(refusal["path"], json!("/autopilot"));
+        assert_eq!(refusal["code"], json!("autopilot_unconfirmed"));
+        assert_eq!(changed(&harness), 0);
+
+        // Turned on, the file is not written, and the log is the only place it is kept.
+        let bytes = team_bytes(&harness);
+        let on = call(
+            &harness.daemon,
+            "autopilot.set",
+            &json!({ "on": true, "confirmed": true }),
+            "autopilotSetResult",
+        );
+        assert_eq!(on, json!({ "autopilot": true }));
+        assert_eq!(changed(&harness), 1);
+        assert_eq!(team_bytes(&harness), bytes);
+        assert_eq!(autopilot(&harness), json!(true));
+        call(
+            &harness.daemon,
+            "autopilot.set",
+            &json!({ "on": true, "confirmed": true }),
+            "autopilotSetResult",
+        );
+        assert_eq!(changed(&harness), 1, "already on records nothing");
+
+        // While it is on, a save that removes the limit is refused.
+        let mut without = team_file(&harness);
+        without["budgets"]
+            .as_object_mut()
+            .expect("budgets")
+            .remove("daily_usd");
+        let reply = rpc(&harness.daemon, "team.save", &json!({ "team": without }));
+        let refusal = reply["error"]["data"]["errors"][0].clone();
+        assert_eq!(refusal["path"], json!("/budgets/daily_usd"), "{reply}");
+        assert_eq!(refusal["code"], json!("daily_limit_required"));
+        assert_eq!(team_bytes(&harness), bytes);
+
+        let off = call(
+            &harness.daemon,
+            "autopilot.set",
+            &json!({ "on": false }),
+            "autopilotSetResult",
+        );
+        assert_eq!(off, json!({ "autopilot": false }));
+        assert_eq!(changed(&harness), 2);
+        call(
+            &harness.daemon,
+            "autopilot.set",
+            &json!({ "on": false }),
+            "autopilotSetResult",
+        );
+        assert_eq!(changed(&harness), 2, "already off records nothing");
     }
 
     #[test]
@@ -5110,6 +5289,7 @@ pub(super) mod tests {
                 "max_iterations": 3,
                 "integration": "pull_request",
                 "escalation_age_hours": 24,
+                "paid_calls_per_hour": 30,
                 "memory_cap_tokens": 8000,
                 "permissions": { "run_commands": true, "push": false }
             })
