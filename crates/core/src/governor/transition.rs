@@ -2009,7 +2009,7 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 32] {
+    fn every_row() -> [Case; 33] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -2087,6 +2087,7 @@ mod tests {
             case(29, S::InProgress, S::Escalated, A::Human, no_change),
             case(30, S::InProgress, S::Cancelled, A::Human, no_change),
             case(31, S::Escalated, S::Ready, A::Human, no_change),
+            case(32, S::Ready, S::Refining, A::ProductManager, no_change),
         ]
     }
 

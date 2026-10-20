@@ -286,6 +286,13 @@ pub(super) async fn tick(
                 return Ok(report);
             }
         }
+        // Nothing could be assigned: a builder left idle by waiting lanes asks for a re-plan.
+        if scope.task_id.is_none()
+            && let Some(report) =
+                requests::replan_for_idle(deps, &team, &board, &mut waiting).await?
+        {
+            return Ok(report);
+        }
     }
     if runs(9) {
         for row in waiting_on_nobody(&board, TaskStatus::Refining).filter(in_scope) {

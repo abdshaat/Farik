@@ -2,7 +2,7 @@
 //! before anything else.
 
 use catervas_core::branch::task_branch;
-use catervas_core::contract::{TaskContract, TaskId, TaskKind, TaskStatus, Verification};
+use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::folders::{DocumentFormat, with_format};
 use catervas_core::governor::done::CriterionResult;
 use catervas_core::governor::gates::Blocker;
@@ -648,6 +648,48 @@ pub(super) fn architect_builds_message(
             "Architects"
         },
         reviewers = reviewers.join(", "),
+    )
+}
+
+/// The Product Manager's re-plan of an epic whose waiting tasks leave builders idle (ADR 0078):
+/// who is idle, each waiting task with its lane and what it waits for, and how to re-plan.
+pub(super) fn replan_message(
+    epic: &TaskContract,
+    role: Role,
+    idle: &[String],
+    stuck: &[TaskContract],
+    builders: u32,
+) -> String {
+    let tasks: Vec<String> = stuck
+        .iter()
+        .map(|task| {
+            let lane = task.lane.map_or(0, std::num::NonZeroU64::get);
+            let after: Vec<&str> = task.dependencies.iter().map(|id| id.as_str()).collect();
+            if after.is_empty() {
+                format!("{} (lane {lane})", task.id.as_str())
+            } else {
+                format!(
+                    "{} (lane {lane}, after {})",
+                    task.id.as_str(),
+                    after.join(", ")
+                )
+            }
+        })
+        .collect();
+    format!(
+        "Re-plan the waiting tasks of {epic} so that every builder has work. {idle} ({role}) has \
+         nothing to do, while these tasks wait in their lanes: {tasks}. Read the epic's plan and \
+         each task with `catervas_read_task`. For each waiting task that does not need an \
+         unfinished task's result, move it back with `catervas_request_transition` to `refining`, \
+         then rewrite it with `catervas_write_contract`: a lane of its own for a builder with \
+         nothing to do (at most {builders} lanes, one per builder), `dependencies` only on the \
+         tasks whose result it needs, and `allowed_paths` that cannot meet another lane's. \
+         Catervas readies it again and it is assigned. When every waiting task needs the one \
+         before it, change nothing, and say so in one line.",
+        epic = epic.id.as_str(),
+        idle = idle.join(", "),
+        role = plain_role(role),
+        tasks = tasks.join(", "),
     )
 }
 
