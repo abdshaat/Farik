@@ -58,6 +58,7 @@
         "product_plan.state",
         "catervafication.get",
         "goal.get",
+        "autopilot.today",
         "skills.list",
         "skill.get",
         "allowances.list",
@@ -292,6 +293,9 @@
             },
             {
               "$ref": "#/$defs/goalGetQuery"
+            },
+            {
+              "$ref": "#/$defs/autopilotTodayQuery"
             },
             {
               "$ref": "#/$defs/costsSummaryQuery"
@@ -2436,6 +2440,20 @@
         }
       }
     },
+    "autopilotTodayQuery": {
+      "title": "Autopilot Today Query",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "autopilot.today" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "goalGetQuery": {
       "title": "Goal Get Query",
       "type": "object",
@@ -3932,6 +3950,47 @@
         "total_usd",
         "limit_usd"
       ]
+    },
+    "autopilotTodayResult": {
+      "description": "What Today shows of autopilot (docs/SPEC.md 5.2 and 5.7, ADR 0082). on says whether it is on. flagged is what the team flagged for the owner and went on without, only while it is on: a task (task_id, with its title), a folder change (no task_id, the title 'Documents change <n>') or a stalled goal (goal, its words as the title), each with the words of what only the owner can give, when it was flagged, and who flagged it (by: an agent or catervas). done is what the team did on its own in the last seven days, newest first, at most 100.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on", "flagged", "done"],
+      "properties": {
+        "on": { "type": "boolean" },
+        "flagged": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "needs", "at"],
+            "properties": {
+              "title": { "type": "string" },
+              "needs": { "type": "string" },
+              "at": { "type": "string", "format": "date-time" },
+              "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
+              "goal": { "type": "string", "pattern": "^goal-[1-9][0-9]*$" },
+              "by": { "type": "string" }
+            }
+          }
+        },
+        "done": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["at", "line"],
+            "properties": {
+              "at": { "type": "string", "format": "date-time" },
+              "line": { "type": "string" },
+              "agent_id": { "type": "string" },
+              "task_id": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" },
+              "reason": { "type": "string" }
+            }
+          }
+        }
+      }
     },
     "goalGetResult": {
       "description": "The goal that stands and the last one ended (docs/SPEC.md 5.18, ADR 0075). goal is null when none stands. status is active, paused, met (the count has reached the target and the owner decides) or stalled, with stall saying why (nothing_planned: the last round filed nothing; no_progress: rounds of work and the number has not moved) and null otherwise. reader is the agent that reads the goal's service and planner the agent that plans, each null when there is none. readings run newest first, at most 10. open counts the board's tasks that are neither accepted nor cancelled, done the accepted tasks filed towards this goal, waiting_on_owner the open ones that wait on the owner. planning is true while the planner's goal session runs.",

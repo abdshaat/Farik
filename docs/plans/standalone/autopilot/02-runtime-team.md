@@ -154,7 +154,7 @@ Files: `docs/schemas/rpc.schema.json`, `daemon/gates.rs`, `crates/store/src/wait
 Tests (`daemon/gates.rs` `mod tests`):
 - `today_shows_flags_and_acts_and_no_help_under_autopilot` — under autopilot with a Product Manager: an escalated task, a blocked one, a contract awaiting approval, a result awaiting acceptance and an escalated folder change are not in `waiting.list`; a flagged task is in `autopilot.today`'s `flagged` with its `needs` and `by`; a `team.decided` of today is in `done` with its `reason`; a stalled goal is a `flagged` row with its `goal`; after `autopilot.set { on: false }`, `waiting.list` holds the escalated, blocked and flagged tasks as `help` rows and `autopilot.today` answers `on: false` and no goal row.
 
-- [ ] `feat(runtime): today shows what the team flagged and did on its own`
+- [x] `feat(runtime): today shows what the team flagged and did on its own`
 
 ## Verification
 

@@ -380,7 +380,13 @@ pub fn waiting(
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
         .map(|agent| agent.id.to_string());
-    for row in board.iter().filter(|row| row.awaiting_approval) {
+    // While the team decides, the Product Manager takes these (ADR 0082): they wait on it, not on
+    // the owner, and turned off they wait on the owner again.
+    let owner_decides = !team_decides;
+    for row in board
+        .iter()
+        .filter(|row| owner_decides && row.awaiting_approval)
+    {
         let pm = product_manager.as_deref();
         let line = format!(
             "{} wrote a plan for you to approve",
@@ -388,10 +394,9 @@ pub fn waiting(
         );
         waiting.push(item(row, WaitingKind::Approval, pm, line));
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Escalated && !row.awaiting_approval)
-    {
+    for row in board.iter().filter(|row| {
+        owner_decides && row.status == TaskStatus::Escalated && !row.awaiting_approval
+    }) {
         let reason = history
             .iter()
             .rev()
@@ -415,7 +420,10 @@ pub fn waiting(
     }
     // A task its agent blocked waits on the owner from the moment it is blocked, with the
     // agent's own words (ADR 0068); the owner answers it as an escalation is answered.
-    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+    for row in board
+        .iter()
+        .filter(|row| owner_decides && row.status == TaskStatus::Blocked)
+    {
         let moves = log.read(&EventQuery {
             task_id: Some(row.task_id.clone()),
             kinds: vec![EventKind::TaskTransitioned],
@@ -443,7 +451,7 @@ pub fn waiting(
     }
     for row in board
         .iter()
-        .filter(|row| row.status == TaskStatus::Verifying)
+        .filter(|row| owner_decides && row.status == TaskStatus::Verifying)
     {
         if !awaits_acceptance(log, files, row)? {
             continue;

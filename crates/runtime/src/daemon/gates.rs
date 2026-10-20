@@ -352,6 +352,7 @@ pub(super) fn query(
         "catervafication.get" => catervafication_get(deps, &team()?),
         "goal.get" => crate::goals::goal_get(deps, &team()?).map_err(|e| internal(&e)),
         "questions.list" => questions(deps, params["task_id"].as_str()),
+        "autopilot.today" => autopilot_today(deps, &team()?),
         _ => {
             let task_id = task_of(deps, params)?;
             match name {
@@ -771,6 +772,99 @@ fn questions(deps: &ToolDeps, task: Option<&str>) -> Result<Value, Failure> {
         })
         .collect();
     Ok(json!({ "questions": listed }))
+}
+
+/// `autopilot.today`: whether autopilot is on, what the team flagged for the owner and went on
+/// without, and what it did on its own in the last seven days (ADR 0082 decisions 4 and 10).
+fn autopilot_today(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
+    let time = |at: DateTime<Utc>| at.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
+    let on = catervas_store::autopilot::autopilot_on(&deps.log).map_err(|e| internal(&e))?;
+    let mut flagged: Vec<Value> = Vec::new();
+    if on {
+        let titles: std::collections::BTreeMap<_, _> = deps
+            .projections
+            .board()
+            .map_err(|e| internal(&e))?
+            .into_iter()
+            .map(|row| (row.task_id, row.title))
+            .collect();
+        for flag in catervas_store::autopilot::flags(&deps.log).map_err(|e| internal(&e))? {
+            let (title, task) = match (&flag.task_id, flag.folder_change) {
+                (Some(task), _) => (
+                    titles
+                        .get(task)
+                        .cloned()
+                        .unwrap_or_else(|| task.to_string()),
+                    Some(task.to_string()),
+                ),
+                (None, Some(change)) => (format!("Documents change {change}"), None),
+                (None, None) => continue,
+            };
+            let mut row = json!({
+                "title": title, "needs": flag.needs, "at": time(flag.at), "by": flag.flagged_by,
+            });
+            if let Some(task) = task {
+                row["task_id"] = json!(task);
+            }
+            flagged.push(row);
+        }
+        flagged.extend(stalled_goal_row(deps, &time)?);
+    }
+    let done: Vec<Value> =
+        catervas_store::autopilot::done_on_its_own(&deps.log, team, deps.clock.now())
+            .map_err(|e| internal(&e))?
+            .into_iter()
+            .map(|act| {
+                let mut row = json!({ "at": time(act.at), "line": act.line });
+                if let Some(agent) = act.agent_id {
+                    row["agent_id"] = json!(agent);
+                }
+                if let Some(task) = act.task_id {
+                    row["task_id"] = json!(task.to_string());
+                }
+                if let Some(reason) = act.reason {
+                    row["reason"] = json!(reason);
+                }
+                row
+            })
+            .collect();
+    Ok(json!({ "on": on, "flagged": flagged, "done": done }))
+}
+
+/// The row of a goal the team stalled on, while autopilot is on: flagged for the owner like a task
+/// (ADR 0082 decision 8), with the newest planning round's time.
+fn stalled_goal_row(
+    deps: &ToolDeps,
+    time: &impl Fn(DateTime<Utc>) -> String,
+) -> Result<Option<Value>, Failure> {
+    use catervas_core::goal::{GoalStatus, StallReason};
+    let Some(goal) = crate::goals::goal_book(&deps.log)
+        .map_err(|e| internal(&e))?
+        .standing
+    else {
+        return Ok(None);
+    };
+    let GoalStatus::Stalled(why) = goal.status() else {
+        return Ok(None);
+    };
+    let needs = match why {
+        StallReason::NothingPlanned => "The last planning round found nothing more to do.",
+        StallReason::NoProgress => "Five planning rounds since the last progress.",
+    };
+    let at = deps
+        .log
+        .read(&EventQuery {
+            kinds: vec![EventKind::GoalPlanned],
+            newest_first: true,
+            limit: Some(1),
+            ..EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?
+        .first()
+        .map_or_else(|| deps.clock.now(), |event| event.envelope.recorded_at);
+    Ok(Some(json!({
+        "title": goal.words, "needs": needs, "at": time(at), "goal": goal.id,
+    })))
 }
 
 /// `escalation.choices`: what the human may do about the task's open escalation (ADR 0062), or
@@ -5028,6 +5122,173 @@ pub(super) mod tests {
         assert_eq!(answer["goal"], Value::Null);
         assert_eq!(answer["last_ended"]["outcome"], "reached");
         assert_eq!(answer["last_ended"]["words"], "Reach 10 paying customers");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    fn today_shows_flags_and_acts_and_no_help_under_autopilot() {
+        let harness = driven_by(Harness::new("gates-autopilot-today", |wire| {
+            wire["budgets"]["daily_usd"] = json!(10);
+            wire["policy"]["wip_limit_per_agent"] = json!(4);
+        }));
+        let waiting_ids = |harness: &Harness| -> Vec<(String, String)> {
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult",
+            )["waiting"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .map(|row| {
+                    (
+                        row["task_id"].as_str().unwrap_or_default().to_string(),
+                        row["kind"].as_str().unwrap_or_default().to_string(),
+                    )
+                })
+                .collect()
+        };
+        let today = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "autopilot.today",
+                &json!({}),
+                "autopilotTodayResult",
+            )
+        };
+        // An escalated task, a blocked one, a contract awaiting approval, a result awaiting
+        // acceptance and an escalated folder change.
+        harness.escalated_hours_ago("CTV-1", "iterations", 1);
+        harness.blocked("CTV-2", "dev-a", "dev-b");
+        harness.project.filed("CTV-3", "refining", "epic", None);
+        harness
+            .project
+            .moved("CTV-3", "refining", "escalated", &json!({}));
+        harness.project.record(
+            "CTV-3",
+            "escalation.raised",
+            &json!({ "reason": "approval", "detail": "the plan waits" }),
+        );
+        harness.verifying_with("CTV-4", true, true, |wire| {
+            wire["exit_criteria"]
+                .as_array_mut()
+                .expect("a list of criteria")
+                .push(json!({
+                    "id": "C2", "text": "The founder read it.", "satisfies": ["R1"],
+                    "verification": { "method": "human", "question": "Is it right?" }
+                }));
+        });
+        harness.project.record(
+            "CTV-4",
+            "review.recorded",
+            &json!({ "reviewer": "dev-b", "criteria_run": 1, "passed": true }),
+        );
+        let change = harness.folder_change("docs/catervas/delivery/cadence.md", "a\n");
+        harness.project.record(
+            "",
+            "folder_change.escalated",
+            &json!({ "change": change, "detail": "conflict" }),
+        );
+        // The owner sees them all before autopilot is on.
+        let before: Vec<(String, String)> = waiting_ids(&harness);
+        for (task, kind) in [
+            ("CTV-1", "help"),
+            ("CTV-2", "help"),
+            ("CTV-3", "approval"),
+            ("CTV-4", "acceptance"),
+        ] {
+            assert!(
+                before.contains(&(task.to_string(), kind.to_string())),
+                "{task} {kind} in {before:?}"
+            );
+        }
+
+        let on = rpc(
+            &harness.daemon,
+            "autopilot.set",
+            &json!({ "on": true, "confirmed": true }),
+        );
+        assert!(on["error"].is_null(), "{on}");
+        assert!(
+            waiting_ids(&harness).is_empty(),
+            "{:?}",
+            waiting_ids(&harness)
+        );
+
+        // A flagged task is on Today with its words, and a decision of today is a done act.
+        harness.project.record(
+            "CTV-2",
+            "task.flagged",
+            &json!({ "needs": "a Stripe key", "flagged_by": "pm" }),
+        );
+        harness.project.record_by(
+            Some("pm"),
+            harness.project.deps.clock.now(),
+            "CTV-1",
+            "team.decided",
+            &json!({ "choice": "back_to_plan", "reason": "The plan was wrong.", "decided_by": "pm" }),
+        );
+        let answer = today(&harness);
+        assert_eq!(answer["on"], json!(true));
+        assert_eq!(answer["flagged"][0]["task_id"], "CTV-2");
+        assert_eq!(answer["flagged"][0]["needs"], "a Stripe key");
+        assert_eq!(answer["flagged"][0]["by"], "pm");
+        assert_eq!(answer["done"][0]["reason"], "The plan was wrong.");
+        assert_eq!(answer["done"][0]["task_id"], "CTV-1");
+
+        // A goal that found nothing more to plan is flagged too, with its words.
+        let goal = rpc(
+            &harness.daemon,
+            "command",
+            &json!({ "command": { "command": "goal_set", "body": { "words": "Grow the list" } } }),
+        );
+        assert!(goal["error"].is_null(), "{goal}");
+        harness.project.record_by(
+            Some("pm"),
+            harness.project.deps.clock.now(),
+            "",
+            "goal.planned",
+            &json!({ "goal": "goal-1", "filed": [] }),
+        );
+        let answer = today(&harness);
+        let rows = answer["flagged"].as_array().expect("rows");
+        let goal_row = rows
+            .iter()
+            .find(|row| row["goal"] == "goal-1")
+            .expect("a goal row");
+        assert_eq!(goal_row["title"], "Grow the list");
+        assert_eq!(
+            goal_row["needs"],
+            "The last planning round found nothing more to do."
+        );
+
+        // Turned off, what waited on the team waits on the owner, and Today shows no goal row.
+        let off = rpc(&harness.daemon, "autopilot.set", &json!({ "on": false }));
+        assert!(off["error"].is_null(), "{off}");
+        let after = waiting_ids(&harness);
+        for (task, kind) in [
+            ("CTV-1", "help"),
+            ("CTV-2", "help"),
+            ("CTV-3", "approval"),
+            ("CTV-4", "acceptance"),
+        ] {
+            assert!(
+                after.contains(&(task.to_string(), kind.to_string())),
+                "{task} in {after:?}"
+            );
+        }
+        let answer = today(&harness);
+        assert_eq!(answer["on"], json!(false));
+        assert!(
+            answer["flagged"]
+                .as_array()
+                .expect("rows")
+                .iter()
+                .all(|row| row["goal"].is_null()),
+            "{answer}"
+        );
     }
 
     #[test]
