@@ -5405,6 +5405,7 @@ mod tests {
             &deps.projections,
             &deps.files.read_team().expect("the team reads"),
             contract.assignee_role,
+            contract.assignee.as_deref(),
             Some(&contract),
             &catervas_core::budget::SessionLedger::default(),
             deps.clock.now(),

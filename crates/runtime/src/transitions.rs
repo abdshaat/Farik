@@ -877,6 +877,7 @@ impl Transitions {
             &self.projections,
             team,
             contract.assignee_role,
+            contract.assignee.as_deref(),
             Some(contract),
             &SessionLedger::default(),
             now,

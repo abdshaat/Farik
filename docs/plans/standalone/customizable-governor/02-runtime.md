@@ -105,7 +105,7 @@ Tests: `escalates_readiness_at_the_teams_limit` — a team with `readiness_attem
 Files: `runtime/src/cost.rs` and its callers in `transitions.rs`, `orchestrator/human.rs`, `orchestrator/rules.rs`, `orchestrator/session.rs`
 Tests (`cost.rs`): `an_agents_session_limits_override_the_teams` — team `budgets.session.max_tool_calls: 100`, agent `ada` `session.max_tool_calls: 50` and `max_wall_clock_seconds: 600`: `ada`'s state has 50 calls and 10 minutes, `theo`'s 100 and the role's 30 minutes, `None` the team's.
 
-- [ ] `feat(runtime): an agent's own session budget`
+- [x] `feat(runtime): an agent's own session budget`
 
 ## Verification
 
