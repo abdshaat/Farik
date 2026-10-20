@@ -7,22 +7,22 @@ export function Switch({
 	label,
 	checked,
 	onChange,
+	disabled,
 	description,
 	info,
 	icon,
-	disabled,
 }: {
 	id: string;
 	label: string;
 	checked: boolean;
 	onChange: (checked: boolean) => void;
+	/** Shown off and not clickable, with the reason beside it. */
+	disabled?: boolean;
 	description?: string;
 	/** A longer note, kept behind an info button after the label. */
 	info?: ReactNode;
 	/** Sits inside the label, before its words. */
 	icon?: ReactNode;
-	/** The switch stays as it is: something else has to finish first. */
-	disabled?: boolean;
 }) {
 	return (
 		<div className={styles.row}>

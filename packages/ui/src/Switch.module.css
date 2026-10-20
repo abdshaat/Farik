@@ -39,7 +39,7 @@
 
 .track:disabled {
 	opacity: 0.5;
-	cursor: default;
+	cursor: not-allowed;
 }
 
 .track:focus-visible {

@@ -32,9 +32,10 @@ pub use crate::generated::event::{
     MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
     MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
     MarketingPlanProposedBody, MarketingPlanProposedBodyFormat, MarketingPlanReturnedBody,
-    MemoryWrittenBody, MessagePostedBody, NoteWrittenBody, NoteWrittenBodyKind, PageCheckedBody,
-    PreviewPreparedBody, PreviewStartedBody, ProductDocWrittenBody, ProjectScannedBody,
-    ProjectStartedBody, ProposedRequest, PullRequestConflictedBody, PullRequestOpenedBody,
+    MemoryWrittenBody, MergePermissionBody, MessagePostedBody, NoteWrittenBody,
+    NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
+    ProductDocWrittenBody, ProjectScannedBody, ProjectStartedBody, ProposedRequest,
+    PullRequestConflictedBody, PullRequestMergedBody, PullRequestOpenedBody,
     PullRequestRefreshedBody, QuestionAnsweredBody, QuestionAskedBody, QuestionChoice, ReasonBody,
     RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
     SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
@@ -276,6 +277,10 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::PullRequestRefreshed => "pullRequestRefreshedBody",
         EventKind::DocumentStorageChanged => "documentStorageChangedBody",
         EventKind::LocalDocumentsWritten => "localDocumentsWrittenBody",
+        EventKind::MergePermissionGranted | EventKind::MergePermissionWithdrawn => {
+            "mergePermissionBody"
+        }
+        EventKind::PullRequestMerged => "pullRequestMergedBody",
     }
 }
 
@@ -380,6 +385,9 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::ContractLocked(body) => Some(("locked_by", &mut body.locked_by)),
         EventBody::ContractUnlocked(body) => Some(("unlocked_by", &mut body.unlocked_by)),
         EventBody::TeamUpdated(body) => Some(("updated_by", &mut body.updated_by)),
+        EventBody::MergePermissionGranted(body) | EventBody::MergePermissionWithdrawn(body) => {
+            Some(("by", &mut body.by))
+        }
         EventBody::CriteriaUpdated(body) => Some(("updated_by", &mut body.updated_by)),
         EventBody::TaskTransitioned(body) => Some(("requested_by", &mut body.requested_by)),
         EventBody::TransitionRefused(body) => Some(("requested_by", &mut body.requested_by)),
@@ -497,13 +505,14 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::PullRequestConflicted(_)
         | EventBody::PullRequestRefreshed(_)
         | EventBody::DocumentStorageChanged(_)
-        | EventBody::LocalDocumentsWritten(_) => None,
+        | EventBody::LocalDocumentsWritten(_)
+        | EventBody::PullRequestMerged(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 124] = [
+pub const EVERY_KIND: [EventKind; 127] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -628,6 +637,9 @@ pub const EVERY_KIND: [EventKind; 124] = [
     EventKind::PullRequestRefreshed,
     EventKind::DocumentStorageChanged,
     EventKind::LocalDocumentsWritten,
+    EventKind::MergePermissionGranted,
+    EventKind::MergePermissionWithdrawn,
+    EventKind::PullRequestMerged,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -1041,6 +1053,15 @@ pub enum EventBody {
     /// Documents kept on this computer were written (ADR 0074).
     #[serde(rename = "local_documents.written")]
     LocalDocumentsWritten(LocalDocumentsWrittenBody),
+    /// `merge_permission.granted`: the owner confirmed the warning on this computer (ADR 0073).
+    #[serde(rename = "merge_permission.granted")]
+    MergePermissionGranted(MergePermissionBody),
+    /// `merge_permission.withdrawn`: the owner turned merging off.
+    #[serde(rename = "merge_permission.withdrawn")]
+    MergePermissionWithdrawn(MergePermissionBody),
+    /// `pull_request.merged`: Catervas merged a pull request itself.
+    #[serde(rename = "pull_request.merged")]
+    PullRequestMerged(PullRequestMergedBody),
 }
 
 impl EventBody {
@@ -1173,6 +1194,9 @@ impl EventBody {
             Self::PullRequestRefreshed(_) => EventKind::PullRequestRefreshed,
             Self::DocumentStorageChanged(_) => EventKind::DocumentStorageChanged,
             Self::LocalDocumentsWritten(_) => EventKind::LocalDocumentsWritten,
+            Self::MergePermissionGranted(_) => EventKind::MergePermissionGranted,
+            Self::MergePermissionWithdrawn(_) => EventKind::MergePermissionWithdrawn,
+            Self::PullRequestMerged(_) => EventKind::PullRequestMerged,
         }
     }
 }
@@ -1533,7 +1557,11 @@ mod tests {
                 // do design_plan.approved, design_plan.returned and preview.stopped, and
                 // tool_approval.granted and tool_approval.refused; no others do, and a
                 // fixture that made one equal must not hide it.
-                let shared: [&[EventKind]; 6] = [
+                let shared: [&[EventKind]; 7] = [
+                    &[
+                        EventKind::MergePermissionGranted,
+                        EventKind::MergePermissionWithdrawn,
+                    ],
                     &[
                         EventKind::SkillAdded,
                         EventKind::SkillChanged,
@@ -2193,7 +2221,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 124);
+        assert_eq!(EVERY_KIND.len(), 127);
     }
 
     #[test]
@@ -2222,7 +2250,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 124);
+        assert_eq!(EVERY_KIND.len(), 127);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2646,7 +2674,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 124);
+        assert_eq!(EVERY_KIND.len(), 127);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2787,7 +2815,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 124);
+        assert_eq!(EVERY_KIND.len(), 127);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3102,7 +3130,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 124);
+        assert_eq!(EVERY_KIND.len(), 127);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

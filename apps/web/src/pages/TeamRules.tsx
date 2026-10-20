@@ -34,6 +34,8 @@ type Part = {
 	online?: boolean;
 	/** Where the team's documents are kept now (ADR 0074). */
 	documentsMode?: string;
+	/** Whether Catervas may merge its pull requests on this computer (ADR 0073). */
+	mergingAllowed?: boolean;
 };
 
 /**
@@ -47,6 +49,7 @@ export function useRuleParts() {
 		membersPresent?: boolean;
 		online?: boolean;
 		documentsMode?: string;
+		mergingAllowed?: boolean;
 	}>("team.get", {});
 	const defaults = useDefaults();
 	const { data: base } = useQuery<Checked>(
@@ -63,6 +66,7 @@ export function useRuleParts() {
 		base,
 		online: Boolean(data?.online),
 		...(data?.documentsMode && { documentsMode: data.documentsMode }),
+		mergingAllowed: Boolean(data?.mergingAllowed),
 		done: () => {
 			setRounds((r) => ({ ...r, [name]: (r[name] ?? 0) + 1 }));
 			again();
@@ -240,10 +244,80 @@ export function Spend(part: Part) {
 	);
 }
 
-export function Finish({ online }: Pick<Part, "online">) {
+/**
+ * How finished work is added, and the switch that lets Catervas merge it (ADR 0073): turning it
+ * on shows the warning first, and only its Turn on sends the confirmation.
+ */
+export function Finish({ saved, online, mergingAllowed, done }: Part) {
+	const { client } = useConnection();
+	const [asking, setAsking] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [refused, setRefused] = useState<string>();
+	const set = async (params: { on: boolean; confirmed?: boolean }) => {
+		if (!client) return;
+		setBusy(true);
+		setRefused(undefined);
+		try {
+			await client.call("merging.set", params);
+			done();
+		} catch (e) {
+			setRefused(saidAll(e));
+			setBusy(false);
+			setAsking(false);
+		}
+	};
+	const alone = saved.policy.solo
+		? saved.agents.find((a) => a.status !== "retired")?.displayName
+		: undefined;
+	const warning = [
+		t("mergingWarn", {
+			branch: saved.policy.integrationBranch ?? t("mergingMainBranch"),
+		}),
+		...(alone ? [t("mergingWarnSolo", { name: alone })] : []),
+	].join("\n");
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
 			<p>{t(online ? "finishLead" : "finishLeadLocal")}</p>
+			<Switch
+				id="catervas-merges"
+				label={t("mergingSwitch")}
+				info={<Bullets text={t("mergingSwitchNote")} />}
+				checked={Boolean(mergingAllowed)}
+				disabled={!online || busy}
+				onChange={(on) => (on ? setAsking(true) : set({ on: false }))}
+			/>
+			{!online && <p className={styles.muted}>{t("mergingOffline")}</p>}
+			{refused && (
+				<p role="alert" className={styles.alert}>
+					{refused}
+				</p>
+			)}
+			{asking && (
+				<Dialog
+					open
+					title={t("mergingWarnTitle")}
+					onClose={() => setAsking(false)}
+					actions={
+						<>
+							<Button onClick={() => setAsking(false)}>
+								{t("mergingCancel")}
+							</Button>
+							<Button
+								kind="primary"
+								busy={busy}
+								onClick={() => set({ on: true, confirmed: true })}
+							>
+								{t("mergingTurnOn")}
+							</Button>
+						</>
+					}
+				>
+					<Bullets text={warning} />
+					<InfoTip id="merging-warn-info">
+						<Bullets text={t("mergingWarnNote")} />
+					</InfoTip>
+				</Dialog>
+			)}
 		</Part>
 	);
 }

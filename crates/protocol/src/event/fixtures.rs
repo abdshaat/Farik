@@ -359,6 +359,13 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "url": "https://github.com/o/r/pull/7",
             "sha": "0123456789abcdef0123456789abcdef01234567"
         }),
+        EventKind::MergePermissionGranted | EventKind::MergePermissionWithdrawn => {
+            json!({ "by": "human", "into": "main" })
+        }
+        EventKind::PullRequestMerged => json!({
+            "url": "https://github.com/o/r/pull/7",
+            "method": "merge"
+        }),
         EventKind::TaskReassigned => {
             json!({ "from": "dev-a", "to": "dev-b", "reason": "resumed" })
         }

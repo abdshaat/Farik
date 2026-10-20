@@ -270,6 +270,80 @@ describe("settings directory", () => {
 		).toBeTruthy();
 	});
 
+	it("asks_before_letting_catervas_merge", async () => {
+		const defaults = {
+			budgets: {},
+			rules: {},
+			policy: {},
+			ui_paths: ["**/*.tsx"],
+		};
+		const rules = (mergingAllowed: boolean) => ({
+			team: {
+				name: "Corner Bakery",
+				agents: [agent("software_developer")],
+				budgets: {},
+				policy: { integration: "pull_request" },
+				rules: {},
+			},
+			agents: [],
+			max_agents: 7,
+			online: true,
+			merging_allowed: mergingAllowed,
+		});
+		const calls = (s: FakeSocket) => s.calls("merging.set");
+
+		const { s } = await open("/settings/work", rules(false));
+		await answerQuery(s, "settings.defaults", defaults);
+		const toggle = await main().findByRole("switch", {
+			name: en.mergingSwitch,
+		});
+		// 1. The warning comes first, and nothing is sent.
+		fireEvent.click(toggle);
+		const dialog = await screen.findByRole("dialog", {
+			name: en.mergingWarnTitle,
+		});
+		expect(
+			within(dialog).getByText("You won't see the work before it lands."),
+		).toBeTruthy();
+		expect(calls(s)).toHaveLength(0);
+
+		// 2. Cancel closes it, still with nothing sent.
+		fireEvent.click(
+			within(dialog).getByRole("button", { name: en.mergingCancel }),
+		);
+		await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+		expect(calls(s)).toHaveLength(0);
+
+		// 3. Turn on sends the confirmation.
+		fireEvent.click(toggle);
+		fireEvent.click(
+			within(
+				await screen.findByRole("dialog", { name: en.mergingWarnTitle }),
+			).getByRole("button", { name: en.mergingTurnOn }),
+		);
+		const frame = await waitFor(() => {
+			const f = calls(s)[0];
+			if (!f) throw new Error("no merging.set was sent");
+			return f;
+		});
+		expect(frame.params).toEqual({ on: true, confirmed: true });
+		cleanup();
+
+		// 4. Turning it off needs no warning.
+		const on = await open("/settings/work", rules(true));
+		await answerQuery(on.s, "settings.defaults", defaults);
+		fireEvent.click(
+			await main().findByRole("switch", { name: en.mergingSwitch }),
+		);
+		const off = await waitFor(() => {
+			const f = calls(on.s)[0];
+			if (!f) throw new Error("no merging.set was sent");
+			return f;
+		});
+		expect(off.params).toEqual({ on: false });
+		expect(screen.queryByRole("dialog")).toBeNull();
+	});
+
 	it("opens_work's_advanced_settings_under_its_button", async () => {
 		const defaults = {
 			budgets: {},

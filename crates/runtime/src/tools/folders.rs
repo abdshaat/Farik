@@ -392,6 +392,11 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
         })
         .collect();
     let docs = folder_docs(&deps.log)?;
+    let waits_for_the_merge = if catervas_store::merging::merging_allowed(&deps.log, team)? {
+        "Catervas merges its pull request when GitHub's checks pass"
+    } else {
+        "Its pull request waits for you to merge it"
+    };
     let mut rows = Vec::new();
     for change in docs
         .changes
@@ -432,7 +437,7 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
                     first.sprint_id.trim_start_matches('S')
                 ),
                 if opened.contains(&change.change) {
-                    "Its pull request waits for you to merge it".to_string()
+                    waits_for_the_merge.to_string()
                 } else {
                     "You approved it; it waits for you to merge it".to_string()
                 },
@@ -444,7 +449,7 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
                 Some(writer.clone()),
                 format!("{} by {name}", plain_names(&paths)),
                 if opened.contains(&change.change) {
-                    "Its pull request waits for you to merge it".to_string()
+                    waits_for_the_merge.to_string()
                 } else {
                     format!("{name} wrote it; it waits for you to merge it")
                 },

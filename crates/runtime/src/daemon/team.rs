@@ -20,7 +20,9 @@ use catervas_core::team::{
 };
 use catervas_protocol::command::{Command, CommandReply};
 use catervas_protocol::event::{EventBody, new_event};
-use catervas_protocol::generated::event::{CriteriaUpdatedBody, TeamUpdatedBody};
+use catervas_protocol::generated::event::{
+    CriteriaUpdatedBody, MergePermissionBody, TeamUpdatedBody,
+};
 use catervas_roles::{Kit, KitConnector, load_role};
 use catervas_store::repos::repo_present;
 use catervas_store::{EventQuery, Git, names_of, scan_project};
@@ -38,8 +40,9 @@ use crate::session::session_model;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 19] = [
+pub(super) const METHODS: [&str; 20] = [
     "team.save",
+    "merging.set",
     "agent.replace",
     "team.start",
     "criteria.save",
@@ -107,6 +110,10 @@ pub(super) fn query(
                     .wire()
             );
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
+            answer["merging_allowed"] = json!(
+                catervas_store::merging::merging_allowed(&deps.log, &team)
+                    .map_err(|e| internal(&e))?
+            );
             answer["team"] =
                 serde_json::to_value(team.without_old_keys()).map_err(|e| internal(&e))?;
             answer["max_agents"] = json!(catervas_core::team::MAX_AGENTS);
@@ -1736,6 +1743,14 @@ fn code_of(error: &ValidationError) -> &'static str {
         ["agents", _, "status"] if message == FROM_THE_CARD => "status_from_card",
         ["policy", "integration_branch"] if message.starts_with(BRANCH_NAME) => BRANCH_NAME,
         ["policy", "integration_branch"] if message.starts_with(BRANCH_MISSING) => BRANCH_MISSING,
+        ["policy", "merge_when_checks_pass"]
+            if message.starts_with("merge_warning_unconfirmed") =>
+        {
+            "merge_warning_unconfirmed"
+        }
+        ["policy", "merge_when_checks_pass"] if message.starts_with("merging_offline") => {
+            "merging_offline"
+        }
         _ => "invalid",
     }
 }
@@ -1758,6 +1773,13 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
     if !setup {
         after.policy.documents_local = before.policy.documents_local;
     }
+    // Only merging.set changes the permission (ADR 0073): whatever the browser sent, the saved
+    // value stays, and a team being set up has none.
+    after.policy.merge_when_checks_pass = if setup {
+        None
+    } else {
+        before.policy.merge_when_checks_pass
+    };
     let mut errors = Vec::new();
     for (index, agent) in after.agents.iter().enumerate() {
         if before
@@ -1796,6 +1818,13 @@ fn checked(deps: &ToolDeps, wire: &Value, setup: bool) -> Result<(Team, Team), R
 /// Words the integration branch's two refusals start with, which `code_of` reads.
 const BRANCH_NAME: &str = "integration_branch_name";
 const BRANCH_MISSING: &str = "integration_branch_missing";
+
+/// `merging.set`'s two refusals (ADR 0073), their path and their words, which `code_of` reads.
+const MERGING_PATH: &str = "/policy/merge_when_checks_pass";
+const MERGE_UNCONFIRMED: &str =
+    "merge_warning_unconfirmed: Turning merging on needs the warning confirmed.";
+const MERGING_OFFLINE: &str =
+    "merging_offline: Catervas can merge only when your project is on GitHub.";
 
 /// The refusals of a new integration branch (ADR 0069): a name git would not allow, and a name no
 /// local branch of the project has. A branch already saved is not asked again, and a project of
@@ -1973,6 +2002,66 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
     append(deps, team_updated(&written, None))
 }
 
+/// `merging.set { on, confirmed }` (ADR 0073), under the lock that writes the team: turning merging
+/// on needs the warning confirmed and a project on GitHub, writes the key and records
+/// `merge_permission.granted`; turning it off removes the key and records
+/// `merge_permission.withdrawn`. A call that changes nothing records nothing. Answers what is
+/// allowed afterwards.
+fn set_merging(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<bool, Failure> {
+    let _writing = state.team_writes();
+    let team = deps.files.read_team().map_err(|e| internal(&e))?;
+    let allowed = |team: &Team| {
+        catervas_store::merging::merging_allowed(&deps.log, team).map_err(|e| internal(&e))
+    };
+    let refuse = |message: &str| {
+        Failure::from(Refused::Errors(vec![ValidationError {
+            path: MERGING_PATH.to_string(),
+            message: message.to_string(),
+        }]))
+    };
+    let into = |team: &Team| {
+        catervas_store::git::integration_branch(team, &deps.git).map_err(|e| internal(&e))
+    };
+    if params["on"].as_bool().unwrap_or(false) {
+        if params["confirmed"].as_bool() != Some(true) {
+            return Err(refuse(MERGE_UNCONFIRMED));
+        }
+        if !online(state, deps) {
+            return Err(refuse(MERGING_OFFLINE));
+        }
+        if allowed(&team)? {
+            return Ok(true);
+        }
+        let mut after = team.clone();
+        after.policy.merge_when_checks_pass = Some(true);
+        let branch = into(&after)?;
+        write_team(deps, state, &after)?;
+        append(
+            deps,
+            EventBody::MergePermissionGranted(MergePermissionBody {
+                by: HUMAN.to_string(),
+                into: branch,
+            }),
+        )?;
+        return allowed(&after);
+    }
+    if team.policy.merge_when_checks_pass.is_none() && !allowed(&team)? {
+        return Ok(false);
+    }
+    let mut after = team.clone();
+    after.policy.merge_when_checks_pass = None;
+    let branch = into(&after)?;
+    write_team(deps, state, &after)?;
+    append(
+        deps,
+        EventBody::MergePermissionWithdrawn(MergePermissionBody {
+            by: HUMAN.to_string(),
+            into: branch,
+        }),
+    )?;
+    allowed(&after)
+}
+
 /// Appends `body` as the human's and projects it.
 pub(super) fn append(deps: &ToolDeps, body: EventBody) -> Result<(), Failure> {
     let event = new_event(body, deps.clock.now(), deps.ids.clone())
@@ -2140,6 +2229,14 @@ pub(super) async fn call(
             // A saved rule can free work at once: the policy switched off frees the Backlog.
             state.wakes().notify_one();
             Ok(json!({}))
+        }
+        "merging.set" => {
+            let holder = Arc::clone(state);
+            let allowed = off_the_worker(move || set_merging(&deps, &holder, &params)).await?;
+            if allowed {
+                state.wakes().notify_one();
+            }
+            Ok(json!({ "merging_allowed": allowed }))
         }
         "agent.replace" => {
             // Retiring deletes the agent's keys (ADR 0030): Google Ads' campaigns are paused first.
@@ -3076,6 +3173,86 @@ pub(super) mod tests {
 
         harness.with_origin();
         assert_eq!(online(&harness), json!(true));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn merging_turns_on_only_with_the_warning_confirmed() {
+        let harness = Harness::new("merging-set", |_| {});
+        harness.with_origin();
+        let merging = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["merging_allowed"]
+                .clone()
+        };
+        let key =
+            |harness: &Harness| team_file(harness)["policy"]["merge_when_checks_pass"].clone();
+        let before = kinds(&harness);
+
+        let (code, message) = refused(&harness, "merging.set", &json!({ "on": true }));
+        assert_eq!(code, -32005);
+        assert!(
+            message.starts_with("merge_warning_unconfirmed"),
+            "{message}"
+        );
+        assert_eq!(key(&harness), Value::Null);
+        assert_eq!(kinds(&harness), before, "a refusal records nothing");
+
+        // The team file alone permits nothing: a save cannot turn it on.
+        let mut sent = team_file(&harness);
+        sent["policy"]["merge_when_checks_pass"] = json!(true);
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": sent }),
+            "emptyResult",
+        );
+        assert_eq!(key(&harness), Value::Null);
+        assert_eq!(merging(&harness), json!(false));
+
+        let on = call(
+            &harness.daemon,
+            "merging.set",
+            &json!({ "on": true, "confirmed": true }),
+            "mergingSetResult",
+        );
+        assert_eq!(on, json!({ "merging_allowed": true }));
+        assert_eq!(key(&harness), json!(true));
+        assert!(kinds(&harness).contains(&EventKind::MergePermissionGranted));
+        assert_eq!(merging(&harness), json!(true));
+
+        // A save from an old tab keeps what was saved.
+        let mut stale = team_file(&harness);
+        stale["policy"]
+            .as_object_mut()
+            .expect("a policy")
+            .remove("merge_when_checks_pass");
+        call(
+            &harness.daemon,
+            "team.save",
+            &json!({ "team": stale }),
+            "emptyResult",
+        );
+        assert_eq!(key(&harness), json!(true));
+
+        let off = call(
+            &harness.daemon,
+            "merging.set",
+            &json!({ "on": false }),
+            "mergingSetResult",
+        );
+        assert_eq!(off, json!({ "merging_allowed": false }));
+        assert_eq!(key(&harness), Value::Null);
+        assert!(kinds(&harness).contains(&EventKind::MergePermissionWithdrawn));
+
+        // With no origin, there is nothing to merge on.
+        let offline = Harness::new("merging-set-offline", |_| {});
+        let (code, message) = refused(
+            &offline,
+            "merging.set",
+            &json!({ "on": true, "confirmed": true }),
+        );
+        assert_eq!(code, -32005);
+        assert!(message.starts_with("merging_offline"), "{message}");
     }
 
     #[test]

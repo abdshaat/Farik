@@ -3249,6 +3249,47 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_catervas_merges_a_folder_change_while_merging_is_allowed() {
+        let harness = Harness::new("gates-folder-change-merging", |wire| {
+            wire["agents"][0]["display_name"] = json!("Mira");
+            wire["agents"].as_array_mut().expect("agents").push(json!({
+                "id": "sm", "display_name": "Sol", "role": "scrum_master", "status": "active"
+            }));
+            wire["policy"]["merge_when_checks_pass"] = json!(true);
+        });
+        harness.project.record_in(
+            Some("sm"),
+            Some("session-2"),
+            "",
+            "folder_doc.written",
+            &json!({
+                "path": "docs/catervas/delivery/cadence.md", "written_by": "sm",
+                "change": 1, "sha": "def"
+            }),
+        );
+        harness.project.record(
+            "",
+            "folder_change.opened",
+            &json!({ "change": 1, "url": "https://github.com/o/r/pull/7", "number": 7 }),
+        );
+        harness.project.record(
+            "",
+            "merge_permission.granted",
+            &json!({ "by": "human", "into": "main" }),
+        );
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "waiting.list",
+                &json!({}),
+                "waitingListResult"
+            )["waiting"][0]["line"],
+            "Catervas merges its pull request when GitHub's checks pass"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lists_a_design_review_that_waits_on_the_human() {
         let harness = Harness::new("gates-design-review-waits", |wire| {
             crate::tools::fixtures::browsing(wire);
