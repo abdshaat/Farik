@@ -7,6 +7,7 @@ import {
 	Finish,
 	IntegrationBranch,
 	RulesTitle,
+	SandboxTools,
 	UiPaths,
 	useRuleParts,
 } from "../TeamRules.tsx";
@@ -42,6 +43,9 @@ export function Work() {
 						>
 							<li>
 								<UiPaths key={key("paths")} {...part("paths")} />
+							</li>
+							<li>
+								<SandboxTools key={key("sandbox")} {...part("sandbox")} />
 							</li>
 						</ul>
 					)}

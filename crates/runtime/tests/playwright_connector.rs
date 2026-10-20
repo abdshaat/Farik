@@ -479,7 +479,7 @@ fn the_browser_reaches_only_the_preview_and_the_owners_computer() {
         }
     });
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree", None)
+        .start(&project, &task(), &root, &serving(), "tree", None, &[])
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let (page, direct, away, owner) = browse(
         preview.as_ref(),
@@ -558,7 +558,7 @@ fn stop_leaves_no_container() {
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let factory = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image);
     let preview = factory
-        .start(&project, &task(), &root, &serving(), "tree", None)
+        .start(&project, &task(), &root, &serving(), "tree", None, &[])
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     assert!(
         root.join("site/.httpd").exists(),
@@ -599,6 +599,7 @@ fn finds_the_port_it_was_not_told() {
             },
             "tree",
             None,
+            &[],
         )
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     assert_eq!(preview.port(), PORT);
@@ -616,7 +617,7 @@ fn the_task_cleanup_removes_the_preview() {
     let project = project("cleanup");
     let _cleanup = Cleanup(project.clone());
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree", None)
+        .start(&project, &task(), &root, &serving(), "tree", None, &[])
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let name = preview.container();
     assert_eq!(containers_named(&name), 1);
@@ -649,7 +650,7 @@ fn checks_a_page_on_the_pinned_image() {
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree", None)
+        .start(&project, &task(), &root, &serving(), "tree", None, &[])
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let check = |theme: CheckTheme| {
         check_page(
@@ -704,7 +705,7 @@ fn a_page_cannot_hide_its_violations_from_the_check() {
     let output = root.join("screenshots");
     std::fs::create_dir_all(&output).expect("the output folder is made");
     let preview = DockerPreviewFactory::new(ALPINE.to_owned(), playwright().image)
-        .start(&project, &task(), &root, &serving(), "tree", None)
+        .start(&project, &task(), &root, &serving(), "tree", None, &[])
         .unwrap_or_else(|error| panic!("the preview did not start: {error}"));
     let checked = check_page(
         &playwright(),
@@ -737,7 +738,7 @@ fn refuses_to_start_without_the_browser_image() {
         ALPINE.to_owned(),
         "catervas-test/no-such-browser:absent".to_owned(),
     )
-    .start(&project, &task(), &root, &serving(), "tree", None)
+    .start(&project, &task(), &root, &serving(), "tree", None, &[])
     .err()
     .expect("no preview starts without the browser's image");
 

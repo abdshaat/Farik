@@ -18,7 +18,7 @@ use catervas_runtime::daemon::{
 use catervas_runtime::forge::Forge;
 use catervas_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, OrchestratorError, RecoveryReport,
-    command_handler, result_of,
+    command_handler, result_of, sandbox_recreator,
 };
 use catervas_runtime::sleep::{Sleeper, TokioSleeper};
 use catervas_runtime::{
@@ -565,6 +565,7 @@ async fn start_listening(
         work: Arc::default(),
     }));
     daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
+    daemon.set_sandbox_recreator(sandbox_recreator(Arc::clone(&orchestrator)));
     let recovering = Arc::clone(&orchestrator);
     let recovered = match tokio::task::spawn_blocking(move || recovering.recover()).await {
         Ok(Ok(recovered)) => recovered,

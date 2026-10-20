@@ -38,7 +38,7 @@ Files: `docs/schemas/rpc.schema.json`, `runtime/src/daemon/web.rs`, `packages/pr
 - `sends_a_long_backlog_in_rounds` (web.rs, ignored) — 450 events and `from_seq: 0`: a query sent right after is answered before the 450th event frame.
 - `subscribes_from_now_and_resumes_where_it_was` (connection.test.tsx) — the first subscribe frame has no `from_seq`; after a reconnect it carries the last seq seen.
 - `lists_the_newest_events_from_the_log` (pages.test.tsx) — the events page queries `events.since` with `newest_first: true` and shows its rows.
-- [ ] `fix(runtime): a page subscribes from now, and a backlog is sent in rounds`
+- [x] `fix(runtime): a page subscribes from now, and a backlog is sent in rounds`
 
 ### Task 2 (worktree b): the owner gives the sandbox system packages
 
@@ -47,14 +47,14 @@ Files: `docs/schemas/team.schema.json`, `core/src/team.rs`, `runtime/src/sandbox
 - `names_an_image_for_the_packages` (docker.rs) — the tag for `[ffmpeg, libnss3]` is `<SANDBOX_IMAGE>-p<12 hex>`, the same for `[libnss3, ffmpeg]`, none for `[]`; the build's Dockerfile text installs both with `--no-install-recommends`.
 - `recreates_a_sandbox_whose_packages_changed` (orchestrator.rs, ignored, `CountingSandboxFactory`) — a second session after the team's packages changed creates a new sandbox with the new list; with no change it reuses the held one.
 - `edits_the_sandbox_tools` (web settings test) — typing `ffmpeg` and `libnss3` on two lines and saving sends `team.save` with `sandbox.packages: ["ffmpeg", "libnss3"]`.
-- [ ] `feat(runtime): the owner gives the sandbox system packages`
+- [x] `feat(runtime): the owner gives the sandbox system packages`
 
 ### Task 2b (worktree b, after Task 2): an agent installs the system packages it needs
 
 Files: `runtime/src/tools.rs` (registration, the `execute` tier), `runtime/src/tools/sandbox.rs` (creates), the orchestrator's sandbox map (a `recreate(task_id, team)` the tool calls), `runtime/src/channel.rs` use, the roles' `system.md` of software_developer, ui_ux_designer and architect (one line: "A missing system tool: install it with `catervas_install_system_packages`; never block on one.")
 - Input `{ packages: [string] (1..=10), why: string (1..=300) }`; refused with `ToolError::InvalidInput` for a name outside the pattern or a total over 40; packages already listed are skipped.
 - `installs_a_system_package_for_the_task` (tools/sandbox.rs, with `CountingSandboxFactory`) — Theo's implement session calls it with `[ffmpeg]` and a why: the team file lists `ffmpeg`, `team.updated` has `updated_by: theo`, the channel has "Theo added ffmpeg to the sandbox:", and the task's sandbox was created again with `[ffmpeg]`. A Product Manager session gets no such tool; `["rm -rf /"]` is refused.
-- [ ] `feat(runtime): an agent installs the system packages it needs`
+- [x] `feat(runtime): an agent installs the system packages it needs`
 
 ### Task 3: a missing preview is a link, not a question
 
@@ -88,7 +88,7 @@ Files: `runtime/src/cost.rs`, `runtime/src/orchestrator/rules.rs` (`budget`), `r
 Files: `docs/schemas/rpc.schema.json` (`task.tries` result), `runtime/src/daemon/gates.rs` (`task.tries`), `apps/web/src/pages/HelpNeeded.tsx` (+test), `apps/web/src/strings/en.ts`
 - `counts_the_sessions_of_a_task` (daemon/gates.rs) — `task.tries` of a task with 3 work sessions, a budget of 6 and one room grant of 6 answers `sessions: 3, max_sessions: 12`.
 - `shows_the_sessions_of_a_sessions_escalation` (HelpNeeded.test.tsx) — a `sessions` escalation shows "Sessions 6 of 6".
-- [ ] `feat(web): a sessions escalation shows the sessions`
+- [x] `feat(web): a sessions escalation shows the sessions`
 
 ### Task 8: a preview error carries no npm notices
 

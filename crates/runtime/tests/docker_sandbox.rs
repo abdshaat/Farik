@@ -267,7 +267,7 @@ fn makes_a_base_container_beside_the_task_s_own_with_no_network() {
     };
     let project = project("base");
     let own = factory
-        .create(&project, &task(), &worktree("base-own"), true, &[])
+        .create(&project, &task(), &worktree("base-own"), true, &[], &[])
         .unwrap_or_else(|error| panic!("the task's sandbox could not be made: {error}"));
     let base = factory
         .create_base(&project, &task(), &worktree("base"))
@@ -308,7 +308,7 @@ fn removes_a_container_by_name() {
     };
     let project = project("remove");
     let _own = factory
-        .create(&project, &task(), &worktree("remove-own"), false, &[])
+        .create(&project, &task(), &worktree("remove-own"), false, &[], &[])
         .unwrap_or_else(|error| panic!("the task's sandbox could not be made: {error}"));
     let _base = factory
         .create_base(&project, &task(), &worktree("remove-base"))
@@ -386,7 +386,7 @@ fn a_check_reads_git_and_an_agent_does_not() {
     let project = project("git-store");
 
     let checking = factory
-        .create_checking(&project, &task(), &worktree, false, &[], &store)
+        .create_checking(&project, &task(), &worktree, false, &[], &[], &store)
         .unwrap_or_else(|error| panic!("the checks' sandbox could not be made: {error}"));
     let run = |sandbox: &dyn Sandbox, command: &str| {
         sandbox
@@ -410,7 +410,7 @@ fn a_check_reads_git_and_an_agent_does_not() {
     checking.discard().expect("the container is removed");
 
     let agent = factory
-        .create(&project, &task(), &worktree, false, &[])
+        .create(&project, &task(), &worktree, false, &[], &[])
         .unwrap_or_else(|error| panic!("the agent's sandbox could not be made: {error}"));
     let status = run(agent.as_ref(), "git status");
     assert_eq!(status.exit_code, 128, "{}", status.stderr);

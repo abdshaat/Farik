@@ -237,10 +237,25 @@ export function HelpNeeded() {
 							? `${waitingSince.recordedAt.slice(11, 16)} UTC`
 							: t("notYet")}
 					</dd>
-					<dt>{t("gateTries")}</dt>
-					<dd>
-						{t("triesOf", { try: String(tries.try), of: String(tries.of) })}
-					</dd>
+					{raised?.body.reason === "sessions" ||
+					raised?.body.reason === "budget" ? (
+						<>
+							<dt>{t("helpSessions")}</dt>
+							<dd>
+								{t("triesOf", {
+									try: String(tries.sessions),
+									of: String(tries.maxSessions),
+								})}
+							</dd>
+						</>
+					) : (
+						<>
+							<dt>{t("gateTries")}</dt>
+							<dd>
+								{t("triesOf", { try: String(tries.try), of: String(tries.of) })}
+							</dd>
+						</>
+					)}
 					<dt>{t("helpSpent")}</dt>
 					<dd>
 						{t("helpSpentOf", {

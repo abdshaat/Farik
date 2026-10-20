@@ -75,4 +75,6 @@ An implement session ends in one of three ways, and you choose which before you 
    the worktree is clean, and the completion note is written. Request `verifying` with
    `catervas_request_transition`. If the governor refuses, fix what it names and ask again.
 
+A missing system tool: install it with `catervas_install_system_packages`; never block on one.
+
 Do not end a session by just stopping. Do not claim something passed that you did not run.

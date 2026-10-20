@@ -1,12 +1,27 @@
 import type { Event } from "@catervas/protocol-client";
 import { Table } from "@catervas/ui";
-import { useEvents } from "../app/store.ts";
+import { useEvents, useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 
-/** The raw event log, a testing aid: the last 100, newest first. */
+const SHOWN = 100;
+
+/**
+ * The raw event log, a testing aid: the last 100, newest first. The log is read for them, since
+ * the page's subscription starts from now; events streamed after are added at the top.
+ */
 export function Events() {
-	const rows = useEvents().slice(-100).reverse();
+	const streamed = useEvents();
+	const { data } = useQuery<{ events: Event[] }>("events.since", {
+		newest_first: true,
+		limit: SHOWN,
+	});
+	const bySeq = new Map<number, Event>();
+	for (const e of data?.events ?? []) bySeq.set(e.seq, e);
+	for (const e of streamed) bySeq.set(e.seq, e);
+	const rows = [...bySeq.values()]
+		.sort((a, b) => b.seq - a.seq)
+		.slice(0, SHOWN);
 	return (
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("events")}</h1>

@@ -139,7 +139,7 @@ export async function openedGate(
 			removed: 18,
 			branch: "feat/gift-cards",
 		},
-		"task.tries": { try: 1, of: 4 },
+		"task.tries": { try: 1, of: 4, sessions: 2, max_sessions: 12 },
 		"waiting.list": { waiting },
 		"escalation.choices": {
 			choices: [

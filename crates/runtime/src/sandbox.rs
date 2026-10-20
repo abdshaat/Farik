@@ -40,6 +40,9 @@ pub enum SandboxError {
         /// What docker said on standard error.
         detail: String,
     },
+    /// The sandbox cannot be made, in the sentence to show (ADR 0081: the image with the owner's
+    /// system packages could not be built).
+    Unavailable(String),
 }
 
 impl fmt::Display for SandboxError {
@@ -62,6 +65,7 @@ impl fmt::Display for SandboxError {
                     "docker could not run the task's container: {detail}"
                 )
             }
+            Self::Unavailable(said) => formatter.write_str(said),
         }
     }
 }
@@ -83,11 +87,14 @@ pub trait SandboxFactory: Send + Sync {
     /// A sandbox for `task_id` of `project_id`, rooted at `worktree`, with the network on only
     /// when `network` is true. `reads` are the project's other repositories, each by name and
     /// folder, which a container sandbox mounts read-only at `/repos/<name>` so that a command can
-    /// read a sibling (5.6, 8.3); a host sandbox isolates nothing and ignores them.
+    /// read a sibling (5.6, 8.3); a host sandbox isolates nothing and ignores them. `packages` are
+    /// the Debian packages the container's image must hold besides the shipped ones (ADR 0081),
+    /// built into an image of their own when there are any; a host sandbox ignores them too.
     ///
     /// # Errors
     ///
-    /// `DockerUnavailable`, `ImageMissing`, or `ContainerFailed`, for a container sandbox.
+    /// `DockerUnavailable`, `ImageMissing`, `ContainerFailed`, or `Unavailable` (the packages
+    /// could not be installed), for a container sandbox.
     fn create(
         &self,
         project_id: &str,
@@ -95,6 +102,7 @@ pub trait SandboxFactory: Send + Sync {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError>;
 
     /// A sandbox for Catervas's own checks of `task_id`, which also sees `git_store` read-only at
@@ -104,6 +112,10 @@ pub trait SandboxFactory: Send + Sync {
     /// # Errors
     ///
     /// As `create`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "`create`'s and the git store: one more would be a type for a single caller"
+    )]
     fn create_checking(
         &self,
         project_id: &str,
@@ -111,10 +123,11 @@ pub trait SandboxFactory: Send + Sync {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
         git_store: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         let _ = git_store;
-        self.create(project_id, task_id, worktree, network, reads)
+        self.create(project_id, task_id, worktree, network, reads, packages)
     }
 
     /// A second sandbox for `task_id` of `project_id`, rooted at `worktree` (the task's base

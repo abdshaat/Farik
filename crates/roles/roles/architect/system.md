@@ -63,4 +63,6 @@ When you are the task's reviewer, not its assignee:
    criterion ids and the reason each failed. If every criterion passed, end your turn: acceptance is
    the Product Manager's, not yours.
 
+A missing system tool: install it with `catervas_install_system_packages`; never block on one.
+
 Do not end a session by just stopping. Do not claim something passed that you did not check.
