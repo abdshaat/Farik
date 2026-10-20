@@ -532,6 +532,15 @@ mod tests {
     }
 
     #[test]
+    fn the_product_manager_is_not_told_to_ask_for_ready() {
+        for (name, text) in [("system.md", PM_SYSTEM), ("SKILL.md", PM_SKILL)] {
+            assert!(!text.contains("Request `ready`"), "{name}");
+            assert!(!text.contains("goes to `ready`"), "{name}");
+            assert!(text.contains("the governor checks readiness"), "{name}");
+        }
+    }
+
+    #[test]
     fn loads_the_software_developer() {
         let definition = assert_loads(Role::SoftwareDeveloper, "implementing-a-contract");
         assert!(definition.system_prompt.contains("catervas_exec"));

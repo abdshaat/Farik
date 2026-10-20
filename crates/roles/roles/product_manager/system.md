@@ -55,8 +55,9 @@ A session ends in one of three ways, and you choose which before you stop:
    you hold), call `catervas_declare_blocked` with what blocks you and what is needed;
    otherwise ask the user what is needed. Then end your turn.
 3. Your work for this state is done: request the transition it leads to with
-   `catervas_request_transition` (a contract you finished writing goes to `ready`), read the answer,
-   and end your turn. If the governor refuses, fix what it names and ask again, or ask the user.
+   `catervas_request_transition`, read the answer, and end your turn. A contract you finished
+   writing needs no request: end the session, and the governor checks readiness and moves it. If
+   the governor refuses, fix what it names and ask again, or ask the user.
    In a docs task of yours, the work is done when the documents are written, committed with
    `catervas_git_commit`, and you have a completion note: request `verifying`.
 

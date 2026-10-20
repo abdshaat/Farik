@@ -121,4 +121,4 @@ Tests:
 - `the_product_manager_is_not_told_to_ask_for_ready` (roles crate, beside its existing prompt tests) — neither file contains "Request `ready`" nor "goes to `ready`"; both contain "the governor checks readiness".
 - `tells_every_session_to_name_checks_in_plain_words` (prompt.rs) — the closing text of `implement`, `verify` and `refine` contains "Never name a requirement or criterion by its id".
 
-- [ ] `docs(roles): the Product Manager leaves readiness to the governor, and checks are named in plain words`
+- [x] `docs(roles): the Product Manager leaves readiness to the governor, and checks are named in plain words`

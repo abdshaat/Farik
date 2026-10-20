@@ -131,7 +131,9 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
          questions are not yet answered, ask them first with `catervas_ask_human` and end your turn \
          after asking. If you cannot write it without something only the owner can give, end it \
          with `catervas_declare_blocked`. After asking for a move, post one or two sentences \
-         about it with `catervas_post_message`, in your persona's voice, naming the task.",
+         about it with `catervas_post_message`, in your persona's voice, naming the task. \
+         Never name a requirement or criterion by its id (R3, C4) to the owner; say what it \
+         checks.",
     ),
     (
         SessionPurpose::Plan,
@@ -156,7 +158,9 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
          by asking for `verifying` with `catervas_request_transition`. If something you cannot \
          change stops you, end it with `catervas_declare_blocked`, saying what is in the way and what \
          is needed. After asking for a move, post one or two sentences \
-         about it with `catervas_post_message`, in your persona's voice, naming the task.",
+         about it with `catervas_post_message`, in your persona's voice, naming the task. \
+         Never name a requirement or criterion by its id (R3, C4) to the owner; say what it \
+         checks.",
     ),
     (
         SessionPurpose::Verify,
@@ -172,7 +176,9 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
          needed. How a page looks and behaves in a browser is the UI/UX Designer's check, shown in \
          the first message when the change touches the interface; never ask the owner to run a \
          command or look at a page. After asking for a move, post one or two sentences \
-         about it with `catervas_post_message`, in your persona's voice, naming the task.",
+         about it with `catervas_post_message`, in your persona's voice, naming the task. \
+         Never name a requirement or criterion by its id (R3, C4) to the owner; say what it \
+         checks.",
     ),
     (
         SessionPurpose::Ceremony,
@@ -1450,6 +1456,23 @@ mod tests {
             validate_contract(&read).expect("the section is a contract"),
             inputs.contract
         );
+    }
+
+    #[test]
+    fn tells_every_session_to_name_checks_in_plain_words() {
+        let inputs = a_product_manager();
+        for purpose in [
+            SessionPurpose::Implement,
+            SessionPurpose::Verify,
+            SessionPurpose::Refine,
+        ] {
+            let prompt = assembled(&inputs.full(purpose));
+            let closing = section(&prompt, "This session");
+            assert!(
+                closing.contains("Never name a requirement or criterion by its id"),
+                "{purpose:?}: {closing}"
+            );
+        }
     }
 
     #[test]
