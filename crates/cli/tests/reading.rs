@@ -402,6 +402,36 @@ fn reports_a_protected_path_that_does_not_compile() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn names_a_read_only_glob_that_does_not_compile() {
+    reports_a_glob_that_does_not_compile(
+        "read-doctor-read-only",
+        "rules:\n  read_only_paths:\n    - \"a/[b\"\n",
+        "read_only_paths",
+        "a/[b",
+    );
+    // An agent's own globs are checked the same, and the report says whose they are.
+    let repository = a_project_with_a_task("read-doctor-agent-rules");
+    let path = repository.path.join(".catervas/team.yaml");
+    let team = std::fs::read_to_string(&path).expect("read");
+    let team = team.replacen(
+        "  id: developer\n",
+        "  id: developer\n  rules:\n    read_only_paths:\n    - \"d/[\"\n",
+        1,
+    );
+    std::fs::write(&path, team).expect("write");
+    let ran = run_in(&repository.path, &["doctor"]);
+    assert_eq!(ran.code, 1, "{}", ran.err);
+    assert!(
+        ran.out.contains("agents[developer].rules")
+            && ran.out.contains("read_only_paths")
+            && ran.out.contains("\"d/[\""),
+        "the report names the agent and the glob: {}",
+        ran.out
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn reports_an_allowed_paths_ceiling_that_does_not_compile() {
     reports_a_glob_that_does_not_compile(
         "read-doctor-ceiling",

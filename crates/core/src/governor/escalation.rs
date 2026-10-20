@@ -58,7 +58,8 @@ pub struct Escalation {
 pub const DEFAULT_ITERATION_LIMIT: u32 = 3;
 
 /// How many times a contract may fail the Definition of Ready before its task escalates
-/// (`docs/SPEC.md` section 5.2, `refining → escalated`).
+/// (`docs/SPEC.md` section 5.2, `refining → escalated`), unless the owner sets another
+/// (`policy.readiness_attempts`, ADR 0080).
 pub const READINESS_ATTEMPT_LIMIT: u32 = 3;
 
 /// How long a task may stay blocked before it escalates (`docs/SPEC.md` section 5.2, default
@@ -92,15 +93,16 @@ pub fn evaluate_rejection(iteration: u32, max_iterations: u32) -> RejectionOutco
 pub enum ReadinessOutcome {
     /// The Product Manager refines the contract again.
     Retry,
-    /// Three attempts failed; the task escalates.
+    /// The limit's worth of attempts failed; the task escalates.
     Escalate,
 }
 
 /// Decides a failed readiness check from the number of failed attempts, this one included:
-/// retry below `READINESS_ATTEMPT_LIMIT`, escalate at it.
+/// retry below the team's `limit` (`READINESS_ATTEMPT_LIMIT` unless the owner set it), escalate
+/// at it.
 #[must_use]
-pub fn evaluate_readiness_attempts(failed_attempts: u32) -> ReadinessOutcome {
-    if failed_attempts < READINESS_ATTEMPT_LIMIT {
+pub fn evaluate_readiness_attempts(failed_attempts: u32, limit: u32) -> ReadinessOutcome {
+    if failed_attempts < limit {
         ReadinessOutcome::Retry
     } else {
         ReadinessOutcome::Escalate
@@ -190,17 +192,28 @@ mod tests {
     }
 
     #[test]
-    fn retries_readiness_twice_and_escalates_on_the_third_failure() {
+    fn retries_readiness_until_the_limit_and_escalates_at_it() {
         // The count includes the failure that has just happened, so the runtime never passes
         // zero; zero retries all the same rather than escalating on a count nothing produces.
-        assert_eq!(evaluate_readiness_attempts(0), ReadinessOutcome::Retry);
-        assert_eq!(evaluate_readiness_attempts(1), ReadinessOutcome::Retry);
-        assert_eq!(evaluate_readiness_attempts(2), ReadinessOutcome::Retry);
+        for attempts in 0..5 {
+            assert_eq!(
+                evaluate_readiness_attempts(attempts, 5),
+                ReadinessOutcome::Retry,
+                "{attempts}"
+            );
+        }
         assert_eq!(
-            evaluate_readiness_attempts(READINESS_ATTEMPT_LIMIT),
+            evaluate_readiness_attempts(5, 5),
             ReadinessOutcome::Escalate
         );
-        assert_eq!(evaluate_readiness_attempts(4), ReadinessOutcome::Escalate);
+        assert_eq!(
+            evaluate_readiness_attempts(1, 1),
+            ReadinessOutcome::Escalate
+        );
+        assert_eq!(
+            evaluate_readiness_attempts(READINESS_ATTEMPT_LIMIT, READINESS_ATTEMPT_LIMIT),
+            ReadinessOutcome::Escalate
+        );
     }
 
     #[test]

@@ -55,7 +55,15 @@ pub fn a_full_team_wire() -> Value {
                 "display_name": "Linus",
                 "role": "software_developer",
                 "status": "active",
-                "model": { "id": "claude-opus-5-5" }
+                "model": { "id": "claude-opus-5-5" },
+                "rules": {
+                    "protected_paths": ["notes/**"],
+                    "read_only_paths": ["vendor/**"],
+                    "lifted_paths": ["infra/**"],
+                    "forbidden_commands": ["^wget"],
+                    "git_subcommands": ["merge"]
+                },
+                "session": { "max_tool_calls": 400 }
             }
         ],
         "budgets": {
@@ -76,10 +84,15 @@ pub fn a_full_team_wire() -> Value {
             "memory_cap_tokens": 8000,
             "integration": "auto_merge",
             "integration_branch": "trunk",
+            "push_remotes": ["origin", "fork"],
+            "readiness_attempts": 5,
             "permissions": { "run_commands": true, "push": false }
         },
         "rules": {
             "protected_paths": ["infra/**"],
+            "lifted_paths": [".env"],
+            "read_only_paths": ["vendor/**"],
+            "git_subcommands": ["fetch", "diff"],
             "allowed_paths_ceiling": ["src/**"],
             "required_criteria": ["test", "review"],
             "require_new_tests": true,

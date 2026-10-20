@@ -17,8 +17,13 @@ use super::refusal::Refusal;
 use super::{Call, ToolError, failed};
 use crate::channel::post_system;
 
-/// The remote a task branch is pushed to.
-const REMOTE: &str = "origin";
+/// `catervas_git_push`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PushInput {
+    /// The remote to push to: one the owner allows, the first of them when absent.
+    pub remote: Option<String>,
+}
 
 /// `catervas_git_commit`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -228,11 +233,24 @@ fn removals(worktree: &std::path::Path, removed: &[String]) -> Result<Vec<String
     Ok(checked)
 }
 
-/// `catervas_git_push`: pushes the task branch to `origin`, for the task's assignee alone. It spells
+/// `catervas_git_push`: pushes the task branch to a remote the owner allows (`origin` unless the
+/// team's `policy.push_remotes` says others, ADR 0080 decision 7), for the task's assignee alone. It spells
 /// `refs/heads/<branch>`, as integration does, so that a tag of the same name cannot make the push
 /// ambiguous.
-pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
+pub(super) fn push(call: &Call<'_>, input: &PushInput) -> Result<Value, ToolError> {
     let task = assignees_task(call)?;
+    let allowed = call.team.push_remotes();
+    let remote = match &input.remote {
+        Some(remote) if allowed.contains(remote) => remote.clone(),
+        Some(remote) => {
+            return Err(Refusal::RemoteNotAllowed {
+                remote: remote.clone(),
+                allowed,
+            }
+            .into());
+        }
+        None => allowed.first().cloned().unwrap_or_default(),
+    };
     let (contract, _) = call.contract(task)?;
     if catervas_store::document_source::is_branchless(&call.team, &call.deps().log, &contract)
         .map_err(failed)?
@@ -244,9 +262,9 @@ pub(super) fn push(call: &Call<'_>) -> Result<Value, ToolError> {
     let branch = task_branch(&contract);
     call.task_repository(&contract)?
         .git
-        .push(REMOTE, &format!("refs/heads/{branch}"))
+        .push(&remote, &format!("refs/heads/{branch}"))
         .map_err(failed)?;
-    Ok(json!({ "remote": REMOTE, "branch": branch }))
+    Ok(json!({ "remote": remote, "branch": branch }))
 }
 
 /// The session's task when the caller is its assignee, or `not_the_named_agent`: nobody rewrites
@@ -636,6 +654,103 @@ mod tests {
                 .contains("b/src/login/form.ts"),
             "{diff}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn pushes_to_a_remote_the_owner_allows() {
+        use catervas_store::git::fixtures::{git_in, git_output_in};
+        let project = TestProject::new(
+            "tools-git-push-remotes",
+            &a_team_of_three(|wire| {
+                wire["agents"][1]["grants"] = json!(["git_remote"]);
+                wire["policy"]["push_remotes"] = json!(["origin", "fork"]);
+            }),
+        );
+        let root = &project.repo.path;
+        let bare = |suffix: &str, name: &str| {
+            let remote = root.with_extension(suffix);
+            let _ = std::fs::remove_dir_all(&remote);
+            std::fs::create_dir_all(&remote).expect("a directory for the remote");
+            git_in(&remote, &["init", "--bare", "-b", "main"]);
+            git_in(
+                root,
+                &["remote", "add", name, remote.to_str().expect("a path")],
+            );
+            remote
+        };
+        let origin = bare("origin.git", "origin");
+        let fork = bare("fork.git", "fork");
+        project.filed("CTV-1", "assigned", "task", None);
+        project.moved(
+            "CTV-1",
+            "assigned",
+            "in_progress",
+            &json!({ "assignee": "dev-a", "reviewer": "dev-b" }),
+        );
+        let worktree = root.join(".catervas/local/worktrees/CTV-1");
+        let branch = project.branch("CTV-1");
+        project
+            .deps
+            .git
+            .create_worktree(&worktree, &branch, "main")
+            .expect("the task's worktree is made");
+        std::fs::create_dir_all(worktree.join("src")).expect("a directory");
+        std::fs::write(worktree.join("src/a.rs"), "fn main() {}\n").expect("a file");
+        project
+            .call(
+                "dev-a",
+                Some("CTV-1"),
+                "catervas_git_commit",
+                json!({ "message": "feat: add a", "paths": ["src/a.rs"] }),
+            )
+            .expect("the assignee commits");
+        let push = |input: serde_json::Value| {
+            project.call("dev-a", Some("CTV-1"), "catervas_git_push", input)
+        };
+
+        let pushed = push(json!({ "remote": "fork" })).expect("fork is allowed");
+        assert_eq!(pushed, json!({ "remote": "fork", "branch": branch }));
+        let on = |remote: &std::path::Path| git_output_in(remote, &["for-each-ref", "refs/heads"]);
+        assert!(
+            on(&fork).contains(&format!("refs/heads/{branch}")),
+            "{}",
+            on(&fork)
+        );
+        assert!(!on(&origin).contains(&branch), "{}", on(&origin));
+
+        let pushed = push(json!({})).expect("the first listed remote is the default");
+        assert_eq!(pushed["remote"], "origin");
+        assert!(
+            on(&origin).contains(&format!("refs/heads/{branch}")),
+            "{}",
+            on(&origin)
+        );
+
+        let upstream = root.with_extension("upstream.git");
+        let _ = std::fs::remove_dir_all(&upstream);
+        std::fs::create_dir_all(&upstream).expect("a directory for the remote");
+        git_in(&upstream, &["init", "--bare", "-b", "main"]);
+        git_in(
+            root,
+            &[
+                "remote",
+                "add",
+                "upstream",
+                upstream.to_str().expect("a path"),
+            ],
+        );
+        match push(json!({ "remote": "upstream" })) {
+            Err(ToolError::Refused { reason }) => {
+                assert!(reason.starts_with("remote_not_allowed: "), "{reason}");
+                assert!(
+                    reason.contains("upstream") && reason.contains("fork"),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+        assert_eq!(on(&upstream), "", "nothing was pushed");
     }
 
     #[test]

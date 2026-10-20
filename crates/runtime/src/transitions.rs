@@ -723,7 +723,11 @@ impl Transitions {
                 completion_note,
                 review_note,
                 human_accepted: false,
-                protected_paths: team.rules().protected_paths,
+                protected_paths: contract
+                    .assignee
+                    .as_deref()
+                    .map_or_else(|| team.rules(), |agent| team.rules_for(agent))
+                    .unwritable(),
                 design_review: match review.state {
                     ReviewState::NotNeeded => DesignReviewNeed::NotNeeded,
                     ReviewState::Passed => DesignReviewNeed::Passed,
@@ -738,6 +742,7 @@ impl Transitions {
             children: children_of(&board, id),
             readiness,
             readiness_failed_attempts: readiness_failed_attempts(&history),
+            readiness_attempt_limit: team.readiness_attempts(),
             assignment,
             assignee_results: results,
             work,
@@ -872,6 +877,7 @@ impl Transitions {
             &self.projections,
             team,
             contract.assignee_role,
+            contract.assignee.as_deref(),
             Some(contract),
             &SessionLedger::default(),
             now,
@@ -4495,6 +4501,55 @@ mod tests {
         assert_eq!(row.status, TaskStatus::Escalated);
     }
 
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn escalates_readiness_at_the_teams_limit() {
+        let ask = |project: &Project, to| {
+            project.ask(
+                &a_request("CTV-1", to, TransitionActor::Governor, None),
+                &TransitionAsk::default(),
+            )
+        };
+        let failing = |name: &str, attempts: Option<u64>| {
+            let project = Project::new(
+                name,
+                a_team(|wire| {
+                    wire["rules"]["max_task_budget_usd"] = json!(5);
+                    if let Some(attempts) = attempts {
+                        wire["policy"]["readiness_attempts"] = json!(attempts);
+                    }
+                }),
+                at(12),
+            );
+            // Past the team's five-dollar task maximum, so the contract fails every check.
+            project.file("CTV-1", |wire| wire["budget"]["max_cost_usd"] = json!(50));
+            project.created("CTV-1", "refining");
+            project
+        };
+
+        let one = failing("readiness-limit-one", Some(1));
+        assert!(matches!(
+            ask(&one, TaskStatus::Ready),
+            TransitionOutcome::Refused(_)
+        ));
+        let outcome = ask(&one, TaskStatus::Escalated);
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "the first failure escalates: {outcome:?}"
+        );
+
+        let default = failing("readiness-limit-default", None);
+        assert!(matches!(
+            ask(&default, TaskStatus::Ready),
+            TransitionOutcome::Refused(_)
+        ));
+        let outcome = ask(&default, TaskStatus::Escalated);
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "one failure of three still retries: {outcome:?}"
+        );
+    }
+
     /// The project's `project.started`, about no task.
     fn started(project: &Project) {
         project.append_wire(&json!({
@@ -4838,6 +4893,41 @@ mod tests {
                 "{glob}: {protected:?}"
             );
         }
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn hands_the_done_check_the_assignees_unwritable_paths() {
+        // A read-only file is not for a task to change either, and what an agent lifts for itself
+        // is lifted for its tasks (ADR 0080).
+        let project = Project::new(
+            "done-unwritable",
+            a_team(|wire| {
+                wire["rules"]["protected_paths"] = json!(["infra/**"]);
+                wire["rules"]["read_only_paths"] = json!(["vendor/**"]);
+                wire["agents"][1]["rules"] = json!({ "lifted_paths": ["infra/**"] });
+            }),
+            at(12),
+        );
+        project.file("CTV-1", |_| {});
+        project.created("CTV-1", "assigned");
+        let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+        project.moved("CTV-1", "assigned", "in_progress", &people, at(9));
+        project.moved("CTV-1", "in_progress", "verifying", &people, at(10));
+
+        let protected = project
+            .context(&accepting("CTV-1"), &TransitionAsk::default())
+            .done
+            .protected_paths;
+        assert!(
+            protected.contains(&"vendor/**".to_string()),
+            "{protected:?}"
+        );
+        assert!(protected.contains(&".env".to_string()), "{protected:?}");
+        assert!(
+            !protected.contains(&"infra/**".to_string()),
+            "{protected:?}"
+        );
     }
 
     #[test]

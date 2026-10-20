@@ -11,6 +11,7 @@ use catervas_core::governor::paths::{
     GlobError, PathRefusal, check_allowed_paths, check_protected_paths,
 };
 use catervas_core::governor::permissions::{CommandRefusal, evaluate_command};
+use catervas_core::governor::team_rules::TeamRules;
 use catervas_protocol::event::EventBody;
 use catervas_protocol::generated::event::{DriftDetectedBody, DriftDetectedBodyDrift};
 use catervas_runtime::cost::unpriced_models;
@@ -110,6 +111,14 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
         ));
     }
     if let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
+        check_protected_paths(&[], &rules.read_only_paths)
+    {
+        found.push(format!(
+            ".catervas/team.yaml: read_only_paths has a glob that does not compile, {pattern:?}: \
+             {detail}. Until it is fixed it refuses every write an agent makes (5.12)"
+        ));
+    }
+    if let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
         check_allowed_paths(&[], &rules.allowed_paths_ceiling)
     {
         found.push(format!(
@@ -134,6 +143,61 @@ fn rules_that_do_not_compile(project: &Project) -> Vec<String> {
             ".catervas/team.yaml: forbidden_commands has a pattern that is not a regular expression, \
              {pattern:?}: {detail}. Until it is fixed it refuses every command the team runs (5.12)"
         ));
+    }
+    found.extend(agent_rules_that_do_not_compile(project));
+    found
+}
+
+/// The same for each agent's own rules (ADR 0080), which are the team's with these added: a glob
+/// or a pattern that does not compile refuses everything that agent asks about.
+fn agent_rules_that_do_not_compile(project: &Project) -> Vec<String> {
+    let mut found = Vec::new();
+    for agent in &project.team.agents {
+        let Some(own) = &agent.rules else { continue };
+        let id = agent.id.as_str();
+        for (name, list) in [
+            (
+                "protected_paths",
+                own.protected_paths
+                    .iter()
+                    .map(|glob| glob.to_string())
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                "read_only_paths",
+                own.read_only_paths
+                    .iter()
+                    .map(|glob| glob.to_string())
+                    .collect::<Vec<_>>(),
+            ),
+        ] {
+            if let Err(PathRefusal::Glob(GlobError::Invalid { pattern, detail })) =
+                check_protected_paths(&[], &list)
+            {
+                found.push(format!(
+                    ".catervas/team.yaml: agents[{id}].rules.{name} has a glob that does not \
+                     compile, {pattern:?}: {detail}. Until it is fixed it refuses every path \
+                     check of {id} (5.12)"
+                ));
+            }
+        }
+        let rules = TeamRules {
+            forbidden_commands: own
+                .forbidden_commands
+                .iter()
+                .map(|glob| glob.to_string())
+                .collect(),
+            ..TeamRules::default()
+        };
+        if let Err(CommandRefusal::InvalidPattern { pattern, detail }) =
+            evaluate_command("true", &rules)
+        {
+            found.push(format!(
+                ".catervas/team.yaml: agents[{id}].rules.forbidden_commands has a pattern that is \
+                 not a regular expression, {pattern:?}: {detail}. Until it is fixed it refuses \
+                 every command {id} runs (5.12)"
+            ));
+        }
     }
     found
 }

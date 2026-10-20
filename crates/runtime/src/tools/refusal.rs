@@ -116,6 +116,11 @@ pub(crate) enum Refusal {
     /// A commit named a directory, which git would stage whole, files the path checks never saw
     /// among it.
     PathIsADirectory { path: String },
+    /// A push named a remote the owner has not allowed (ADR 0080 decision 7).
+    RemoteNotAllowed {
+        remote: String,
+        allowed: Vec<String>,
+    },
     /// A commit named a file that still holds the markers of a merge's conflict (ADR 0069).
     ConflictMarkers { path: String },
     /// A commit message that names a task, whose id stays inside Catervas (ADR 0066).
@@ -230,6 +235,13 @@ impl Refusal {
             | Self::CommitMessageNamesATask { .. }
             | Self::DocumentsStayLocal { .. }
             | Self::OutsideWorkspace { .. } => self.workspace(),
+            Self::RemoteNotAllowed { remote, allowed } => (
+                "remote_not_allowed",
+                format!(
+                    "{remote} is not a remote the owner allows; push to {}",
+                    allowed.join(", ")
+                ),
+            ),
             Self::ChannelLimit { detail } => ("channel_limit", detail.clone()),
             Self::RetroRefused { detail } => ("retro_refused", detail.clone()),
             Self::MemoryRefused { detail } => ("memory_refused", detail.clone()),
@@ -371,6 +383,10 @@ fn tool(refusal: &ToolRefusal) -> (&'static str, String) {
         ToolRefusal::PathProtected { path } => (
             "path_protected",
             format!("{path} is protected, and no tool reads or writes it (5.12)"),
+        ),
+        ToolRefusal::PathReadOnly { path } => (
+            "path_read_only",
+            format!("{path} is read only: the owner lets agents read it, not change it"),
         ),
         ToolRefusal::PathsMissing => (
             "paths_missing",

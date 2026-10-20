@@ -203,6 +203,7 @@ pub fn day_spent(
         team,
         role,
         None,
+        None,
         &SessionLedger::default(),
         now,
     )?;
@@ -214,7 +215,8 @@ pub fn day_spent(
 /// Everything `check_budgets` needs for one session, read from the projections at `now`.
 ///
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
-/// its place. The task's come from its contract, and a session with no task is bounded by none;
+/// its place, and then each field the agent's own `session` sets (`agent_id`, none for a session
+/// of no agent). The task's come from its contract, and a session with no task is bounded by none;
 /// its sessions allowance grows by 4 for every extra try the human granted it (ADR 0024). The
 /// day is the UTC date of `now`, and a team that sets no daily budget has an unbounded day (ADR
 /// 0015).
@@ -226,12 +228,20 @@ pub fn budget_state(
     projections: &Projections,
     team: &Team,
     role: Role,
+    agent_id: Option<&str>,
     task: Option<&TaskContract>,
     session: &SessionLedger,
     now: DateTime<Utc>,
 ) -> Result<BudgetState, CostError> {
     let mut session_limits = default_session_limits(role);
-    if let Some(set) = &team.budgets.session {
+    let agent_sets = agent_id
+        .and_then(|id| team.agents.iter().find(|agent| agent.id.as_str() == id))
+        .and_then(|agent| agent.session.as_ref());
+    // The team's limits first, then the agent's own on top, field by field (ADR 0080 decision 9).
+    for set in [team.budgets.session.as_ref(), agent_sets]
+        .into_iter()
+        .flatten()
+    {
         if let Some(max) = set.max_input_tokens {
             session_limits.max_input_tokens = max.get();
         }
@@ -794,11 +804,45 @@ mod tests {
             projections,
             team,
             role,
+            None,
             task,
             &SessionLedger::default(),
             clock().at,
         )
         .expect("the state reads")
+    }
+
+    #[test]
+    fn an_agents_session_limits_override_the_teams() {
+        let (_log, projections) = a_board();
+        let mut wire = a_team_wire();
+        wire["budgets"]["session"] = json!({ "max_tool_calls": 100 });
+        wire["agents"][0]["session"] =
+            json!({ "max_tool_calls": 50, "max_wall_clock_seconds": 600 });
+        let team = validate_team(&wire).expect("a team");
+        let limits = |agent: Option<&str>| {
+            budget_state(
+                &projections,
+                &team,
+                Role::SoftwareDeveloper,
+                agent,
+                None,
+                &SessionLedger::default(),
+                clock().at,
+            )
+            .expect("the state reads")
+            .session_limits
+        };
+        let own = limits(Some("ada"));
+        assert_eq!(own.max_tool_calls, 50);
+        assert_eq!(own.max_wall_clock, Duration::from_secs(600));
+        let other = limits(Some("linus"));
+        assert_eq!(other.max_tool_calls, 100);
+        assert_eq!(
+            other.max_wall_clock,
+            default_session_limits(Role::SoftwareDeveloper).max_wall_clock
+        );
+        assert_eq!(limits(None).max_tool_calls, 100);
     }
 
     #[test]

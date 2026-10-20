@@ -411,10 +411,10 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
              Conventional Commits: a type, a colon and what changed (feat: ..., fix: ..., docs: ...). \
              Name no task id.",
         ),
-        tool::<NoInput>(
+        tool::<git::PushInput>(
             "catervas_git_push",
             GitRemote,
-            "Push the task branch to origin.",
+            "Push the task branch to a remote the owner allows (origin unless the owner set others).",
         ),
         tool::<marketing::ProposeMarketingPlanInput>(
             "catervas_propose_marketing_plan",
@@ -556,7 +556,7 @@ pub async fn call_tool(
         "catervas_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "catervas_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
         "catervas_git_commit" => git::commit(&call, &parse(input)?),
-        "catervas_git_push" => nothing_in(input).and_then(|()| git::push(&call)),
+        "catervas_git_push" => git::push(&call, &parse(input)?),
         "catervas_propose_marketing_plan" => marketing::propose_plan(&call, &parse(input)?),
         "catervas_schedule_post" => posts::schedule_post(&call, parse(input)?).await,
         _ => Err(ToolError::Failed {
@@ -716,6 +716,7 @@ impl Call<'_> {
                 .collect(),
             None => Vec::new(),
         };
+        let rules = self.team.rules_for(self.agent_id());
         evaluate_tool_call(
             &ToolCallRequest {
                 tool: ToolDescriptor {
@@ -731,7 +732,8 @@ impl Call<'_> {
             },
             &ToolCallContext {
                 allowed_paths,
-                protected_paths: self.team.rules().protected_paths,
+                protected_paths: rules.protected_paths,
+                read_only_paths: rules.read_only_paths,
                 approved_calls: Vec::new(),
             },
         )

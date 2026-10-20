@@ -2738,3 +2738,102 @@ describe("logos and info buttons on the Connectors section", () => {
 		onlyInTips(page, en.connectorCustomKeychain);
 	});
 });
+
+describe("what each connector tool does", () => {
+	afterEach(() => localStorage.clear());
+
+	/** Theo's draft of his connector `server`'s tools, as the page last asked the daemon to check them. */
+	const draftTools = async (s: FakeSocket, server: string, expected: object) =>
+		waitFor(() => {
+			const asked = s
+				.calls("query")
+				.filter((q) => q.params.name === "team.validate")
+				.at(-1);
+			if (!asked) throw new Error("no team.validate was asked");
+			const team = (
+				asked.params.params as {
+					team: {
+						agents: {
+							id: string;
+							mcp_servers?: { name: string; tools: object }[];
+						}[];
+					};
+				}
+			).team;
+			const tools = team.agents
+				.find((a) => a.id === "theo")
+				?.mcp_servers?.find((c) => c.name === server)?.tools;
+			expect(tools).toEqual(expected);
+		});
+
+	it("sets_a_tool_to_run_ask_first_or_never", async () => {
+		const POSTER = {
+			...AIRTABLE,
+			name: "poster",
+			tools: {
+				post_message: "external_effect",
+				list_posts: "network",
+				pay_invoice: "paid",
+			},
+		};
+		const { s } = await openedWithKit(
+			[],
+			[POSTER],
+			[{ agent: "theo", server: "poster", state: "connected" }],
+		);
+		fireEvent.click(within(row("poster")).getByText(en.toolsSummary));
+		const choice = (tool: string, label: string) =>
+			within(
+				within(row("poster")).getByRole("group", { name: tool }),
+			).getByRole("radio", { name: label });
+		const all = {
+			post_message: "external_effect",
+			list_posts: "network",
+			pay_invoice: "paid",
+		};
+
+		fireEvent.click(choice("post_message", en.toolAsks));
+		await draftTools(s, "poster", { ...all, post_message: "ask" });
+		fireEvent.click(choice("post_message", en.toolNever));
+		await draftTools(s, "poster", { ...all, post_message: "denied" });
+		fireEvent.click(choice("post_message", en.toolRuns));
+		await draftTools(s, "poster", all);
+		// A tool that only reads goes back to the label it had.
+		fireEvent.click(choice("list_posts", en.toolNever));
+		fireEvent.click(choice("list_posts", en.toolRuns));
+		await draftTools(s, "poster", all);
+
+		// A paid tool offers Asks first and Never only, and Asks first keeps `paid`.
+		const paid = within(
+			within(row("poster")).getByRole("group", { name: "pay_invoice" }),
+		);
+		expect(
+			paid.getAllByRole("radio").map((r) => r.getAttribute("value")),
+		).toEqual(["ask", "never"]);
+		fireEvent.click(choice("pay_invoice", en.toolNever));
+		await draftTools(s, "poster", { ...all, pay_invoice: "denied" });
+		fireEvent.click(choice("pay_invoice", en.toolAsks));
+		await draftTools(s, "poster", all);
+	});
+
+	it("shows_no_choice_for_a_tool_the_plan_marks", async () => {
+		const { container } = await openedWithKit(
+			[{ ...KIT_NOTION, plan_approved: ["create_page"] }],
+			[kitEntry("notion")],
+			[
+				{
+					agent: "theo",
+					server: "notion",
+					state: "connected",
+					auth: "keys",
+					source: "kit",
+				},
+			],
+		);
+		const notion = within(kitRow("Notion"));
+		fireEvent.click(notion.getByText(en.toolsSummary));
+		expect(notion.getByRole("group", { name: "search pages" })).toBeTruthy();
+		expect(notion.queryByRole("group", { name: "create a page" })).toBeNull();
+		await expectNoAxeViolations(container);
+	});
+});
