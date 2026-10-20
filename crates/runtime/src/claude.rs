@@ -9,7 +9,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use catervas_core::governor::paths::literal_folder;
+use catervas_core::governor::paths::{literal_folder, matches_an_unnamed_env_template};
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::{CATERVAS_KEYS, CATERVAS_STATE, TeamRules};
 use catervas_core::team::validate_team;
@@ -870,7 +870,10 @@ impl Denied {
                 })
         };
         Self {
-            read: with(&rules.protected_paths, &CATERVAS_KEYS),
+            read: with(&rules.protected_paths, &CATERVAS_KEYS)
+                .into_iter()
+                .filter(|glob| !matches_an_unnamed_env_template(glob, &rules.protected_paths))
+                .collect(),
             edit: with(&rules.read_only_paths, &[CATERVAS_STATE]),
         }
     }
@@ -1623,6 +1626,44 @@ mod tests {
         ] {
             assert!(deny.contains(&rule), "{rule}: {deny:?}");
         }
+    }
+
+    #[test]
+    fn leaves_an_env_template_readable_in_the_settings() {
+        let deny_of = |name: &str, protected: &[&str]| {
+            let project = TempProject::new(name);
+            let mut wire = a_team_wire();
+            wire["rules"]["protected_paths"] = json!(protected);
+            project
+                .files()
+                .write_team(&validate_team(&wire).expect("a team"))
+                .expect("the team is written");
+            let config = config(&project);
+            let spec = spec();
+            let args = claude_args(&spec, &config, &session_dir(&config, &spec), false)
+                .expect("the args are built");
+            settings(&args)["permissions"]["deny"]
+                .as_array()
+                .expect("an array")
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToString::to_string)
+                .collect::<Vec<String>>()
+        };
+        let shipped = deny_of("claude-env-template", &[".env", ".env.*", "**/.env.*"]);
+        assert!(shipped.contains(&"Read(.env)".to_string()), "{shipped:?}");
+        assert!(
+            shipped.iter().all(|rule| !rule.contains(".env.")),
+            "{shipped:?}"
+        );
+        let named = deny_of(
+            "claude-env-template-named",
+            &[".env", ".env.*", ".env.example"],
+        );
+        assert!(
+            named.contains(&"Read(.env.example)".to_string()),
+            "{named:?}"
+        );
     }
 
     #[test]

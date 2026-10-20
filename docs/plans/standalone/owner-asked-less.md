@@ -122,7 +122,7 @@ Found live (CTV-24, 20:10 UTC): ADR 0078 made `.env.example`, `.env.sample` and 
 
 Files: `runtime/src/claude.rs`, using `catervas_core::governor::paths` (make `is_env_template` / the template list `pub` if needed)
 - `leaves_an_env_template_readable_in_the_settings` (claude.rs) — with the shipped protected paths, the settings' `permissions.deny` holds `Read(.env)` and no rule matching `.env.example`; with a team naming `.env.example` exactly, `Read(.env.example)` is there.
-- [ ] `fix(runtime): an env template is writable in a Claude session too`
+- [x] `fix(runtime): an env template is writable in a Claude session too`
 
 ## Verification
 
