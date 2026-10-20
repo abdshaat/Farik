@@ -2661,7 +2661,7 @@
     },
     "documentAttachRequest": {
       "title": "Document Attach Request",
-      "description": "The owner attaches a file (docs/SPEC.md 5.17, ADR 0076): data_base64 (standard base64, at most 10 MiB decoded) is turned into Markdown and committed as the owner's own folder change at docs/catervas/<kind>/attached/<slug>.md, recorded as folder_doc.edited then document.attached, and the integrated change files the task that writes its agent version. Answers the document's path and the change. Refused with -32005 and data.errors, each with path, message and code, in this order: no_folder_owner (/kind: no active agent of the kind's role), unreadable (/data_base64: not base64), unsupported_type, no_text, unreadable and too_large (/data_base64: the file or its text), then file_busy, is_a_link and change_waiting (/name).",
+      "description": "The owner attaches a file (docs/SPEC.md 5.17, ADR 0076): data_base64 (standard base64, at most 10 MiB decoded) is turned into Markdown and committed as the owner's own folder change at docs/catervas/<kind>/attached/<slug>.md, recorded as folder_doc.edited then document.attached, and the integrated change files the task that writes its agent version. With the documents kept on this computer (ADR 0074) the file is written on disk instead, recorded as local_documents.written then document.attached, the agent version's task filed at once, and change is null. Answers the document's path and the change. Refused with -32005 and data.errors, each with path, message and code, in this order: no_folder_owner (/kind: no active agent of the kind's role), unreadable (/data_base64: not base64), unsupported_type, no_text, unreadable and too_large (/data_base64: the file or its text), then documents_switching, file_busy, is_a_link and change_waiting (/name).",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -2682,13 +2682,13 @@
       }
     },
     "documentAttachResult": {
-      "description": "The attached document's path and the folder change that holds it.",
+      "description": "The attached document's path and the folder change that holds it, null when the documents are kept on this computer (ADR 0074).",
       "type": "object",
       "additionalProperties": false,
       "required": ["path", "change"],
       "properties": {
         "path": { "type": "string", "minLength": 1 },
-        "change": { "type": "integer", "minimum": 1 }
+        "change": { "type": ["integer", "null"], "minimum": 1 }
       }
     },
     "documentsSetLocalRequest": {

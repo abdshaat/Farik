@@ -253,6 +253,19 @@ fn attach(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     let converted = crate::attach::to_markdown(name, &bytes)
         .map_err(|why| refusal(why.code(), "/data_base64", attach_words(why.code())))?;
     let _lock = integration_lock(deps.files.root()).map_err(|e| internal(&e))?;
+    if !documents_mode_of(&team, &deps.log)
+        .map_err(|e| internal(&e))?
+        .writes_open()
+    {
+        return Err(refusal(
+            "documents_switching",
+            "/name",
+            "Documents can't be changed until you merge the pull request that moves them.",
+        ));
+    }
+    if documents_on_disk(&team, &deps.log).map_err(|e| internal(&e))? {
+        return attach_on_disk(deps, &team, kind, name, converted);
+    }
     let branch = integration_branch(&team, &deps.git).map_err(|e| internal(&e))?;
     // A path is taken when the integration branch holds it or its agent version, or a folder
     // change not yet integrated does.
@@ -322,6 +335,61 @@ fn attach(deps: &ToolDeps, params: &Value) -> Result<Value, Failure> {
     .map_err(|e| internal(&e))?;
     append(deps, EventBody::DocumentAttached(attached))?;
     Ok(json!({ "path": path, "change": landed.change }))
+}
+
+/// `document.attach` with the documents kept on this computer (ADR 0074): the file is written at
+/// a free path of the folder on disk, recorded as `local_documents.written` then
+/// `document.attached`, and the task that writes its agent version is filed at once, as
+/// `save_on_disk` does. The caller holds the integration lock.
+fn attach_on_disk(
+    deps: &ToolDeps,
+    team: &Team,
+    kind: AttachKind,
+    name: &str,
+    converted: crate::attach::Converted,
+) -> Result<Value, Failure> {
+    let source = DocumentSource::Disk(deps.files.root().to_path_buf());
+    let held: Vec<String> = source
+        .entries(&deps.git, &format!("{}/attached", kind.folder()))
+        .map_err(|e| internal(&e))?
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect();
+    let path = free_attached_path(kind, name, |path| {
+        held.iter()
+            .any(|held| held == path || Some(held) == agent_twin(path).as_ref())
+    });
+    write_document(deps.files.root(), &path, &converted.text).map_err(|_| {
+        refusal(
+            "is_a_link",
+            "/name",
+            "This folder holds a link, which Catervas does not write through.",
+        )
+    })?;
+    let written = serde_json::from_value(json!({
+        "paths": [path], "removed": [], "by": "owner",
+        "written_by": null, "task_id": null, "set_aside": [],
+    }))
+    .map_err(|e| internal(&e))?;
+    append(deps, EventBody::LocalDocumentsWritten(written))?;
+    let attached = serde_json::from_value(json!({
+        "path": path, "name": name, "media_type": converted.media_type,
+    }))
+    .map_err(|e| internal(&e))?;
+    append(deps, EventBody::DocumentAttached(attached))?;
+    if let Err(reason) = crate::tools::folders::file_rederive_for(deps, team, &path) {
+        crate::channel::post_system(
+            &deps.log,
+            deps.clock.as_ref(),
+            &deps.ids,
+            None,
+            &format!(
+                "{name} was attached, but the task that writes the team's version of it could not be filed: {reason}"
+            ),
+        )
+        .map_err(|e| internal(&e))?;
+    }
+    Ok(json!({ "path": path, "change": null }))
 }
 
 /// The name of the file the owner attached as `path`, from the newest `document.attached`.
@@ -3481,6 +3549,12 @@ mod tests {
             ("documents_switching".to_string(), "/path".to_string()),
             "{switching}"
         );
+        let attaching = attach(&harness, "Trip spec.md", "product", b"# Trip\n");
+        assert_eq!(
+            refusal(&attaching),
+            ("documents_switching".to_string(), "/name".to_string()),
+            "{attaching}"
+        );
         // It waits on Today, and a task that changes documents is not started meanwhile.
         let listed = query(
             &harness.daemon,
@@ -3764,5 +3838,63 @@ mod tests {
         );
         let listed = read(&harness.daemon, cadence);
         assert_eq!(listed["document"]["last_change"]["agent_id"], "ada");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn an_attachment_is_written_on_disk_when_the_documents_are_local() {
+        let harness = local_project("files-attach-local");
+        let root = harness.project.repo.path.clone();
+        let attached = attach(
+            &harness,
+            "Trip spec.md",
+            "product",
+            b"# Trip\n\nThe spec.\n",
+        );
+        conforms(&attached["result"], "documentAttachResult", &attached);
+        assert_eq!(
+            attached["result"],
+            json!({ "path": TRIP_SPEC, "change": null }),
+            "{attached}"
+        );
+        assert!(
+            std::fs::read_to_string(root.join(TRIP_SPEC))
+                .expect("on disk")
+                .contains("The spec.")
+        );
+        assert_eq!(git_output(&harness, &["branch", "--list", "docs/*"]), "");
+        assert!(
+            harness
+                .project
+                .events(&[EventKind::FolderDocEdited])
+                .is_empty()
+        );
+        assert_eq!(
+            harness
+                .project
+                .events(&[EventKind::LocalDocumentsWritten])
+                .len(),
+            1
+        );
+        assert_eq!(
+            harness.project.events(&[EventKind::DocumentAttached]).len(),
+            1
+        );
+        // The agent version's task is filed at once, and a second file of the name takes the next.
+        assert_eq!(
+            super::rederive_tasks(&harness.project.deps.log)
+                .expect("reads")
+                .len(),
+            1
+        );
+        let again = attach(&harness, "Trip spec.md", "product", b"# Trip again\n");
+        assert_eq!(
+            again["result"]["path"], "docs/catervas/product/attached/trip-spec-2.md",
+            "{again}"
+        );
+        assert_eq!(
+            read_path(&harness, TRIP_SPEC)["attached"],
+            json!({ "name": "Trip spec.md" })
+        );
     }
 }
