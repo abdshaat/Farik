@@ -131,6 +131,8 @@ pub struct TransitionContext {
     /// (ADR 0074): the runtime sets it for a task that changes documents only, in a mode that
     /// reads the disk.
     pub documents_stay_local: bool,
+    /// Whether autopilot is on (ADR 0082), which the Product Manager's `Autopilot` rows need.
+    pub autopilot: bool,
 }
 
 /// What the runtime must record along with the move.
@@ -457,7 +459,40 @@ fn check_gate(
         GateId::DependencyCancelled => {
             check_dependency_cancelled(&context.readiness.dependency_statuses)
         }
+        GateId::Autopilot => check_autopilot(to, context),
     }
+}
+
+/// The `Autopilot` gate (ADR 0082 decision 3): the Product Manager takes the owner's move only
+/// while autopilot is on, only for a task that is blocked or escalated, and only where the owner's
+/// own row of the same move would open, with the gate it has.
+fn check_autopilot(to: TaskStatus, context: &TransitionContext) -> GateResult {
+    if !context.autopilot {
+        return Err(vec![
+            "the Product Manager takes the owner's moves only while autopilot is on (ADR 0082)"
+                .to_string(),
+        ]);
+    }
+    let from = context.contract.status;
+    if !matches!(from, TaskStatus::Blocked | TaskStatus::Escalated) {
+        return Err(vec![format!(
+            "autopilot's moves are an escalation's or a block's, and the task is {from}"
+        )]);
+    }
+    let mut details = Vec::new();
+    for row in find_transitions(from, to) {
+        if row.actor != TransitionActor::Human {
+            continue;
+        }
+        match check_gate(row.gate, TransitionActor::Human, to, context) {
+            Ok(()) => return Ok(()),
+            Err(shut) => details.extend(shut),
+        }
+    }
+    if details.is_empty() {
+        details.push("the owner has no such move for this task".to_string());
+    }
+    Err(details)
 }
 
 /// The governor's own acceptance and rejection open only to a contract that no agent reviews and
@@ -702,7 +737,8 @@ fn escalation_reason(gate: GateId, context: &TransitionContext) -> EscalationRea
         | GateId::IterationBelowLimit
         | GateId::HumanRejection
         | GateId::PullRequestConflicted
-        | GateId::DependencyCancelled => EscalationReason::ExplicitRequest,
+        | GateId::DependencyCancelled
+        | GateId::Autopilot => EscalationReason::ExplicitRequest,
     }
 }
 
@@ -838,6 +874,7 @@ mod tests {
             design_reviewer: None,
             solo: false,
             documents_stay_local: false,
+            autopilot: false,
         }
     }
 
@@ -1958,7 +1995,7 @@ mod tests {
                 decide(&ask(TaskStatus::Ready, actor, Some(agent_id)), &context),
                 Err(TransitionRefusal::ActorNotAllowed {
                     actor,
-                    allowed: vec![A::Human]
+                    allowed: vec![A::Human, A::ProductManager]
                 }),
                 "{actor:?}"
             );
@@ -1972,7 +2009,7 @@ mod tests {
             ),
             Err(TransitionRefusal::ActorNotAllowed {
                 actor: A::Assignee,
-                allowed: vec![A::Human]
+                allowed: vec![A::Human, A::ProductManager]
             })
         );
     }
@@ -2017,9 +2054,10 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 33] {
+    fn every_row() -> [Case; 40] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
+        let autopilot: fn(&mut TransitionContext) = |context| context.autopilot = true;
         [
             case(0, S::Draft, S::Refining, A::ProductManager, no_change),
             case(1, S::Refining, S::Ready, A::Governor, no_change),
@@ -2096,6 +2134,17 @@ mod tests {
             case(30, S::InProgress, S::Cancelled, A::Human, no_change),
             case(31, S::Escalated, S::Ready, A::Human, no_change),
             case(32, S::Ready, S::Refining, A::ProductManager, no_change),
+            case(33, S::Blocked, S::InProgress, A::ProductManager, autopilot),
+            case(34, S::Blocked, S::Verifying, A::ProductManager, |context| {
+                context.blocked_from = Some(S::Verifying);
+                context.autopilot = true;
+            }),
+            case(35, S::Blocked, S::Refining, A::ProductManager, autopilot),
+            // A task being reviewed is neither blocked nor escalated, so this twin never opens.
+            case(36, S::Verifying, S::Rejected, A::ProductManager, autopilot),
+            case(37, S::Blocked, S::Escalated, A::ProductManager, autopilot),
+            case(38, S::Blocked, S::Cancelled, A::ProductManager, autopilot),
+            case(39, S::Escalated, S::Ready, A::ProductManager, autopilot),
         ]
     }
 
@@ -2115,13 +2164,21 @@ mod tests {
                 A::Reviewer => Some("arch-1"),
                 A::ScrumMaster | A::ProductManager | A::Governor | A::Human => None,
             };
-            if case.row == 3 {
-                // The row for a contract that waits for the human stays in the table, so older
-                // logs read, but no contract waits any more (ADR 0061): it never opens.
+            if let Some(shut) = match case.row {
+                3 => Some(GateId::ContractRequiresHuman),
+                36 => Some(GateId::Autopilot),
+                _ => None,
+            } {
+                // Row 3, for a contract that waits for the human, stays in the table so older
+                // logs read, but no contract waits any more (ADR 0061): it never opens. Row 36,
+                // the Product Manager's twin of the human's rejection, is for a task under review,
+                // which autopilot's gate does not hand over: it never opens either.
                 assert!(
                     gates(&ask(case.to, case.actor, agent_id), &context)
                         .iter()
-                        .any(|failure| failure.gate == GateId::ContractRequiresHuman)
+                        .any(|failure| failure.gate == shut),
+                    "row {}",
+                    case.row
                 );
                 covered.push(case.row);
                 continue;
@@ -2155,7 +2212,11 @@ mod tests {
             let stranger = match case.actor {
                 A::Assignee | A::Reviewer => A::ScrumMaster,
                 // The reviewer shares the human's and the governor's `verifying -> rejected`.
-                A::Human | A::Governor if case.from == TaskStatus::Verifying => A::Assignee,
+                A::Human | A::Governor | A::ProductManager
+                    if case.from == TaskStatus::Verifying =>
+                {
+                    A::Assignee
+                }
                 A::ScrumMaster | A::ProductManager | A::Governor | A::Human => A::Reviewer,
             };
             match decide(&ask(case.to, stranger, Some("arch-1")), &context) {
@@ -2204,7 +2265,8 @@ mod tests {
                 GateId::BlockedAge,
                 GateId::IterationLimitReached,
                 GateId::GovernorEscalation,
-                GateId::None
+                GateId::None,
+                GateId::Autopilot
             ]
         );
     }
@@ -2287,5 +2349,44 @@ mod tests {
                 assert_eq!(details, [refusal]);
             }
         }
+    }
+
+    #[test]
+    fn the_product_manager_takes_the_owners_moves_only_under_autopilot() {
+        let mut context = a_context();
+        context.contract.status = TaskStatus::Blocked;
+        let request = ask(TaskStatus::InProgress, A::ProductManager, None);
+        let Err(TransitionRefusal::GateFailed { failures }) = decide(&request, &context) else {
+            panic!("the move is refused while autopilot is off");
+        };
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].gate, GateId::Autopilot);
+        context.autopilot = true;
+        assert!(decide(&request, &context).is_ok());
+
+        // The owner's own gate still holds: with nothing written, its words are the refusal.
+        context.blocker_resolution = None;
+        let Err(TransitionRefusal::GateFailed { failures }) = decide(&request, &context) else {
+            panic!("a block is not cleared without a resolution");
+        };
+        assert_eq!(failures[0].gate, GateId::Autopilot);
+        assert!(failures[0].details[0].contains("written resolution"));
+
+        let mut escalated = a_context();
+        escalated.autopilot = true;
+        escalated.contract.status = TaskStatus::Escalated;
+        for to in [TaskStatus::Cancelled, TaskStatus::Refining] {
+            let request = ask(to, A::ProductManager, None);
+            assert!(decide(&request, &escalated).is_ok(), "escalated -> {to}");
+        }
+
+        // Only an escalation or a block is the owner's to hand over.
+        let mut working = a_context();
+        working.autopilot = true;
+        let request = ask(TaskStatus::Cancelled, A::ProductManager, None);
+        let Err(TransitionRefusal::GateFailed { failures }) = decide(&request, &working) else {
+            panic!("a task at work is not cancelled by autopilot");
+        };
+        assert_eq!(failures[0].gate, GateId::Autopilot);
     }
 }

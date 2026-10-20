@@ -62,6 +62,10 @@ pub enum GateId {
     /// A dependency of the ready task was cancelled, so the plan that named it is the Product
     /// Manager's to change (ADR 0079).
     DependencyCancelled,
+    /// The Product Manager takes a move that is the owner's, while autopilot is on (ADR 0082):
+    /// only an escalation's or a block's, and only when the owner's own row of the same move would
+    /// open.
+    Autopilot,
 }
 
 /// A status pattern in a row: one status, or any status.
@@ -108,7 +112,7 @@ const fn row(from: Status, to: Status, actor: TransitionActor, gate: GateId) -> 
 
 /// The transition table of `docs/SPEC.md` section 5.2: the spec's lines in order, split where
 /// a line names two triggers or two actors, with the `any` rows last.
-pub static TRANSITION_TABLE: [TransitionRow; 33] = {
+pub static TRANSITION_TABLE: [TransitionRow; 40] = {
     use GateId as G;
     use Status::{Any, Is};
     use TaskStatus as S;
@@ -263,6 +267,35 @@ pub static TRANSITION_TABLE: [TransitionRow; 33] = {
         row(Is(S::Escalated), Any, A::Human, G::None),
         // A ready task no one holds goes back to be re-planned for idle builders (ADR 0078).
         row(Is(S::Ready), Is(S::Refining), A::ProductManager, G::None),
+        // Under autopilot the Product Manager takes the owner's moves (ADR 0082): a twin of each
+        // human row, in table order.
+        row(
+            Is(S::Blocked),
+            Is(S::InProgress),
+            A::ProductManager,
+            G::Autopilot,
+        ),
+        row(
+            Is(S::Blocked),
+            Is(S::Verifying),
+            A::ProductManager,
+            G::Autopilot,
+        ),
+        row(
+            Is(S::Blocked),
+            Is(S::Refining),
+            A::ProductManager,
+            G::Autopilot,
+        ),
+        row(
+            Is(S::Verifying),
+            Is(S::Rejected),
+            A::ProductManager,
+            G::Autopilot,
+        ),
+        row(Any, Is(S::Escalated), A::ProductManager, G::Autopilot),
+        row(Any, Is(S::Cancelled), A::ProductManager, G::Autopilot),
+        row(Is(S::Escalated), Any, A::ProductManager, G::Autopilot),
     ]
 };
 
@@ -317,13 +350,13 @@ mod tests {
     }
 
     #[test]
-    fn has_exactly_thirty_three_distinct_rows() {
+    fn has_exactly_forty_distinct_rows() {
         let distinct: BTreeSet<String> = TRANSITION_TABLE
             .iter()
             .map(|row| format!("{row:?}"))
             .collect();
-        assert_eq!(TRANSITION_TABLE.len(), 33);
-        assert_eq!(distinct.len(), 33);
+        assert_eq!(TRANSITION_TABLE.len(), 40);
+        assert_eq!(distinct.len(), 40);
     }
 
     #[test]
@@ -340,13 +373,13 @@ mod tests {
     }
 
     #[test]
-    fn has_twenty_nine_specific_rows_and_four_any_rows() {
+    fn has_thirty_three_specific_rows_and_seven_any_rows() {
         let specific = TRANSITION_TABLE
             .iter()
             .filter(|row| is_specific(**row))
             .count();
-        assert_eq!(specific, 29);
-        assert_eq!(TRANSITION_TABLE.len() - specific, 4);
+        assert_eq!(specific, 33);
+        assert_eq!(TRANSITION_TABLE.len() - specific, 7);
     }
 
     #[allow(clippy::too_many_lines)] // reason: the spec table, one line each
@@ -403,6 +436,7 @@ mod tests {
                 &[
                     (A::ScrumMaster, G::BlockerResolved),
                     (A::Human, G::BlockerResolved),
+                    (A::ProductManager, G::Autopilot),
                 ],
             ),
             (S::Blocked, S::Escalated, &[(A::Governor, G::BlockedAge)]),
@@ -421,6 +455,7 @@ mod tests {
                     (A::Reviewer, G::RejectionReasons),
                     (A::Governor, G::RejectionReasons),
                     (A::Human, G::HumanRejection),
+                    (A::ProductManager, G::Autopilot),
                 ],
             ),
             (
@@ -444,9 +479,17 @@ mod tests {
                 &[
                     (A::ScrumMaster, G::BlockerResolved),
                     (A::Human, G::BlockerResolved),
+                    (A::ProductManager, G::Autopilot),
                 ],
             ),
-            (S::Blocked, S::Refining, &[(A::Human, G::BlockerResolved)]),
+            (
+                S::Blocked,
+                S::Refining,
+                &[
+                    (A::Human, G::BlockerResolved),
+                    (A::ProductManager, G::Autopilot),
+                ],
+            ),
             (
                 S::Verifying,
                 S::Blocked,
@@ -479,14 +522,18 @@ mod tests {
                 .collect();
             assert_eq!(
                 actors_and_gates(&rows),
-                [(A::Governor, G::GovernorEscalation), (A::Human, G::None)],
+                [
+                    (A::Governor, G::GovernorEscalation),
+                    (A::Human, G::None),
+                    (A::ProductManager, G::Autopilot)
+                ],
                 "{status}"
             );
         }
     }
 
     #[test]
-    fn cancels_any_non_terminal_status_for_the_human_only() {
+    fn cancels_any_non_terminal_status_for_the_human_and_the_product_manager_under_autopilot() {
         for status in TASK_STATUSES {
             if is_terminal(status) {
                 continue;
@@ -495,7 +542,11 @@ mod tests {
                 .into_iter()
                 .filter(|row| row.from == Status::Any)
                 .collect();
-            assert_eq!(actors_and_gates(&rows), [(A::Human, G::None)], "{status}");
+            assert_eq!(
+                actors_and_gates(&rows),
+                [(A::Human, G::None), (A::ProductManager, G::Autopilot)],
+                "{status}"
+            );
         }
     }
 
@@ -509,7 +560,11 @@ mod tests {
                 .into_iter()
                 .filter(|row| row.to == Status::Any)
                 .collect();
-            assert_eq!(actors_and_gates(&rows), [(A::Human, G::None)], "{status}");
+            assert_eq!(
+                actors_and_gates(&rows),
+                [(A::Human, G::None), (A::ProductManager, G::Autopilot)],
+                "{status}"
+            );
         }
     }
 
@@ -553,6 +608,11 @@ mod tests {
                 (A::Governor, G::GovernorEscalation),
                 (A::Human, G::None),
                 (A::Human, G::None),
+                (A::ProductManager, G::Autopilot),
+                (A::ProductManager, G::Autopilot),
+                (A::ProductManager, G::Autopilot),
+                (A::ProductManager, G::Autopilot),
+                (A::ProductManager, G::Autopilot),
             ]
         );
     }
@@ -563,7 +623,12 @@ mod tests {
         assert!(rows.iter().all(|row| row.to != Status::Is(S::Escalated)));
         assert_eq!(
             actors_and_gates(&rows),
-            [(A::Human, G::None), (A::Human, G::None)]
+            [
+                (A::Human, G::None),
+                (A::Human, G::None),
+                (A::ProductManager, G::Autopilot),
+                (A::ProductManager, G::Autopilot),
+            ]
         );
     }
 

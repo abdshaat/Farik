@@ -162,7 +162,7 @@ Tests:
 - `transition_table.rs`: `has_exactly_forty_distinct_rows` (replaces `..._thirty_three_...`) and `has_thirty_three_specific_rows_and_seven_any_rows` (replaces `..._twenty_nine_..._four_...`); `escalates_any_non_terminal_status_for_the_governor_and_the_human`, `cancels_any_non_terminal_status_for_the_human_only` (renamed `cancels_any_non_terminal_status_for_the_human_and_the_product_manager_under_autopilot`), `lets_the_human_move_an_escalated_task_to_any_other_status`, `lists_the_rows_that_leave_a_status_in_table_order` and `matches_every_line_of_the_spec_table` gain the `(ProductManager, Autopilot)` pairs in table order.
 - `transition.rs`: `the_product_manager_takes_the_owners_moves_only_under_autopilot` — for a blocked task with a resolution, the Product Manager's `blocked -> in_progress` is `GateFailed` with gate `Autopilot` when `autopilot` is false and opens when true; with autopilot on and no resolution it fails on the human row's `BlockerResolved` words; an escalated task goes to `cancelled` and to `refining` for the Product Manager under autopilot; an `in_progress` task's `in_progress -> cancelled` is refused for the Product Manager under autopilot (not blocked or escalated).
 
-- [ ] `feat(core): the product manager takes the owner's moves under autopilot`
+- [x] `feat(core): the product manager takes the owner's moves under autopilot`
 
 ### Task 4: an idle agent may take work past its limit
 
