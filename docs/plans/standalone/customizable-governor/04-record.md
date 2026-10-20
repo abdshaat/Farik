@@ -15,4 +15,4 @@ Writes revision 0.135 (2026-10-20, ADR 0080) at the end of the revision paragrap
 - 8.6: the session's deny rules (`Read` for off limits and Catervas's keys, `Edit` for read only and Catervas's state); "Secrets stay out of reach" now reads "unless the owner lifts them".
 No test: the spec is prose (hard rule 8 is the check).
 
-- [ ] `docs(spec): the owner sets the governor's rules, revision 0.135 (ADR 0080)`
+- [x] `docs(spec): the owner sets the governor's rules, revision 0.135 (ADR 0080)`
