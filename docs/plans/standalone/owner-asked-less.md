@@ -49,6 +49,13 @@ Files: `docs/schemas/team.schema.json`, `core/src/team.rs`, `runtime/src/sandbox
 - `edits_the_sandbox_tools` (web settings test) — typing `ffmpeg` and `libnss3` on two lines and saving sends `team.save` with `sandbox.packages: ["ffmpeg", "libnss3"]`.
 - [ ] `feat(runtime): the owner gives the sandbox system packages`
 
+### Task 2b (worktree b, after Task 2): an agent installs the system packages it needs
+
+Files: `runtime/src/tools.rs` (registration, the `execute` tier), `runtime/src/tools/sandbox.rs` (creates), the orchestrator's sandbox map (a `recreate(task_id, team)` the tool calls), `runtime/src/channel.rs` use, the roles' `system.md` of software_developer, ui_ux_designer and architect (one line: "A missing system tool: install it with `catervas_install_system_packages`; never block on one.")
+- Input `{ packages: [string] (1..=10), why: string (1..=300) }`; refused with `ToolError::InvalidInput` for a name outside the pattern or a total over 40; packages already listed are skipped.
+- `installs_a_system_package_for_the_task` (tools/sandbox.rs, with `CountingSandboxFactory`) — Theo's implement session calls it with `[ffmpeg]` and a why: the team file lists `ffmpeg`, `team.updated` has `updated_by: theo`, the channel has "Theo added ffmpeg to the sandbox:", and the task's sandbox was created again with `[ffmpeg]`. A Product Manager session gets no such tool; `["rm -rf /"]` is refused.
+- [ ] `feat(runtime): an agent installs the system packages it needs`
+
 ### Task 3: a missing preview is a link, not a question
 
 Files: `core/src/governor/gates.rs` (string + its test), `docs/schemas/team.schema.json` (description), `runtime/src/daemon/gates.rs` (`design_reviews_waiting` or a sibling), Today test
