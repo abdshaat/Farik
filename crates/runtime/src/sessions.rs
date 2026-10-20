@@ -122,6 +122,7 @@ pub(crate) fn purpose_wire(purpose: SessionPurpose) -> SessionStartedBodyPurpose
         SessionPurpose::Conversation => SessionStartedBodyPurpose::Conversation,
         SessionPurpose::Chat => SessionStartedBodyPurpose::Chat,
         SessionPurpose::Goal => SessionStartedBodyPurpose::Goal,
+        SessionPurpose::Decide => SessionStartedBodyPurpose::Decide,
     }
 }
 

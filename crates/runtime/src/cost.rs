@@ -463,6 +463,7 @@ fn purpose_wire(purpose: SessionPurpose) -> CostRecordedBodyPurpose {
         SessionPurpose::Conversation => CostRecordedBodyPurpose::Conversation,
         SessionPurpose::Chat => CostRecordedBodyPurpose::Chat,
         SessionPurpose::Goal => CostRecordedBodyPurpose::Goal,
+        SessionPurpose::Decide => CostRecordedBodyPurpose::Decide,
     }
 }
 

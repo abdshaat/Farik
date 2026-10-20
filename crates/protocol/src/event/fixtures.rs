@@ -372,6 +372,33 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         EventKind::MergePermissionGranted | EventKind::MergePermissionWithdrawn => {
             json!({ "by": "human", "into": "main" })
         }
+        EventKind::AutopilotChanged => json!({ "on": true }),
+        EventKind::TeamQuestionAsked => json!({
+            "question": "Should the login page remember the user?",
+            "asked_by": "dev-a",
+            "about": "product"
+        }),
+        EventKind::TeamQuestionAnswered => json!({
+            "question_seq": 1,
+            "answer": "Yes, for 30 days.",
+            "answered_by": "maya-chen"
+        }),
+        EventKind::TeamDecided => json!({
+            "choice": "more_tries",
+            "reason": "The last attempt was close.",
+            "decided_by": "maya-chen"
+        }),
+        EventKind::TaskFlagged => json!({
+            "needs": "A sign-in to the payment service.",
+            "flagged_by": "dev-a"
+        }),
+        EventKind::ToolApproved => json!({
+            "server": "github",
+            "tool": "create_issue",
+            "input": "{\"title\":\"x\"}",
+            "input_sha256": "0".repeat(64),
+            "by": "autopilot"
+        }),
         EventKind::PullRequestMerged => json!({
             "url": "https://github.com/o/r/pull/7",
             "method": "merge"

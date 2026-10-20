@@ -390,6 +390,7 @@ pub(crate) fn record_sent(deps: &ToolDeps, prepared: &Prepared) -> Result<u64, M
             .map_err(mail_failed)?,
         sha256: hash.try_into().map_err(mail_failed)?,
         edited: prepared.edited,
+        sent_by: None,
     };
     record_unattended(
         deps,

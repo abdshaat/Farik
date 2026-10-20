@@ -142,7 +142,7 @@ Produces: `EventBody::AutopilotChanged`, `TeamQuestionAsked`, `TeamQuestionAnswe
 Tests (`event.rs` `mod tests`):
 - `reads_an_event_of_every_kind_and_gives_the_body_its_own_kind_back` (extended): `EVERY_KIND` and `an_event_wire` gain the six kinds; each reads back as its own kind; `team.decided`, `task.flagged`, `team.question_asked` and `team.question_answered` are about their task, the other two about none, and a `team.decided` with `folder_change` and no task reads back about none; a `marketing_plan.approved` with `by: "autopilot"`, a `seller_message.sent` with `sent_by: "autopilot"`, a `task.transitioned` with gate `autopilot` and a `session.started` with purpose `decide` read back, and each body of the six is refused with one unknown property.
 
-- [ ] `feat(protocol): the autopilot's events`
+- [x] `feat(protocol): the autopilot's events`
 
 ### Task 2: the team's choices and their limits
 

@@ -190,7 +190,13 @@
         "local_documents.written",
         "merge_permission.granted",
         "merge_permission.withdrawn",
-        "pull_request.merged"
+        "pull_request.merged",
+        "autopilot.changed",
+        "team.question_asked",
+        "team.question_answered",
+        "team.decided",
+        "task.flagged",
+        "tool.approved"
       ]
     },
     "eventBodyWire": {
@@ -318,7 +324,13 @@
         { "$ref": "#/$defs/documentStorageChangedBody" },
         { "$ref": "#/$defs/localDocumentsWrittenBody" },
         { "$ref": "#/$defs/mergePermissionBody" },
-        { "$ref": "#/$defs/pullRequestMergedBody" }
+        { "$ref": "#/$defs/pullRequestMergedBody" },
+        { "$ref": "#/$defs/autopilotChangedBody" },
+        { "$ref": "#/$defs/teamQuestionAskedBody" },
+        { "$ref": "#/$defs/teamQuestionAnsweredBody" },
+        { "$ref": "#/$defs/teamDecidedBody" },
+        { "$ref": "#/$defs/taskFlaggedBody" },
+        { "$ref": "#/$defs/toolApprovedBody" }
       ]
     },
     "contractSummary": {
@@ -476,7 +488,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model_id", "usage", "cost_usd"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal", "decide"] },
         "model_id": { "type": "string", "minLength": 1 },
         "usage": { "$ref": "#/$defs/tokenUsage" },
         "cost_usd": { "type": "number", "minimum": 0 },
@@ -529,7 +541,7 @@
       "title": "Gate Id",
       "description": "The gate of the row a move took (docs/SPEC.md section 5.2); none for a row with no gate.",
       "type": "string",
-      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection", "pull_request_conflicted", "dependency_cancelled"]
+      "enum": ["none", "triaged", "definition_of_ready", "readiness_exhausted", "contract_requires_human", "assignment", "criteria_recorded", "blocker_written", "blocker_resolved", "blocked_age", "definition_of_done", "rejection_reasons", "iteration_below_limit", "iteration_limit_reached", "governor_escalation", "human_rejection", "pull_request_conflicted", "dependency_cancelled", "autopilot"]
     },
     "blockerWire": {
       "title": "Blocker Wire",
@@ -1228,7 +1240,8 @@
       "required": ["plan", "note"],
       "properties": {
         "plan": { "$ref": "#/$defs/marketingPlanId" },
-        "note": { "type": "string" }
+        "note": { "type": "string" },
+        "by": { "type": "string", "enum": ["autopilot"], "description": "Present when the team approved the plan under autopilot (ADR 0082); absent when the owner or Catervas did." }
       }
     },
     "marketingPlanReturnedBody": {
@@ -1746,7 +1759,8 @@
         "message": { "$ref": "#/$defs/sellerMessageNumber" },
         "message_id": { "type": "string", "minLength": 3, "maxLength": 300, "pattern": "^[^\\s<>]+@[^\\s<>]+$" },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-        "edited": { "type": "boolean" }
+        "edited": { "type": "boolean" },
+        "sent_by": { "type": "string", "enum": ["autopilot"], "description": "Present when Catervas sent the message when it was drafted, under autopilot (ADR 0082); absent when the owner pressed Send." }
       }
     },
     "sellerMessageFailedBody": {
@@ -2300,6 +2314,80 @@
         "duration_ms": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 }
       }
     },
+    "autopilotChangedBody": {
+      "title": "Autopilot Changed Body",
+      "description": "The owner turned autopilot on or off on this computer (docs/SPEC.md 5.2, 5.7; ADR 0082). The newest of these says whether it is on. It is about no task, and the envelope names no agent and no session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on"],
+      "properties": {
+        "on": { "type": "boolean" }
+      }
+    },
+    "teamQuestionAskedBody": {
+      "title": "Team Question Asked Body",
+      "description": "An agent asked the team a question under autopilot (ADR 0082): the event's sequence number is the question's id. about says whether the Product Manager (product) or the Architect (technical) answers it. The envelope names the task, the asking agent and its session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "asked_by", "about"],
+      "properties": {
+        "question": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "asked_by": { "type": "string" },
+        "about": { "type": "string", "enum": ["product", "technical"] }
+      }
+    },
+    "teamQuestionAnsweredBody": {
+      "title": "Team Question Answered Body",
+      "description": "The team answered a question an agent asked it (ADR 0082): question_seq is the sequence number of its team.question_asked. The envelope names the question's task, the answering agent and its session.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_seq", "answer", "answered_by"],
+      "properties": {
+        "question_seq": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "answered_by": { "type": "string" }
+      }
+    },
+    "teamDecidedBody": {
+      "title": "Team Decided Body",
+      "description": "The Product Manager took a decision the owner would otherwise take, under autopilot (ADR 0082): choice is one of the owner's own choices for that wait, and reason is why. answer goes with answer_block, needs with flag. It is about the task its envelope names; a decision about a folder change names folder_change instead and is about no task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["choice", "reason", "decided_by"],
+      "properties": {
+        "choice": { "type": "string", "enum": ["more_tries", "more_room", "back_to_plan", "try_readiness_again", "reopen_integration", "answer_block", "cancel", "approve_plan", "accept_result", "carry_on", "retry_folder_change", "flag"] },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 600 },
+        "decided_by": { "type": "string" },
+        "answer": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "needs": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "folder_change": { "$ref": "#/$defs/folderChangeNumber" }
+      }
+    },
+    "taskFlaggedBody": {
+      "title": "Task Flagged Body",
+      "description": "A task needs something only the owner can give, and the team works on without it (ADR 0082): needs says what. flagged_by is an agent id, or catervas when Catervas flagged it itself. The envelope names the task.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["needs", "flagged_by"],
+      "properties": {
+        "needs": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "flagged_by": { "type": "string" }
+      }
+    },
+    "toolApprovedBody": {
+      "title": "Tool Approved Body",
+      "description": "A paid or asking connector call ran without the owner's grant because autopilot is on (ADR 0082). server, tool, input and input_sha256 are as in tool_approval.requested; the count of these per agent and hour is what limits the rate of paid calls. The envelope names the agent and its session, and the task when the session has one.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["server", "tool", "input", "input_sha256", "by"],
+      "properties": {
+        "server": { "type": "string", "minLength": 1 },
+        "tool": { "type": "string", "minLength": 1 },
+        "input": { "type": "string" },
+        "input_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "by": { "type": "string", "enum": ["autopilot"] }
+      }
+    },
     "sessionStartedBody": {
       "title": "Session Started Body",
       "description": "A Claude Code session started (docs/SPEC.md sections 8.2 and 8.5): why, on which model, and how hard it thinks. The envelope names the session, the agent, and the task when the session has one; the exact system prompt it was given is kept in .catervas/local/sessions/<session_id>/system-prompt.md. A conversation's in_reply_to is the seq of the latest message it was shown: the mentions up to it are answered, and one posted after it is still pending, even one posted before this event. A ceremony's thread says which ceremony it was. A chat session's in_reply_to is the user's message it answers, and its chat is the chat's agent (ADR 0026).",
@@ -2307,7 +2395,7 @@
       "additionalProperties": false,
       "required": ["purpose", "model", "effort"],
       "properties": {
-        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal"] },
+        "purpose": { "type": "string", "enum": ["triage", "refine", "plan", "explore", "implement", "verify", "ceremony", "conversation", "chat", "goal", "decide"] },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] },
         "in_reply_to": { "type": "integer", "minimum": 1, "maximum": 18446744073709551615 },
