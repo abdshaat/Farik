@@ -2424,16 +2424,16 @@ mod tests {
         harness.assigned("CTV-3", "dev-b", "dev-a");
         harness.ready("CTV-4");
         // A task in progress, whose implement session is work, and an epic in progress whose one
-        // task was cancelled, whose breakdown is planning. Its dollars are spent by the first
-        // breakdown (plan sessions no longer count, ADR 0079), which files nothing here, so it is
-        // not asked for again.
+        // task was cancelled, whose breakdown is planning. One session is all the epic has room
+        // for, so that its breakdown, which files nothing here, is not asked for again (an
+        // epic's plan sessions count toward its own budget, ADR 0079).
         harness.in_progress("CTV-5", "dev-b", "dev-a");
         harness
             .project
             .filed_with("CTV-6", "ready", "epic", None, |wire| {
                 wire["assignee_role"] = json!("product_manager");
                 wire["reviewer_role"] = json!("human");
-                wire["budget"]["max_cost_usd"] = json!(0.0001);
+                wire["budget"]["max_sessions"] = json!(1);
             });
         let pm = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
         harness.project.moved("CTV-6", "ready", "assigned", &pm);
