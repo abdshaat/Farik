@@ -95,6 +95,16 @@ async function costs(summary: unknown = SUMMARY, metrics: unknown = EMPTY) {
 describe("costs page", () => {
 	afterEach(() => vi.unstubAllGlobals());
 
+	it("says_what_cancelled_work_cost", async () => {
+		await costs({ ...SUMMARY, cancelled_today_usd: 1.5 });
+		expect(
+			screen.getByText("$1.50 of it went to cancelled tasks."),
+		).toBeTruthy();
+		cleanup();
+		await costs();
+		expect(screen.queryByText(/went to cancelled tasks/)).toBeNull();
+	});
+
 	it("shows_the_costs", async () => {
 		const first = await costs();
 		expect(

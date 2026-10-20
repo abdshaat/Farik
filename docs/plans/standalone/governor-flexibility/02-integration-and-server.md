@@ -79,4 +79,4 @@ Tests:
 - `says_what_cancelled_work_cost` (Costs.test.tsx) — with `cancelledTodayUsd: 1.5` the page shows "$1.50 of it went to cancelled tasks".
 
 - [x] `fix(runtime): Files names who wrote a pending document and keeps table words whole` (first two tests)
-- [ ] `feat(web): Costs says what cancelled work cost` (last two tests)
+- [x] `feat(web): Costs says what cancelled work cost` (last two tests)

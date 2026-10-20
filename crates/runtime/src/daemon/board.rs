@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::fmt::Display;
 
-use catervas_core::contract::{Role, TaskId};
+use catervas_core::contract::{Role, TaskId, TaskStatus};
 use catervas_core::team::{AgentStatus, custom_server};
 use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, MessageKind};
 use catervas_store::{CostScope, CostWindow, EventQuery, HarnessMetrics};
@@ -314,8 +314,9 @@ fn chats_list(deps: &ToolDeps) -> Result<Value, Failure> {
     Ok(json!({ "team_last": team_last, "chats": chats }))
 }
 
-/// `costs.summary {}`: today's spending (UTC) and the daily limit, today's one-to-one chats, and
-/// each agent's that is not retired, in the team's order.
+/// `costs.summary {}`: today's spending (UTC) and the daily limit, today's one-to-one chats, what
+/// today's spending went to tasks now cancelled (omitted when none), and each agent's that is not
+/// retired, in the team's order.
 fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     let day = deps.clock.now().date_naive();
     let team = deps.files.read_team().map_err(|e| internal(&e))?;
@@ -331,8 +332,17 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
     let today = sum_by(CostScope::Day, CostWindow::Day(day))?;
     let agents_today = sum_by(CostScope::Agent, CostWindow::Day(day))?;
     let purposes_today = sum_by(CostScope::Purpose, CostWindow::Day(day))?;
+    let tasks_today = sum_by(CostScope::Task, CostWindow::Day(day))?;
+    let cancelled_today: f64 = deps
+        .projections
+        .board()
+        .map_err(|e| internal(&e))?
+        .iter()
+        .filter(|row| row.status == TaskStatus::Cancelled)
+        .filter_map(|row| tasks_today.get(row.task_id.as_str()))
+        .sum();
     let of = |spent: &BTreeMap<String, f64>, agent: &str| spent.get(agent).copied().unwrap_or(0.0);
-    Ok(json!({
+    let mut summary = json!({
         "today_usd": today.values().sum::<f64>(),
         "daily_limit_usd": team.budgets.daily_usd,
         "conversations_today_usd": of(&purposes_today, "chat"),
@@ -348,7 +358,12 @@ fn costs_summary(deps: &ToolDeps) -> Result<Value, Failure> {
                 })
             })
             .collect::<Vec<_>>(),
-    }))
+    });
+    // Omitted when no cancelled task was paid for today.
+    if cancelled_today > 0.0 {
+        summary["cancelled_today_usd"] = json!(cancelled_today);
+    }
+    Ok(summary)
 }
 
 /// `allowances.list {}`: each allowance of a connected kit connector of an active agent with the
@@ -561,6 +576,55 @@ mod tests {
             ended.get("session_id").is_none() && ended.get("purpose").is_none(),
             "{ended}"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn sums_today_spend_on_cancelled_tasks() {
+        let harness = Harness::new("board-cancelled-spend", |_| {});
+        let cancelled = |harness: &Harness| {
+            query(
+                &harness.daemon,
+                "costs.summary",
+                &json!({}),
+                "costsSummaryResult",
+            )
+            .get("cancelled_today_usd")
+            .cloned()
+        };
+        // Omitted while nothing cancelled was paid for.
+        assert_eq!(cancelled(&harness), None);
+
+        harness.ready("CTV-1");
+        harness
+            .project
+            .moved("CTV-1", "ready", "cancelled", &json!({}));
+        harness.ready("CTV-2");
+        let today = at().to_rfc3339();
+        spent(
+            &harness,
+            (Some("CTV-1"), "dev-a", "s1"),
+            "implement",
+            1.5,
+            &today,
+        );
+        spent(
+            &harness,
+            (Some("CTV-2"), "dev-a", "s2"),
+            "implement",
+            2.0,
+            &today,
+        );
+        // Yesterday's is not today's.
+        spent(
+            &harness,
+            (Some("CTV-1"), "dev-a", "s0"),
+            "implement",
+            9.0,
+            "2026-09-21T12:00:00Z",
+        );
+
+        assert_eq!(cancelled(&harness), Some(json!(1.5)));
     }
 
     #[test]

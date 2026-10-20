@@ -1076,6 +1076,7 @@ export const en = {
 	meetingPostsOne: "1 post on {day}",
 	costsToday: "Today the team has spent {spent}, with no daily limit set.",
 	costsTodayOf: "Today the team has spent {spent}, of {limit} a day.",
+	costsCancelled: "{spent} of it went to cancelled tasks.",
 	costsSetLimit: "Set a daily limit",
 	limitSave: "Save the limit",
 	costsByAgent: "By agent",

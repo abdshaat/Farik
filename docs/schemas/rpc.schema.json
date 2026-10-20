@@ -4761,6 +4761,11 @@
           "type": "number",
           "minimum": 0
         },
+        "cancelled_today_usd": {
+          "description": "Today's spending (UTC) on tasks now cancelled; omitted when none (ADR 0079).",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
         "agents": {
           "type": "array",
           "items": {
