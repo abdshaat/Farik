@@ -16,7 +16,7 @@ use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, 
 use catervas_core::folders::human_of_twin;
 pub(crate) use catervas_core::governor::done::result_awaits_human;
 use catervas_core::governor::done::{CriterionResult, DesignReviewNeed, DoneEvidence, RunBy};
-use catervas_core::governor::escalation::{EscalationReason, READINESS_ATTEMPT_LIMIT};
+use catervas_core::governor::escalation::EscalationReason;
 use catervas_core::governor::gates::{
     AssignmentInput, AssignmentRequester, Blocker, ChildState, DependencyState, DesignerBrowser,
     FolderWork, ReassignmentInput, Rejection, WorkState, check_reassignment,
@@ -742,7 +742,7 @@ impl Transitions {
             children: children_of(&board, id),
             readiness,
             readiness_failed_attempts: readiness_failed_attempts(&history),
-            readiness_attempt_limit: READINESS_ATTEMPT_LIMIT,
+            readiness_attempt_limit: team.readiness_attempts(),
             assignment,
             assignee_results: results,
             work,
@@ -4498,6 +4498,55 @@ mod tests {
             .expect("the board reads")
             .expect("on the board");
         assert_eq!(row.status, TaskStatus::Escalated);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn escalates_readiness_at_the_teams_limit() {
+        let ask = |project: &Project, to| {
+            project.ask(
+                &a_request("CTV-1", to, TransitionActor::Governor, None),
+                &TransitionAsk::default(),
+            )
+        };
+        let failing = |name: &str, attempts: Option<u64>| {
+            let project = Project::new(
+                name,
+                a_team(|wire| {
+                    wire["rules"]["max_task_budget_usd"] = json!(5);
+                    if let Some(attempts) = attempts {
+                        wire["policy"]["readiness_attempts"] = json!(attempts);
+                    }
+                }),
+                at(12),
+            );
+            // Past the team's five-dollar task maximum, so the contract fails every check.
+            project.file("CTV-1", |wire| wire["budget"]["max_cost_usd"] = json!(50));
+            project.created("CTV-1", "refining");
+            project
+        };
+
+        let one = failing("readiness-limit-one", Some(1));
+        assert!(matches!(
+            ask(&one, TaskStatus::Ready),
+            TransitionOutcome::Refused(_)
+        ));
+        let outcome = ask(&one, TaskStatus::Escalated);
+        assert!(
+            matches!(outcome, TransitionOutcome::Moved(_)),
+            "the first failure escalates: {outcome:?}"
+        );
+
+        let default = failing("readiness-limit-default", None);
+        assert!(matches!(
+            ask(&default, TaskStatus::Ready),
+            TransitionOutcome::Refused(_)
+        ));
+        let outcome = ask(&default, TaskStatus::Escalated);
+        assert!(
+            matches!(outcome, TransitionOutcome::Refused(_)),
+            "one failure of three still retries: {outcome:?}"
+        );
     }
 
     /// The project's `project.started`, about no task.

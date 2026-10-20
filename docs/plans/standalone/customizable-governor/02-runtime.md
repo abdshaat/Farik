@@ -98,7 +98,7 @@ Tests:
 Files: `runtime/src/transitions.rs`
 Tests: `escalates_readiness_at_the_teams_limit` — a team with `readiness_attempts: 1` escalates on the first failed readiness check; the default team still retries twice.
 
-- [ ] `feat(runtime): readiness escalates at the team's limit`
+- [x] `feat(runtime): readiness escalates at the team's limit`
 
 ### Task 12: an agent's own session budget
 
