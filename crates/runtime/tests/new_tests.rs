@@ -82,8 +82,9 @@ impl SandboxFactory for Counting {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
+        HostSandboxFactory.create(project_id, task_id, worktree, network, reads, packages)
     }
 
     fn create_base(
@@ -112,6 +113,7 @@ impl SandboxFactory for NoDocker {
         _worktree: &Path,
         _network: bool,
         _reads: &[(String, PathBuf)],
+        _packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         Err(SandboxError::DockerUnavailable)
     }
@@ -271,8 +273,9 @@ impl SandboxFactory for Recording {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
-        HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
+        HostSandboxFactory.create(project_id, task_id, worktree, network, reads, packages)
     }
 
     fn create_base(

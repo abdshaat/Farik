@@ -47,7 +47,7 @@ Files: `docs/schemas/team.schema.json`, `core/src/team.rs`, `runtime/src/sandbox
 - `names_an_image_for_the_packages` (docker.rs) — the tag for `[ffmpeg, libnss3]` is `<SANDBOX_IMAGE>-p<12 hex>`, the same for `[libnss3, ffmpeg]`, none for `[]`; the build's Dockerfile text installs both with `--no-install-recommends`.
 - `recreates_a_sandbox_whose_packages_changed` (orchestrator.rs, ignored, `CountingSandboxFactory`) — a second session after the team's packages changed creates a new sandbox with the new list; with no change it reuses the held one.
 - `edits_the_sandbox_tools` (web settings test) — typing `ffmpeg` and `libnss3` on two lines and saving sends `team.save` with `sandbox.packages: ["ffmpeg", "libnss3"]`.
-- [ ] `feat(runtime): the owner gives the sandbox system packages`
+- [x] `feat(runtime): the owner gives the sandbox system packages`
 
 ### Task 2b (worktree b, after Task 2): an agent installs the system packages it needs
 

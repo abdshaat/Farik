@@ -1535,6 +1535,14 @@ export const en = {
 	uiPathsAdd: "Add a file pattern",
 	uiPathsAddButton: "Add",
 	uiPathsRemove: "Remove",
+	sandboxToolsTitle: "System tools in the sandbox",
+	sandboxToolsLead:
+		"Programs a task or a preview needs that the sandbox does not have, like ffmpeg.\nOne name per line.",
+	sandboxToolsMore:
+		"These are Debian package names. Catervas builds the sandbox once with them installed, which takes about a minute, and the next task waits for it.\nAn agent that can run commands may add a tool here when it needs one, and says so in the channel. You can remove it.",
+	sandboxToolsLabel: "System packages",
+	refuseSandboxPackage:
+		"Catervas cannot install these. A package name uses lower-case letters, digits, + . and -, appears once, and the list holds at most 40.",
 	designChecked: "{name}, your UI/UX Designer, checked the screens first",
 	designPassed: "Passed, and sent on to {reviewer}",
 	designFailed: "Sent back to {builder}",

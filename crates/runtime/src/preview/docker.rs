@@ -15,7 +15,7 @@ use crate::preview::{
     AVAILABLE_FOR, PreviewEnv, PreviewError, PreviewFactory, RunningPreview, browser_container,
 };
 use crate::sandbox::SandboxError;
-use crate::sandbox::docker::{docker, docker_name, id, removed, stderr_of};
+use crate::sandbox::docker::{docker, docker_name, ensure_package_image, id, removed, stderr_of};
 
 /// How long `prepare` may run: installs and builds, with the network on.
 const PREPARE_LIMIT: Duration = Duration::from_mins(15);
@@ -168,6 +168,7 @@ impl PreviewFactory for DockerPreviewFactory {
         preview: &Preview,
         tree: &str,
         env: Option<&PreviewEnv>,
+        packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         let unavailable = |detail: String| PreviewError::DockerUnavailable { detail };
         // `--mount` splits on commas and wants an absolute source.
@@ -191,6 +192,9 @@ impl PreviewFactory for DockerPreviewFactory {
                 .to_string(),
             ));
         }
+        // With the owner's system packages the containers run the image built with them.
+        let image = ensure_package_image(&self.image, packages)
+            .map_err(|error| unavailable(error.to_string()))?;
         // The browser runs `--pull never`: without its image every session would fail to browse.
         if !run(&["image", "inspect", &self.browser])?.status.success() {
             return Err(unavailable(format!(
@@ -224,7 +228,7 @@ impl PreviewFactory for DockerPreviewFactory {
             running.prepare(
                 &preparing,
                 &mount,
-                &self.image,
+                &image,
                 prepare,
                 env.map(PreviewEnv::path),
             )?;
@@ -235,7 +239,7 @@ impl PreviewFactory for DockerPreviewFactory {
             mount: &mount,
             user: &running.user,
             labels: &running.labels,
-            image: &self.image,
+            image: &image,
             env: env.map(PreviewEnv::path),
         };
         let args = start_args(&launch, &tree_label, &preview.start);

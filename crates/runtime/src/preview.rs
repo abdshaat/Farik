@@ -239,11 +239,16 @@ pub trait PreviewFactory: Send + Sync {
     fn settle(&self) {}
     /// Prepares the preview when `preview.prepare` is set, then starts it and waits for it to
     /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of. `env` is the owner's
-    /// environment file, passed to `prepare` and `start` alone (ADR 0067).
+    /// environment file, passed to `prepare` and `start` alone (ADR 0067). `packages` are the
+    /// Debian packages the containers need besides the shipped ones (ADR 0081).
     ///
     /// # Errors
     ///
     /// `Prepare`, `NeverAnswered`, or `DockerUnavailable`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a preview's whole launch: where, what, of which tree, with which environment and packages"
+    )]
     fn start(
         &self,
         project_id: &str,
@@ -252,6 +257,7 @@ pub trait PreviewFactory: Send + Sync {
         preview: &Preview,
         tree: &str,
         env: Option<&PreviewEnv>,
+        packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError>;
 }
 
@@ -271,6 +277,7 @@ impl PreviewFactory for NoPreviews {
         _preview: &Preview,
         _tree: &str,
         _env: Option<&PreviewEnv>,
+        _packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         Err(PreviewError::DockerUnavailable {
             detail: "Catervas runs without Docker's sandbox".to_string(),
@@ -387,9 +394,10 @@ impl PreviewFactory for PolledPreviews {
         preview: &Preview,
         tree: &str,
         env: Option<&PreviewEnv>,
+        packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         self.inner
-            .start(project_id, task_id, worktree, preview, tree, env)
+            .start(project_id, task_id, worktree, preview, tree, env, packages)
     }
 }
 
@@ -795,6 +803,7 @@ pub(crate) mod fixtures {
             preview: &Preview,
             _tree: &str,
             env: Option<&PreviewEnv>,
+            _packages: &[String],
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             crate::locked(&self.envs).push(env.map(|env| env.path().to_path_buf()));
             crate::locked(&self.prepared).push(preview.prepare.clone());
@@ -824,6 +833,7 @@ pub(crate) mod fixtures {
             _preview: &Preview,
             _tree: &str,
             _env: Option<&PreviewEnv>,
+            _packages: &[String],
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a preview factory was asked to start a preview");
         }
@@ -914,6 +924,7 @@ pub(crate) mod fixtures {
             _preview: &Preview,
             _tree: &str,
             _env: Option<&PreviewEnv>,
+            _packages: &[String],
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a held factory was asked to start a preview");
         }

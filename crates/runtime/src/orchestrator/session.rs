@@ -719,6 +719,7 @@ async fn open_preview(
         ..preview.clone()
     };
     let env = crate::preview::PreviewEnv::read(tools.files.root());
+    let packages = team.sandbox_packages();
     let (previews, project, task, worktree_owned, tree_owned) = (
         Arc::clone(&deps.previews),
         tools.ids.project_id.clone(),
@@ -735,6 +736,7 @@ async fn open_preview(
             &asked,
             &tree_owned,
             env.as_ref(),
+            &packages,
         )
     })
     .await

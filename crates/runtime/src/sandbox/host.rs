@@ -88,6 +88,7 @@ impl SandboxFactory for HostSandboxFactory {
         worktree: &Path,
         _network: bool,
         _reads: &[(String, PathBuf)],
+        _packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         Ok(Box::new(HostSandbox::new(worktree.to_path_buf())))
     }
@@ -337,7 +338,7 @@ mod tests {
         let root = fresh_root("factory");
         let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
-            .create("p", &task_id, &root, false, &[])
+            .create("p", &task_id, &root, false, &[], &[])
             .expect("a host sandbox is always available");
         let result = sandbox
             .run("pwd", "", 5 * SECOND, &no_env())
@@ -363,7 +364,7 @@ mod tests {
         let root = fresh_root("discard");
         let task_id = TaskId::try_from("CTV-1").expect("an id");
         let sandbox = HostSandboxFactory
-            .create("p", &task_id, &root, false, &[])
+            .create("p", &task_id, &root, false, &[], &[])
             .expect("a host sandbox is always available");
         assert_eq!(sandbox.discard(), Ok(()));
         assert!(root.exists());
