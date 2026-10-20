@@ -495,8 +495,9 @@ const WRAPPERS: [&str; 11] = [
 ///
 /// # Errors
 ///
-/// `InvalidPattern` when a pattern does not compile, then `GitViaExec`, then `ForbiddenCommand`
-/// with the first pattern that matches.
+/// `InvalidPattern` when a pattern does not compile, then `GitViaExec` (git other than the
+/// read-only subcommands and `rules.git_subcommands`), then `ForbiddenCommand` with the first
+/// pattern that matches.
 pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandRefusal> {
     let patterns = compile_patterns(&rules.forbidden_commands)?;
     let segments: Vec<&str> = command
@@ -504,7 +505,11 @@ pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandR
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
         .collect();
-    if segments.iter().copied().any(runs_git) {
+    if segments
+        .iter()
+        .copied()
+        .any(|segment| runs_git(segment, &rules.git_subcommands))
+    {
         return Err(CommandRefusal::GitViaExec);
     }
     for (pattern, regex) in &patterns {
@@ -551,9 +556,10 @@ pub const READ_ONLY_GIT: [&str; 8] = [
 const GIT_OPTIONS_THAT_ACT: [&str; 2] = ["--output", "--open-files-in-pager"];
 
 /// Whether the segment runs git other than by a read-only subcommand: its first git call, whose
-/// next bare word is the subcommand, is not one of `READ_ONLY_GIT`, or it carries an option that
-/// acts.
-fn runs_git(segment: &str) -> bool {
+/// next bare word is the subcommand, is neither one of `READ_ONLY_GIT` nor one the owner allowed,
+/// or it is a read-only one that carries an option that acts. A subcommand the owner allowed runs
+/// with any option (ADR 0080 decision 6).
+fn runs_git(segment: &str, owner_allowed: &[String]) -> bool {
     let words: Vec<&str> = segment.split_whitespace().filter_map(bare_word).collect();
     let Some((first, rest)) = words.split_first() else {
         return false;
@@ -568,6 +574,12 @@ fn runs_git(segment: &str) -> bool {
     } else {
         return false;
     };
+    if words
+        .get(at + 1)
+        .is_some_and(|subcommand| owner_allowed.iter().any(|allowed| allowed == subcommand))
+    {
+        return false;
+    }
     let read_only = words
         .get(at + 1)
         .is_some_and(|subcommand| READ_ONLY_GIT.contains(subcommand));
@@ -1663,6 +1675,30 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn runs_the_git_the_owner_allowed() {
+        let rules = TeamRules {
+            git_subcommands: strings(&["fetch", "diff"]),
+            ..TeamRules::default()
+        };
+        for command in ["git fetch origin", "cd x && git diff --output=p.txt"] {
+            assert_eq!(evaluate_command(command, &rules), Ok(()), "{command}");
+        }
+        for command in ["git push", "sudo git merge main"] {
+            assert_eq!(
+                evaluate_command(command, &rules),
+                Err(CommandRefusal::GitViaExec),
+                "{command}"
+            );
+        }
+        let none = TeamRules::default();
+        assert_eq!(
+            evaluate_command("git diff --output=p.txt", &none),
+            Err(CommandRefusal::GitViaExec)
+        );
+        assert_eq!(evaluate_command("git status", &none), Ok(()));
     }
 
     #[test]

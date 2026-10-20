@@ -97,7 +97,7 @@ Produces: `evaluate_command` reading `rules.git_subcommands`
 Tests (`permissions.rs` `mod tests`):
 - `runs_the_git_the_owner_allowed` — asserts that with `git_subcommands: ["fetch", "diff"]`: `git fetch origin` and `cd x && git diff --output=p.txt` pass; `git push` and `sudo git merge main` are `GitViaExec`; with `git_subcommands` empty, `git diff --output=p.txt` is `GitViaExec` and `git status` passes (today's behavior).
 
-- [ ] `feat(core): commands run the git subcommands the owner allows`
+- [x] `feat(core): commands run the git subcommands the owner allows`
 
 ### Task 5: the owner sets how many readiness attempts a task gets
 
