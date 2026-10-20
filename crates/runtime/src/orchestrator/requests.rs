@@ -343,7 +343,7 @@ fn is_to_be_judged(contract: &TaskContract, history: &[CatervasEvent], began: u6
 /// The owner's words when they moved the task into `refining` and no refine session has run
 /// since (ADR 0079): the Product Manager hears them before the contract is judged. An empty note
 /// is no words, and the task is still heard.
-fn sent_back_unheard(history: &[CatervasEvent]) -> bool {
+pub(super) fn sent_back_unheard(history: &[CatervasEvent]) -> bool {
     let Some(back) = last_move_into(history, TaskStatus::Refining) else {
         return false;
     };

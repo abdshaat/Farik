@@ -81,7 +81,7 @@ Files: `runtime/src/orchestrator/requests.rs` (`replan_for_idle`), `runtime/src/
 Files: `runtime/src/cost.rs`, `runtime/src/orchestrator/rules.rs` (`budget`), `runtime/src/orchestrator/requests.rs` (`sent_back_unheard` visibility)
 - `does_not_count_the_refine_after_a_send_back` (cost.rs) — a task at 5 of 5 sessions, sent back to refining by the human, whose refine session then runs, reports 5 of 5, not 6.
 - `lets_a_sent_back_task_be_refined` (rules.rs, ignored) — a task at N of N moved to refining by the human is not escalated by the budget rule before its refine session.
-- [ ] `fix(runtime): an owner's send-back does not cost the task a session`
+- [x] `fix(runtime): an owner's send-back does not cost the task a session`
 
 ### Task 7 (worktree b): a sessions escalation shows sessions
 
