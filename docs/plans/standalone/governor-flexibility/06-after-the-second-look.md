@@ -26,7 +26,7 @@ Files: `apps/web/src/pages/TaskDetail.tsx`, `TaskDetail.test.tsx`, `strings/en.t
 Files: `crates/core/src/governor/transition_table.rs` (and its tests' counts), `apps/web/src/pages/TaskDetail.tsx`, `TaskDetail.test.tsx`, `strings/en.ts`
 - `the_owner_sends_a_ready_task_back_to_its_plan` (core) — `find_transitions(Ready, Refining)` includes `(Human, None)`; a human move with words is allowed.
 - `sends_a_ready_task_back_to_its_plan` (web) — on a ready task, "Change the plan" is disabled until the note has text, then sends `task_transition` with `to: "refining"` and the note as `reason`.
-- [ ] `feat(web): the owner sends a ready task back to its plan`
+- [x] `feat(web): the owner sends a ready task back to its plan`
 
 ### Task 28: the Product Manager changes an epic's waiting tasks from the epic's session
 

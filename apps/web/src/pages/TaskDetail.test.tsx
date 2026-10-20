@@ -135,6 +135,33 @@ describe("task detail", () => {
 		expect(screen.getAllByText("Gift cards").length).toBeGreaterThan(0);
 	});
 
+	it("sends_a_ready_task_back_to_its_plan", async () => {
+		const page = await opened({ ...CONTRACT, status: "ready" });
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Change the plan" }),
+		);
+		const dialog = screen.getByRole("dialog");
+		const send = within(dialog).getByRole("button", {
+			name: "Change the plan",
+		}) as HTMLButtonElement;
+		expect(send.disabled).toBe(true);
+		fireEvent.change(within(dialog).getByLabelText(/What should change/), {
+			target: { value: "Depend on CTV-22 instead." },
+		});
+		expect(send.disabled).toBe(false);
+		fireEvent.click(send);
+		expect((await sentCommand(page.s)).params).toEqual({
+			command: {
+				command: "task_transition",
+				body: {
+					task_id: "CTV-1",
+					to: "refining",
+					reason: "Depend on CTV-22 instead.",
+				},
+			},
+		});
+	});
+
 	it("a_finance_tasks_changes_tab_says_where_its_books_are", async () => {
 		// A task in a private folder has no branch and no diff: the page says where its changes are.
 		await opened(

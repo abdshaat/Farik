@@ -2009,7 +2009,7 @@ mod tests {
     }
 
     /// One case per row of `TRANSITION_TABLE`, in its order.
-    fn every_row() -> [Case; 31] {
+    fn every_row() -> [Case; 32] {
         use TaskStatus as S;
         let no_change: fn(&mut TransitionContext) = |_| {};
         [
@@ -2080,12 +2080,13 @@ mod tests {
                     .dependency_statuses
                     .insert("CTV-9".to_string(), TaskStatus::Cancelled);
             }),
-            case(27, S::InProgress, S::Escalated, A::Governor, |context| {
+            case(27, S::Ready, S::Refining, A::Human, no_change),
+            case(28, S::InProgress, S::Escalated, A::Governor, |context| {
                 context.permission_denied = true;
             }),
-            case(28, S::InProgress, S::Escalated, A::Human, no_change),
-            case(29, S::InProgress, S::Cancelled, A::Human, no_change),
-            case(30, S::Escalated, S::Ready, A::Human, no_change),
+            case(29, S::InProgress, S::Escalated, A::Human, no_change),
+            case(30, S::InProgress, S::Cancelled, A::Human, no_change),
+            case(31, S::Escalated, S::Ready, A::Human, no_change),
         ]
     }
 

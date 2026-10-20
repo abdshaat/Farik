@@ -8,6 +8,7 @@ import type { en } from "../strings/en.ts";
 import { t } from "../strings/t.ts";
 import { DesignReview, type Recorded, type Review } from "./DesignReview.tsx";
 import { CancelTask } from "./dialogs/CancelTask.tsx";
+import { ChangePlan } from "./dialogs/ChangePlan.tsx";
 import {
 	approvesPlan,
 	dollars,
@@ -201,6 +202,7 @@ export function TaskDetail() {
 	}>("task.get", task);
 	const [tab, setTab] = useState<Tab>("summary");
 	const [cancelling, setCancelling] = useState(false);
+	const [changingPlan, setChangingPlan] = useState(false);
 	const { busy, refusal, send } = useCommand(() => {});
 	if (
 		!team ||
@@ -828,7 +830,7 @@ export function TaskDetail() {
 						)}
 					</section>
 				)}
-				{(session || cancellable) && (
+				{(session || cancellable || contract.status === "ready") && (
 					<div className={page.stack}>
 						{session && (
 							<Button
@@ -841,6 +843,11 @@ export function TaskDetail() {
 								}
 							>
 								{t("taskStop")}
+							</Button>
+						)}
+						{contract.status === "ready" && (
+							<Button onClick={() => setChangingPlan(true)}>
+								{t("taskChangePlan")}
 							</Button>
 						)}
 						{cancellable && (
@@ -856,6 +863,13 @@ export function TaskDetail() {
 					</p>
 				)}
 			</aside>
+			{changingPlan && (
+				<ChangePlan
+					id={id}
+					title={contract.title}
+					onClose={() => setChangingPlan(false)}
+				/>
+			)}
 			{cancelling && (
 				<CancelTask
 					id={id}
