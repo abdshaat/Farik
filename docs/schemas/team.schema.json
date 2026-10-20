@@ -81,7 +81,7 @@
           "description": "The page to open first. Left out, /."
         }
       },
-      "description": "How Catervas opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under How to open your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
+      "description": "How Catervas opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under Your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
     },
     "mcpServer": {
       "type": "object",

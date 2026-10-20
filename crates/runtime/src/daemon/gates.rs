@@ -134,6 +134,30 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
             "line": line,
         }));
     }
+    // A Designer's task that is ready cannot be assigned while the team has no preview (ADR 0081):
+    // one row, for the first such task, links the owner to Settings.
+    if team.preview().is_none()
+        && !rows.iter().any(|row| row["kind"] == "preview_missing")
+        && let Some(agent) = team.designer()
+    {
+        for row in board.iter().filter(|row| row.status == TaskStatus::Ready) {
+            let contract = deps
+                .files
+                .read_contract(&row.task_id)
+                .map_err(|e| internal(&e))?;
+            if contract.assignee_role == catervas_core::contract::Role::UiUxDesigner {
+                let name = name_of(team, agent.id.as_str());
+                rows.push(json!({
+                    "task_id": row.task_id,
+                    "kind": "preview_missing",
+                    "agent_id": agent.id.to_string(),
+                    "title": row.title,
+                    "line": format!("{name} needs to know how to open your app"),
+                }));
+                break;
+            }
+        }
+    }
     Ok(rows)
 }
 
@@ -3319,6 +3343,49 @@ pub(super) mod tests {
             )["waiting"][0]["line"],
             "Catervas merges its pull request when GitHub's checks pass"
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_a_designer_task_waiting_for_a_preview() {
+        let ready_designer_task = |harness: &Harness| {
+            harness.file("CTV-1", "ready", |wire| {
+                wire["assignee_role"] = json!("ui_ux_designer");
+                wire["reviewer_role"] = json!("product_manager");
+            });
+        };
+        let harness = Harness::new("gates-designer-task-no-preview", |wire| {
+            crate::tools::fixtures::browsing(wire);
+            wire.as_object_mut().expect("a team").remove("preview");
+            wire["agents"][3]["display_name"] = json!("Iris");
+        });
+        ready_designer_task(&harness);
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "CTV-1", "kind": "preview_missing", "agent_id": "iris",
+                "title": "Add a login page", "line": "Iris needs to know how to open your app"
+            }])
+        );
+
+        let harness = Harness::new(
+            "gates-designer-task-with-preview",
+            crate::tools::fixtures::browsing,
+        );
+        ready_designer_task(&harness);
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(waiting["waiting"], json!([]));
     }
 
     #[test]

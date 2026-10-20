@@ -61,7 +61,7 @@ Files: `runtime/src/tools.rs` (registration, the `execute` tier), `runtime/src/t
 Files: `core/src/governor/gates.rs` (string + its test), `docs/schemas/team.schema.json` (description), `runtime/src/daemon/gates.rs` (`design_reviews_waiting` or a sibling), Today test
 - `lists_a_designer_task_waiting_for_a_preview` (daemon/gates.rs) — a team with a Designer, no preview and a ready Designer task: `waiting.list` has a `preview_missing` row; with a preview set, none.
 - The refusal text says "set it in Settings, Your app" (updated assertion in `refuses_to_assign_a_designer_without_its_browser`).
-- [ ] `fix(runtime): a missing preview waits on the owner as a link to Settings`
+- [x] `fix(runtime): a missing preview waits on the owner as a link to Settings`
 
 ### Task 4: every session knows the current team
 

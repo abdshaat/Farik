@@ -344,7 +344,7 @@ fn without_a_browser(input: &AssignmentInput) -> Option<String> {
     match input.designer_browser {
         DesignerBrowser::Ready => None,
         DesignerBrowser::NoPreview => Some(
-            "preview_not_set: the UI/UX Designer opens your app to work, and Catervas has not been told how; set it in Settings, under How to open your app"
+            "preview_not_set: the UI/UX Designer opens your app to work, and Catervas has not been told how; set it in Settings, Your app"
                 .to_string(),
         ),
         DesignerBrowser::NoSandbox => Some(
@@ -1331,7 +1331,7 @@ mod tests {
         assert_eq!(
             reasons(check_assignment(&designers, &input)),
             [
-                "preview_not_set: the UI/UX Designer opens your app to work, and Catervas has not been told how; set it in Settings, under How to open your app"
+                "preview_not_set: the UI/UX Designer opens your app to work, and Catervas has not been told how; set it in Settings, Your app"
             ]
         );
         input.designer_browser = DesignerBrowser::NoSandbox;
