@@ -94,7 +94,7 @@ Files: `docs/schemas/rpc.schema.json` (`task.tries` result), `runtime/src/daemon
 
 Files: `runtime/src/preview.rs`
 - `drops_npm_notices_from_a_preview_error` — a tail with no error line and four `npm notice` lines after the Remotion message shows the Remotion lines and no `npm notice`.
-- [ ] `fix(runtime): a preview error carries no npm notices`
+- [x] `fix(runtime): a preview error carries no npm notices`
 
 ### Task 9: the spec says it
 

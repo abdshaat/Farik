@@ -165,7 +165,8 @@ impl fmt::Display for PreviewError {
 impl std::error::Error for PreviewError {}
 
 /// The lines of a failed command's tail an owner needs: at most 8 that say `error` or `ERR`, not
-/// option help (a line starting `--` or `-<letter>`), in order; the last 8 lines when none do.
+/// option help (a line starting `--` or `-<letter>`), in order; the last 8 lines without npm's
+/// `notice` and `warn` lines when none do.
 /// The full tail stays in the session's log.
 fn error_lines(tail: &str) -> String {
     const MOST: usize = 8;
@@ -180,7 +181,14 @@ fn error_lines(tail: &str) -> String {
         .take(MOST)
         .collect();
     if errors.is_empty() {
-        let lines: Vec<&str> = tail.lines().collect();
+        // npm's update notices say nothing about the failure (ADR 0081).
+        let lines: Vec<&str> = tail
+            .lines()
+            .filter(|line| {
+                let line = line.trim();
+                !(line.starts_with("npm notice") || line.starts_with("npm warn"))
+            })
+            .collect();
         lines[lines.len().saturating_sub(MOST)..].join("\n")
     } else {
         errors.join("\n")
@@ -1139,6 +1147,28 @@ mod tests {
         assert!(text.contains("can only install with an existing package-lock.json"));
         assert!(!text.contains("--allow-scripts"), "{text}");
         assert!(text.lines().count() <= 9, "{text}");
+    }
+
+    #[test]
+    fn drops_npm_notices_from_a_preview_error() {
+        let tail = "Remotion needs a browser to render\n\
+                    Install Chrome or set the browser executable\n\
+                    npm notice\n\
+                    npm notice New major version of npm available! 10.8.2 -> 11.6.0\n\
+                    npm warn Using the latest npm\n\
+                    npm notice To update run: npm install -g npm@11.6.0\n";
+        let text = super::PreviewError::Prepare {
+            tail: tail.to_string(),
+        }
+        .to_string();
+
+        assert!(
+            text.contains("Remotion needs a browser to render"),
+            "{text}"
+        );
+        assert!(text.contains("Install Chrome"), "{text}");
+        assert!(!text.contains("npm notice"), "{text}");
+        assert!(!text.contains("npm warn"), "{text}");
     }
 
     #[test]
