@@ -445,22 +445,7 @@ pub fn waiting(
         .iter()
         .filter(|row| row.status == TaskStatus::Verifying)
     {
-        let mut contract = files
-            .read_contract(&row.task_id)
-            .map_err(|error| StoreError::Io {
-                detail: error.to_string(),
-            })?;
-        contract.status = row.status;
-        if !result_awaits_human(&contract) {
-            continue;
-        }
-        // A task's result reaches the human once its reviewer passed it; an epic's is theirs.
-        if contract.kind != TaskKind::Epic
-            && !review_passed(&log.read(&EventQuery {
-                task_id: Some(row.task_id.clone()),
-                ..EventQuery::default()
-            })?)
-        {
+        if !awaits_acceptance(log, files, row)? {
             continue;
         }
         let assignee = row.assignee_id.as_deref();
@@ -518,6 +503,38 @@ pub fn waiting(
         ));
     }
     Ok(waiting)
+}
+
+/// Whether the result of a task in `verifying` waits on the human's acceptance (5.4): it is an epic,
+/// risk `high`, or has a `human` criterion, and, for a task, its reviewer passed it; an epic's is
+/// the human's to review. The owner's acceptance is not looked for: the caller asks that.
+///
+/// # Errors
+///
+/// What the store refused.
+pub fn awaits_acceptance(
+    log: &EventLog,
+    files: &ProjectFiles,
+    row: &TaskProjection,
+) -> Result<bool, StoreError> {
+    if row.status != TaskStatus::Verifying {
+        return Ok(false);
+    }
+    let mut contract = files
+        .read_contract(&row.task_id)
+        .map_err(|error| StoreError::Io {
+            detail: error.to_string(),
+        })?;
+    contract.status = row.status;
+    if !result_awaits_human(&contract) {
+        return Ok(false);
+    }
+    // A task's result reaches the human once its reviewer passed it; an epic's is theirs.
+    Ok(contract.kind == TaskKind::Epic
+        || review_passed(&log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            ..EventQuery::default()
+        })?))
 }
 
 /// Whether the latest `review.recorded` since the task last entered `verifying` passed.

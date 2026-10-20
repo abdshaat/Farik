@@ -50,6 +50,7 @@ mod session;
 pub(crate) use session::read_roots;
 mod spend;
 mod verify;
+pub(crate) use verify::{governor_results, is_mechanical, since_verifying};
 mod work;
 pub use work::Work;
 

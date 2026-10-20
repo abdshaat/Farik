@@ -146,7 +146,7 @@ Tests (`orchestrator/autopilot.rs`):
 - `the_product_manager_approves_a_plan_and_accepts_a_result_for_the_owner` — under autopilot an epic escalated `approval` gets a decide session offering `approve_plan`, `back_to_plan`, `cancel`, `flag`; `approve_plan` appends `human.accepted { subject: contract, accepted_by: "pm" }` and moves it to `ready` with gate `autopilot`; a high-risk task in `verifying` whose review passed gets a decide session, and `accept_result` appends `human.accepted { subject: result, accepted_by: "pm" }`, after which the Product Manager's `verifying -> accepted` passes the Definition of Done (`DoneEvidence.human_accepted` read from it by `with_the_humans_acceptance`, transitions.rs near 1890, unchanged), as after the owner's `accept_result`; a second `accept_result` is refused `already_accepted`; neither row is in `waiting.list`.
 - `the_product_manager_carries_on_and_retries_a_folder_change` — a `permission` escalation from `in_progress` offers `carry_on` first and `carry_on` moves the task back to `in_progress`; a `preview` escalation offers `carry_on`, `cancel`, `flag` and no Settings choice; an escalated folder change gets a decide session about no task, `catervas_decide { folder_change, choice: "retry_folder_change" }` records `team.decided` naming it and the next tick opens its integration again; `catervas_decide` with both `task_id` and `folder_change` is refused `name_one`; after three retries only `flag` is offered, and its flag is a `flagged` row with no task.
 
-- [ ] `feat(runtime): the product manager approves, accepts, carries on and retries`
+- [x] `feat(runtime): the product manager approves, accepts, carries on and retries`
 
 ### Task 12: Today shows what the team flagged and did on its own
 

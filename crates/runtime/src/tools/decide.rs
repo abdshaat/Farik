@@ -8,14 +8,17 @@ use std::num::NonZeroU64;
 use catervas_core::autopilot::{
     DecideChoice, DecideMove, QuestionAbout, Spent, answerer, choices_for, move_of,
 };
-use catervas_core::contract::{Role, TaskId, TaskStatus};
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_protocol::event::{EventBody, EventKind};
 use catervas_protocol::generated::event::{
-    EscalationResolvedBody, TaskRoomGrantedBody, TeamQuestionAskedBodyAbout,
+    EscalationResolvedBody, HumanAcceptedBody, HumanAcceptedBodySubject, TaskRoomGrantedBody,
+    TeamQuestionAskedBodyAbout,
 };
 use catervas_store::EventQuery;
-use catervas_store::autopilot::{flags, team_decides, team_spent};
+use catervas_store::autopilot::{flags, folder_change_spent, team_decides, team_spent};
+use catervas_store::folder_docs::folder_docs;
+use catervas_store::waiting::awaits_acceptance;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -25,7 +28,9 @@ use super::work::ask_governor;
 use super::{Call, ToolError, failed};
 use crate::choices::{Waits, waits_of};
 use crate::goals::planner;
-use crate::transitions::{TransitionAsk, status_wire};
+use crate::transitions::{
+    TransitionAsk, mechanical_criteria_passed, result_accepted, result_awaits_human, status_wire,
+};
 
 /// `catervas_answer_question`'s input.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -209,6 +214,175 @@ fn record_decision(
     Ok(())
 }
 
+/// The owner's approval of a plan, given by the Product Manager (ADR 0082 decision 11): the
+/// contract accepted, then `escalated -> ready`, as `human.rs` does for the owner.
+fn approve_plan(
+    call: &Call<'_>,
+    task: &TaskId,
+    row: &catervas_store::TaskProjection,
+    reason: &str,
+) -> Result<(), ToolError> {
+    if !row.awaiting_approval {
+        return Err(refused(
+            "not_awaiting_approval",
+            format!(
+                "{} is {} and no approval is asked of the human",
+                task.as_str(),
+                row.status
+            ),
+        ));
+    }
+    call.append(
+        Some(task),
+        EventBody::HumanAccepted(HumanAcceptedBody {
+            subject: HumanAcceptedBodySubject::Contract,
+            accepted_by: call.agent_id().to_string(),
+            message: Some(reason.to_string()),
+        }),
+    )?;
+    ask_governor(
+        call,
+        task.clone(),
+        TaskStatus::Ready,
+        TransitionActor::ProductManager,
+        TransitionAsk::default(),
+    )?;
+    Ok(())
+}
+
+/// The owner's acceptance of a result, given by the Product Manager (ADR 0082 decision 11), after
+/// the owner's own checks: one acceptance a verification, an epic's mechanical criteria passed,
+/// and a result that waits on the human at all.
+fn accept_result(
+    call: &Call<'_>,
+    task: &TaskId,
+    row: &catervas_store::TaskProjection,
+    reason: &str,
+) -> Result<(), ToolError> {
+    let deps = call.deps();
+    let not_waiting = || {
+        refused(
+            "not_waiting_for_the_human",
+            format!(
+                "{} is {}, and its result does not wait for the human",
+                task.as_str(),
+                row.status
+            ),
+        )
+    };
+    if row.status != TaskStatus::Verifying {
+        return Err(not_waiting());
+    }
+    let mut contract = deps.files.read_contract(task).map_err(failed)?;
+    contract.status = row.status;
+    let history = deps
+        .log
+        .read(&EventQuery {
+            task_id: Some(task.clone()),
+            ..EventQuery::default()
+        })
+        .map_err(failed)?;
+    if result_accepted(&history).is_some() {
+        return Err(refused(
+            "already_accepted",
+            format!(
+                "the human accepted {}'s result in this verification",
+                task.as_str()
+            ),
+        ));
+    }
+    if contract.kind == TaskKind::Epic {
+        mechanical_criteria_passed(&contract, &history).map_err(|said| {
+            let (code, detail) = said.split_once(": ").unwrap_or(("criterion_failed", &said));
+            refused(
+                if code == "criteria_not_run" {
+                    "criteria_not_run"
+                } else {
+                    "criterion_failed"
+                },
+                detail,
+            )
+        })?;
+    } else if !result_awaits_human(&contract) {
+        return Err(not_waiting());
+    }
+    call.append(
+        Some(task),
+        EventBody::HumanAccepted(HumanAcceptedBody {
+            subject: HumanAcceptedBodySubject::Result,
+            accepted_by: call.agent_id().to_string(),
+            message: Some(reason.to_string()),
+        }),
+    )?;
+    Ok(())
+}
+
+/// A decision about a folder change whose integration failed (ADR 0082 decision 11): a retry the
+/// next tick carries out, or a flag. It has no task, so `team.decided` names the change alone.
+fn decide_folder_change(
+    call: &Call<'_>,
+    change: u64,
+    input: &DecideInput,
+    reason: &str,
+) -> Result<Value, ToolError> {
+    let deps = call.deps();
+    let waiting = folder_docs(&deps.log)
+        .map_err(failed)?
+        .changes
+        .iter()
+        .any(|held| held.change == change && held.escalated && !held.integrated);
+    let flagged = flags(&deps.log)
+        .map_err(failed)?
+        .iter()
+        .any(|flag| flag.folder_change == Some(change));
+    if !waiting || flagged {
+        return Err(refused(
+            "not_waiting_on_the_team",
+            format!("folder change {change} waits on nothing the team decides"),
+        ));
+    }
+    let offered = choices_for(
+        "folder_change",
+        None,
+        None,
+        folder_change_spent(&deps.log, change).map_err(failed)?,
+    );
+    let Some(choice) =
+        DecideChoice::from_wire(&input.choice).filter(|choice| offered.contains(choice))
+    else {
+        return Err(refused(
+            "choice_not_offered",
+            format!(
+                "{} is not offered here; offered: {}",
+                input.choice,
+                named(&offered)
+            ),
+        ));
+    };
+    let needs = if choice == DecideChoice::Flag {
+        Some(written(
+            input.needs.as_ref(),
+            300,
+            "needs_required",
+            "say what the owner must give",
+        )?)
+    } else {
+        None
+    };
+    let decided = serde_json::from_value(json!({
+        "choice": choice.wire(),
+        "reason": reason,
+        "decided_by": call.agent_id(),
+        "needs": needs,
+        "folder_change": change,
+    }))
+    .map_err(|_| ToolError::InvalidInput {
+        detail: "the decision's words are not ones the log can hold".to_string(),
+    })?;
+    call.append(None, EventBody::TeamDecided(decided))?;
+    Ok(json!({ "decided": choice.wire(), "folder_change": change }))
+}
+
 /// A role's name for a refusal an agent reads.
 fn role_name(role: Role) -> &'static str {
     match role {
@@ -244,10 +418,7 @@ pub(super) fn decide(call: &Call<'_>, input: &DecideInput) -> Result<Value, Tool
     }
     match (&input.task_id, input.folder_change) {
         (Some(task), None) => decide_task(call, task, input, reason),
-        (None, Some(_)) => Err(refused(
-            "not_waiting_on_the_team",
-            "no folder change waits on the team",
-        )),
+        (None, Some(change)) => decide_folder_change(call, change, input, reason),
         _ => Err(refused(
             "name_one",
             "name the task (task_id) or the folder change (folder_change) you decide, and one only",
@@ -295,7 +466,18 @@ fn decide_task(
     {
         None
     } else {
-        waits_of(&deps.log, &deps.projections, &task).map_err(failed)?
+        match waits_of(&deps.log, &deps.projections, &task).map_err(failed)? {
+            Some(wait) => Some(wait),
+            // A result the owner would accept (5.4) waits on the team as well.
+            None if awaits_acceptance(&deps.log, &deps.files, &row).map_err(failed)? => {
+                Some(Waits {
+                    reason: "acceptance".to_string(),
+                    before: None,
+                    blocked_from: None,
+                })
+            }
+            None => None,
+        }
     };
     let Some(wait) = wait else {
         return Err(refused(
@@ -352,7 +534,9 @@ fn decide_task(
             move_the_task(call, &task, status, (extra_tries, extra_room), (ask, text))?;
         }
         Some(DecideMove::Reopen | DecideMove::Flag) => {}
-        Some(_) | None => {
+        Some(DecideMove::ApprovePlan) => approve_plan(call, &task, &row, reason)?,
+        Some(DecideMove::AcceptResult) => accept_result(call, &task, &row, reason)?,
+        Some(DecideMove::RetryFolderChange) | None => {
             return Err(refused(
                 "choice_not_offered",
                 format!(

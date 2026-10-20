@@ -569,6 +569,64 @@ pub(super) fn decide_message(
     )
 }
 
+/// The first message of the session in which the Product Manager decides whether to accept a
+/// result for the owner (ADR 0082 decision 11): the task, its criteria and the results recorded,
+/// the agents' words in untrusted blocks.
+pub(super) fn acceptance_message(
+    decider: &Agent,
+    contract: &TaskContract,
+    results: &str,
+    offered: &[DecideChoice],
+) -> String {
+    let criteria = contract
+        .exit_criteria
+        .iter()
+        .map(|criterion| format!("{}: {}", criterion.id.as_str(), criterion.text.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let said = if contract.kind == TaskKind::Epic {
+        "It is an epic, and its tasks are done."
+    } else {
+        "Its review passed."
+    };
+    let choices = offered
+        .iter()
+        .map(|choice| format!("- `{}`: {}", choice.wire(), choice.meaning()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{decider}, the result of {id} waits for the owner's acceptance. {said}\n\nThe task's title:\n{title}\n\nIts criteria:\n{criteria}\n\nThe results recorded:\n{results}\n\nYou may choose:\n{choices}\n\nAccept it with `catervas_decide` (`accept_result`) once you have read the work, or flag it.",
+        decider = decider.display_name.as_str(),
+        id = contract.id.as_str(),
+        title = untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
+        criteria = untrusted_block("criteria", &criteria, RESULTS_CAP_BYTES),
+        results = untrusted_block("results", results, RESULTS_CAP_BYTES),
+    )
+}
+
+/// The first message of the session in which the Product Manager decides a folder change whose
+/// integration failed (ADR 0082 decision 11): its documents, and what failed, an agent's or a
+/// tool's words.
+pub(super) fn folder_change_message(
+    decider: &Agent,
+    change: &catervas_store::folder_docs::FolderChange,
+    detail: &str,
+    offered: &[DecideChoice],
+) -> String {
+    let choices = offered
+        .iter()
+        .map(|choice| format!("- `{}`: {}", choice.wire(), choice.meaning()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{decider}, adding the documents of folder change {n} to the project failed.\n\nIts documents:\n{paths}\n\nWhat failed:\n{detail}\n\nYou may choose:\n{choices}\n\nDecide with `catervas_decide` and `folder_change` {n}.",
+        decider = decider.display_name.as_str(),
+        n = change.change,
+        paths = untrusted_block("paths", &change.paths.join("\n"), NOTE_CAP_BYTES),
+        detail = untrusted_block("detail", detail, NOTE_CAP_BYTES),
+    )
+}
+
 /// The owner's answers to this task's blocks and escalations that came before `since`, the start of
 /// the last session, and still belong to the task's try (from its last start out of `assigned` or
 /// `ready`): the newest three, oldest first. Those after `since` the caller tells already.

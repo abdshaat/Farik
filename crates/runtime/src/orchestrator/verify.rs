@@ -966,7 +966,7 @@ pub(super) fn reviewer_results(context: &TransitionContext) -> Vec<CriterionResu
 /// The results Catervas recorded as the governor since `since`, the latest per criterion. Catervas's own
 /// carry no agent on their envelope; `recorded_by` alone would trust an agent the team named
 /// `governor`.
-pub(super) fn governor_results(history: &[CatervasEvent], since: u64) -> Vec<CriterionResult> {
+pub(crate) fn governor_results(history: &[CatervasEvent], since: u64) -> Vec<CriterionResult> {
     let mut results: Vec<CriterionResult> = Vec::new();
     for event in history
         .iter()
@@ -1003,7 +1003,7 @@ pub(super) fn is_human(criterion: &ExitCriterion) -> bool {
 }
 
 /// A `command`, `test`, or `artifact` criterion: one Catervas runs itself.
-pub(super) fn is_mechanical(criterion: &ExitCriterion) -> bool {
+pub(crate) fn is_mechanical(criterion: &ExitCriterion) -> bool {
     matches!(
         wire_method(&criterion.verification),
         Some("command" | "test" | "artifact")
@@ -1022,7 +1022,7 @@ pub(super) fn history(
 }
 
 /// The sequence number of the task's last move into `verifying`, or 0.
-pub(super) fn since_verifying(history: &[CatervasEvent]) -> u64 {
+pub(crate) fn since_verifying(history: &[CatervasEvent]) -> u64 {
     last_move_into(history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq)
 }
 

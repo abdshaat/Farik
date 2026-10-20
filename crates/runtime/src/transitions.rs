@@ -1885,6 +1885,53 @@ pub(crate) fn result_accepted(history: &[CatervasEvent]) -> Option<(u64, Option<
         })
 }
 
+/// Every `command`, `test`, or `artifact` criterion of the epic has Catervas's passing result since
+/// it last moved into `verifying` (ADR 0013). The refusal is in the words the owner's acceptance
+/// and the team's use.
+///
+/// # Errors
+///
+/// `criteria_not_run: ...` or `criterion_failed: ...`.
+pub(crate) fn mechanical_criteria_passed(
+    contract: &TaskContract,
+    history: &[CatervasEvent],
+) -> Result<(), String> {
+    let results = crate::orchestrator::governor_results(
+        history,
+        crate::orchestrator::since_verifying(history),
+    );
+    let mechanical: Vec<String> = contract
+        .exit_criteria
+        .iter()
+        .filter(|criterion| crate::orchestrator::is_mechanical(criterion))
+        .map(|criterion| criterion.id.to_string())
+        .collect();
+    let not_run: Vec<&str> = mechanical
+        .iter()
+        .filter(|id| !results.iter().any(|result| &result.criterion_id == *id))
+        .map(String::as_str)
+        .collect();
+    if !not_run.is_empty() {
+        return Err(format!(
+            "criteria_not_run: Catervas has not yet run {} on the integration branch",
+            not_run.join(", ")
+        ));
+    }
+    let failed: Vec<&str> = results
+        .iter()
+        .filter(|result| mechanical.contains(&result.criterion_id) && !result.passed)
+        .map(|result| result.criterion_id.as_str())
+        .collect();
+    if !failed.is_empty() {
+        return Err(format!(
+            "criterion_failed: {} failed on the integration branch: escalate the epic and send it \
+             back to in_progress with what is missing",
+            failed.join(", ")
+        ));
+    }
+    Ok(())
+}
+
 /// The Done evidence with the human's acceptance of the result read into it (5.4): the
 /// acceptance itself, and one passing `Human` result for each `human` criterion, which is the one
 /// path to them. For an epic the human reviews (ADR 0013), it also stands for the reviewer's

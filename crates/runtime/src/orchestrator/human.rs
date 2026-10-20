@@ -5,7 +5,7 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::{agent_twin, folder_doc_author, folder_doc_message};
 use catervas_core::governor::gates::{Blocker, DesignerBrowser, Rejection};
 use catervas_core::governor::transition::TransitionRequest;
@@ -31,7 +31,6 @@ use catervas_store::{EventQuery, TaskProjection};
 use serde_json::json;
 
 use super::requests::{HUMAN, product_manager};
-use super::verify::{governor_results, is_mechanical, since_verifying};
 
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::catervafication::{self, Project};
@@ -53,8 +52,9 @@ use crate::skills::{
 use crate::tools::ToolDeps;
 use crate::tools::folders::{LandRefusal, land};
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, contract_accepted, last_move_into, refusal_details,
-    result_accepted, result_awaits_human, review_passed, status_wire,
+    TransitionAsk, TransitionOutcome, contract_accepted, last_move_into,
+    mechanical_criteria_passed, refusal_details, result_accepted, result_awaits_human,
+    review_passed, status_wire,
 };
 use catervas_core::governor::gates::return_from_block;
 
@@ -1633,7 +1633,8 @@ fn accept_result(
     }
     let message = message.filter(|text| !text.trim().is_empty());
     if contract.kind == TaskKind::Epic {
-        mechanical_criteria_passed(&contract, &history)?;
+        mechanical_criteria_passed(&contract, &history)
+            .map_err(|reason| CommandError::Refused { reason })?;
         if message.is_none() {
             return Err(CommandError::Invalid {
                 detail: "an epic's acceptance carries the human's words: say what you checked"
@@ -1748,49 +1749,6 @@ fn send_result_back(
         said: format!("{} is sent back to its assignee", task_id.as_str()),
         events,
     })
-}
-
-/// Every `command`, `test`, or `artifact` criterion of the epic has Catervas's passing result since
-/// it last moved into `verifying` (ADR 0013).
-fn mechanical_criteria_passed(
-    contract: &TaskContract,
-    history: &[catervas_protocol::event::CatervasEvent],
-) -> Result<(), CommandError> {
-    let results = governor_results(history, since_verifying(history));
-    let mechanical: Vec<String> = contract
-        .exit_criteria
-        .iter()
-        .filter(|criterion| is_mechanical(criterion))
-        .map(|criterion| criterion.id.to_string())
-        .collect();
-    let not_run: Vec<&str> = mechanical
-        .iter()
-        .filter(|id| !results.iter().any(|result| &result.criterion_id == *id))
-        .map(String::as_str)
-        .collect();
-    if !not_run.is_empty() {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "criteria_not_run: Catervas has not yet run {} on the integration branch",
-                not_run.join(", ")
-            ),
-        });
-    }
-    let failed: Vec<&str> = results
-        .iter()
-        .filter(|result| mechanical.contains(&result.criterion_id) && !result.passed)
-        .map(|result| result.criterion_id.as_str())
-        .collect();
-    if !failed.is_empty() {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "criterion_failed: {} failed on the integration branch: escalate the epic and \
-                 send it back to in_progress with what is missing",
-                failed.join(", ")
-            ),
-        });
-    }
-    Ok(())
 }
 
 /// Resolves an escalation (5.7), or a task its agent blocked (ADR 0068, with the message as the

@@ -13,12 +13,16 @@ use catervas_protocol::event::{
     EventBody, EventIds, EventKind, SessionStartedBodyPurpose, new_event,
 };
 use catervas_store::autopilot::{
-    TeamQuestion, flags, open_team_questions, team_decides, team_spent,
+    TeamQuestion, flags, folder_change_spent, open_team_questions, team_decides, team_spent,
 };
+use catervas_store::folder_docs::{FolderChange, folder_docs};
+use catervas_store::waiting::awaits_acceptance;
 use catervas_store::{EventQuery, TaskProjection};
 use chrono::{DateTime, Duration, Utc};
 
-use super::messages::{decide_message, question_message};
+use super::messages::{
+    acceptance_message, decide_message, folder_change_message, question_message,
+};
 use super::rules::{Waiting, acted, day_is_spent, unavailable};
 use super::session::{SessionAsk, run_session};
 use super::{OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScope};
@@ -26,7 +30,7 @@ use crate::ceremonies::open_escalations;
 use crate::choices::waits_of;
 use crate::goals::planner;
 use crate::session::SessionPurpose;
-use crate::transitions::last_move_into;
+use crate::transitions::{last_move_into, result_accepted};
 
 /// The Catervas tools a session that answers a question is offered: the reading tools, a decision
 /// to record, a post, the notebook, and the answer.
@@ -77,7 +81,10 @@ pub(super) async fn autopilot_rule(
     if let Some(report) = answer_a_question(deps, team, board, waiting).await? {
         return Ok(Some(report));
     }
-    decide_a_wait(deps, team, board, waiting).await
+    if let Some(report) = decide_a_wait(deps, team, board, waiting).await? {
+        return Ok(Some(report));
+    }
+    decide_a_folder_change(deps, team, waiting).await
 }
 
 /// One thing that waits on the owner and that the Product Manager decides instead (decision 3): an
@@ -141,9 +148,38 @@ fn waits(
             began: (blocking.envelope.recorded_at, blocking.envelope.seq),
         });
     }
+    // A result that waits on the owner's acceptance, once its review passed, from its move into
+    // `verifying`.
+    for row in board
+        .iter()
+        .filter(|row| row.status == TaskStatus::Verifying && !row.waiting_on_human)
+    {
+        if !awaits_acceptance(log, &deps.tools.files, row)? {
+            continue;
+        }
+        let history = log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            ..EventQuery::default()
+        })?;
+        let Some(verifying) = last_move_into(&history, TaskStatus::Verifying) else {
+            continue;
+        };
+        if result_accepted(&history).is_some() {
+            continue;
+        }
+        waits.push(Wait {
+            row: row.clone(),
+            reason: ACCEPTANCE.to_string(),
+            detail: String::new(),
+            began: (verifying.envelope.recorded_at, verifying.envelope.seq),
+        });
+    }
     waits.sort_by_key(|wait| wait.began);
     Ok(waits)
 }
+
+/// The reason of a result that waits on the owner's acceptance, as the choices name it.
+const ACCEPTANCE: &str = "acceptance";
 
 /// Whether the team already decided `row`'s wait, which began at the event at `began`: its decision
 /// is in the log, and whatever it set going is not this rule's.
@@ -194,13 +230,18 @@ async fn decide_a_wait(
         {
             continue;
         }
-        let Some(waits) = waits_of(log, &deps.tools.projections, &row.task_id)? else {
-            continue;
+        let (before, blocked_from) = if wait.reason == ACCEPTANCE {
+            (None, None)
+        } else {
+            let Some(waits) = waits_of(log, &deps.tools.projections, &row.task_id)? else {
+                continue;
+            };
+            (waits.before, waits.blocked_from)
         };
         let offered = choices_for(
-            &waits.reason,
-            waits.before,
-            waits.blocked_from,
+            &wait.reason,
+            before,
+            blocked_from,
             team_spent(log, &row.task_id)?,
         );
         let contract = deps.tools.files.read_contract(&row.task_id)?;
@@ -213,19 +254,23 @@ async fn decide_a_wait(
             &catervas_core::budget::SessionLedger::default(),
             deps.tools.clock.now(),
         )?;
-        let initial_prompt = decide_message(
-            decider,
-            &contract,
-            row.status,
-            &wait.reason,
-            &wait.detail,
-            (
-                state.task_sessions,
-                state.task_max_sessions,
-                state.task_spent_usd,
-            ),
-            &offered,
-        );
+        let initial_prompt = if wait.reason == ACCEPTANCE {
+            acceptance_message(decider, &contract, &results_of(deps, row)?, &offered)
+        } else {
+            decide_message(
+                decider,
+                &contract,
+                row.status,
+                &wait.reason,
+                &wait.detail,
+                (
+                    state.task_sessions,
+                    state.task_max_sessions,
+                    state.task_spent_usd,
+                ),
+                &offered,
+            )
+        };
         let end = run_session(
             deps,
             team,
@@ -326,6 +371,155 @@ async fn answer_a_question(
         return Ok(Some(acted(row, agent, "decision", &end)));
     }
     Ok(None)
+}
+
+/// The oldest folder change whose integration failed gets a `decide` session about no task
+/// (ADR 0082 decision 11): to try it again, or to flag it. After `DECIDE_SESSIONS_PER_WAIT` such
+/// sessions since its escalation Catervas flags it.
+async fn decide_a_folder_change(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(decider) = planner(team) else {
+        return Ok(None);
+    };
+    let log = &deps.tools.log;
+    let flagged = flags(log)?;
+    let changes: Vec<FolderChange> = folder_docs(log)?
+        .changes
+        .into_iter()
+        .filter(|change| change.escalated && !change.integrated)
+        .collect();
+    for change in changes {
+        if flagged
+            .iter()
+            .any(|flag| flag.folder_change == Some(change.change))
+        {
+            continue;
+        }
+        let escalations = log.read(&EventQuery {
+            kinds: vec![EventKind::FolderChangeEscalated],
+            ..EventQuery::default()
+        })?;
+        let Some((began, detail)) = escalations
+            .iter()
+            .rev()
+            .find_map(|event| match &event.body {
+                EventBody::FolderChangeEscalated(body) if body.change.get() == change.change => {
+                    Some((event.envelope.seq, body.detail.to_string()))
+                }
+                _ => None,
+            })
+        else {
+            continue;
+        };
+        let sessions = log
+            .read(&EventQuery {
+                kinds: vec![EventKind::SessionStarted],
+                after_seq: Some(began),
+                ..EventQuery::default()
+            })?
+            .iter()
+            .filter(|event| {
+                event.envelope.ids.task_id.is_none()
+                    && matches!(&event.body, EventBody::SessionStarted(body)
+                        if body.purpose == SessionStartedBodyPurpose::Decide)
+            })
+            .count();
+        if u32::try_from(sessions).unwrap_or(u32::MAX) >= DECIDE_SESSIONS_PER_WAIT {
+            flag_folder_change_by_catervas(deps, change.change)?;
+            continue;
+        }
+        if day_is_spent(deps, team, Role::from(decider.role), &mut waiting.day_spent)?
+            | unavailable(deps, decider, &mut waiting.slept)?
+        {
+            continue;
+        }
+        let offered = choices_for(
+            "folder_change",
+            None,
+            None,
+            folder_change_spent(log, change.change)?,
+        );
+        let initial_prompt = folder_change_message(decider, &change, &detail, &offered);
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent: decider,
+                contract: None,
+                purpose: SessionPurpose::Decide,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: Some(DECIDE_TOOLS),
+                in_reply_to: None,
+                thread: None,
+                initial_prompt,
+            },
+        )
+        .await?;
+        return Ok(Some(TickReport::FolderChange {
+            change: change.change,
+            what: super::rules::ran(decider, "decision", &end),
+        }));
+    }
+    Ok(None)
+}
+
+/// Flags a folder change for the owner in Catervas's own name: its decisions cost the team its
+/// sessions and it is still escalated. A folder change has no task, so the flag is a decision.
+fn flag_folder_change_by_catervas(
+    deps: &OrchestratorDeps,
+    change: u64,
+) -> Result<(), OrchestratorError> {
+    let refused = || OrchestratorError::Refused {
+        reason: "flag_unrecorded: the flag's words are not ones the log can hold".to_string(),
+    };
+    let body = serde_json::from_value(serde_json::json!({
+        "choice": "flag",
+        "reason": "The team could not decide it in three sessions.",
+        "decided_by": "catervas",
+        "needs": "a decision the team could not make",
+        "folder_change": change,
+    }))
+    .map_err(|_| refused())?;
+    let event = new_event(
+        EventBody::TeamDecided(body),
+        deps.tools.clock.now(),
+        deps.tools.ids.clone(),
+    )
+    .map_err(|_| refused())?;
+    let appended = deps.tools.log.append(&event)?;
+    deps.tools.projections.apply(&appended)?;
+    Ok(())
+}
+
+/// The results recorded for `row`'s task since it moved into `verifying`, one line each, the
+/// agents' words, for the session that decides whether to accept them.
+fn results_of(deps: &OrchestratorDeps, row: &TaskProjection) -> Result<String, OrchestratorError> {
+    let history = deps.tools.log.read(&EventQuery {
+        task_id: Some(row.task_id.clone()),
+        ..EventQuery::default()
+    })?;
+    let since =
+        last_move_into(&history, TaskStatus::Verifying).map_or(0, |event| event.envelope.seq);
+    let lines: Vec<String> = history
+        .iter()
+        .filter(|event| event.envelope.seq > since)
+        .filter_map(|event| match &event.body {
+            EventBody::CriterionRecorded(body) => Some(format!(
+                "{}: {} ({})",
+                body.criterion_id,
+                if body.passed { "passed" } else { "failed" },
+                body.evidence
+            )),
+            _ => None,
+        })
+        .collect();
+    Ok(lines.join("\n"))
 }
 
 /// The name the answerer reads for the agent that asked.
@@ -734,5 +928,314 @@ mod tests {
             }
             other => panic!("expected answer_required, got {other:?}"),
         }
+    }
+
+    /// CTV-`n` `in_progress`, held by `dev-a`, then escalated for `reason` at the clock's now.
+    fn escalated_from_work(harness: &Harness, task: &str, reason: &str) {
+        harness.in_progress(task, "dev-a", "dev-b");
+        harness
+            .project
+            .moved(task, "in_progress", "escalated", &json!({}));
+        harness.project.record(
+            task,
+            "escalation.raised",
+            &json!({ "reason": reason, "detail": format!("{task} waits") }),
+        );
+    }
+
+    fn offered_in(error: ToolError) -> String {
+        match error {
+            ToolError::Refused { reason } => {
+                assert!(reason.starts_with("choice_not_offered: "), "{reason}");
+                reason
+            }
+            other => panic!("expected choice_not_offered, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    async fn the_product_manager_approves_a_plan_and_accepts_a_result_for_the_owner() {
+        use catervas_core::contract::TaskStatus;
+        let harness = Harness::new("autopilot-approve", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(4);
+        });
+        autopilot(&harness, true);
+        // An epic escalated for the owner's approval.
+        harness.project.filed("CTV-1", "refining", "epic", None);
+        harness
+            .project
+            .moved("CTV-1", "refining", "escalated", &json!({}));
+        harness.project.record(
+            "CTV-1",
+            "escalation.raised",
+            &json!({ "reason": "approval", "detail": "the plan waits" }),
+        );
+        let adapter = harness.recorded(vec![
+            tool_calls(&[(
+                "catervas_decide",
+                json!({ "task_id": "CTV-1", "choice": "approve_plan",
+                        "reason": "The plan matches the product plan." }),
+            )]),
+            tool_calls(&[(
+                "catervas_decide",
+                json!({ "task_id": "CTV-2", "choice": "accept_result",
+                        "reason": "I read the work: it does what the contract says." }),
+            )]),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let prompt = adapter.started()[0].initial_prompt.clone();
+        for choice in ["approve_plan", "back_to_plan", "cancel", "flag"] {
+            assert!(prompt.contains(choice), "{prompt}");
+        }
+        let accepted = harness.events(&[EventKind::HumanAccepted]);
+        let EventBody::HumanAccepted(body) = &accepted[0].body else {
+            panic!("an acceptance");
+        };
+        assert_eq!(body.accepted_by, "pm");
+        assert_eq!(body.subject.to_string(), "contract");
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Ready);
+        let moves = harness.events(&[EventKind::TaskTransitioned]);
+        let EventBody::TaskTransitioned(last) = &moves[moves.len() - 1].body else {
+            panic!("a move");
+        };
+        assert_eq!(last.gate, GateWire::Autopilot);
+
+        // A task with a `human` criterion, whose review passed, waits for the owner's acceptance.
+        harness.verifying_with("CTV-2", true, true, |wire| {
+            wire["exit_criteria"]
+                .as_array_mut()
+                .expect("a list of criteria")
+                .push(json!({
+                    "id": "C2",
+                    "text": "The founder read it.",
+                    "satisfies": ["R1"],
+                    "verification": { "method": "human", "question": "Is it right?" }
+                }));
+        });
+        harness.project.record(
+            "CTV-2",
+            "review.recorded",
+            &json!({ "reviewer": "dev-b", "criteria_run": 1, "passed": true }),
+        );
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        let accepting = started
+            .iter()
+            .find(|spec| spec.initial_prompt.contains("CTV-2"));
+        let accepting = accepting.expect("a decide session about CTV-2");
+        assert!(accepting.initial_prompt.contains("accept_result"));
+        let accepted = harness.events(&[EventKind::HumanAccepted]);
+        let EventBody::HumanAccepted(body) = &accepted[1].body else {
+            panic!("an acceptance");
+        };
+        assert_eq!(
+            (body.subject.to_string(), body.accepted_by.as_str()),
+            ("result".to_string(), "pm")
+        );
+        // The Product Manager's own acceptance of the task now passes the Definition of Done,
+        // beside Catervas's run of C1 and the reviewer's note.
+        harness.project.record(
+            "CTV-2",
+            "criterion.recorded",
+            &json!({ "criterion_id": "C1", "passed": true, "evidence": "at abc: exit 0",
+                     "run_by": "reviewer", "recorded_by": "governor" }),
+        );
+        harness.project.record_by(
+            Some("dev-b"),
+            at(),
+            "CTV-2",
+            "note.written",
+            &json!({ "kind": "review", "written_by": "dev-b",
+                     "text": "The login page does what its contract says, and the founder's question is theirs.\n\nC1: test -f done.txt passed." }),
+        );
+        let team = harness.project.deps.files.read_team().expect("a team");
+        let outcome = harness
+            .project
+            .deps
+            .transitions
+            .request(
+                &catervas_core::governor::transition::TransitionRequest {
+                    task_id: "CTV-2".parse().expect("a task id"),
+                    to: TaskStatus::Accepted,
+                    actor:
+                        catervas_core::governor::transition_table::TransitionActor::ProductManager,
+                    agent_id: Some("pm".to_string()),
+                },
+                &crate::transitions::TransitionAsk::default(),
+                &team,
+            )
+            .expect("the governor answers");
+        assert!(
+            matches!(outcome, crate::transitions::TransitionOutcome::Moved(_)),
+            "{outcome:?}"
+        );
+        // A second acceptance is refused.
+        match decided(
+            &harness,
+            "CTV-2",
+            json!({ "task_id": "CTV-2", "choice": "accept_result", "reason": "Again." }),
+        )
+        .await
+        {
+            Err(ToolError::Refused { reason }) => {
+                assert!(
+                    reason.starts_with("not_waiting_on_the_team: ")
+                        || reason.starts_with("already_accepted: "),
+                    "{reason}"
+                );
+            }
+            other => panic!("expected a refusal, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    async fn the_product_manager_carries_on_and_retries_a_folder_change() {
+        use catervas_core::contract::TaskStatus;
+        const CADENCE: &str = "docs/catervas/delivery/cadence.md";
+        let harness = Harness::new("autopilot-carry-on", |wire| {
+            wire["policy"]["wip_limit_per_agent"] = json!(4);
+        });
+        autopilot(&harness, true);
+        escalated_from_work(&harness, "CTV-1", "permission");
+        let adapter = harness.recorded(vec![
+            tool_calls(&[(
+                "catervas_decide",
+                json!({ "task_id": "CTV-1", "choice": "carry_on",
+                        "reason": "The permission is not needed for this." }),
+            )]),
+            tool_calls(&[(
+                "catervas_decide",
+                json!({ "folder_change": 1, "choice": "retry_folder_change",
+                        "reason": "The conflict is gone." }),
+            )]),
+        ]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+        orchestrator.tick().await.expect("the tick runs");
+        let prompt = adapter.started()[0].initial_prompt.clone();
+        assert!(
+            prompt.find("carry_on").expect("offered")
+                < prompt.find("back_to_plan").expect("offered"),
+            "{prompt}"
+        );
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+
+        // The preview's Settings choice is flagged, not offered.
+        escalated_from_work(&harness, "CTV-2", "preview");
+        let refusal = offered_in(
+            decided(
+                &harness,
+                "CTV-2",
+                json!({ "task_id": "CTV-2", "choice": "back_to_plan", "reason": "x" }),
+            )
+            .await
+            .expect_err("back_to_plan is not offered"),
+        );
+        assert!(
+            refusal.ends_with("offered: carry_on, cancel, flag"),
+            "{refusal}"
+        );
+        // Neither both nor none of the two names.
+        for input in [
+            json!({ "task_id": "CTV-2", "folder_change": 1, "choice": "flag", "reason": "x" }),
+            json!({ "choice": "flag", "reason": "x" }),
+        ] {
+            match decided(&harness, "CTV-2", input).await {
+                Err(ToolError::Refused { reason }) => assert!(reason.starts_with("name_one: ")),
+                other => panic!("expected name_one, got {other:?}"),
+            }
+        }
+
+        // A folder change whose integration failed.
+        let origin = harness.with_origin();
+        let change = harness.folder_change(CADENCE, "a\n");
+        harness.project.record(
+            "",
+            "folder_change.escalated",
+            &json!({ "change": change, "detail": "the branch conflicts with main" }),
+        );
+        harness
+            .project
+            .moved("CTV-2", "escalated", "cancelled", &json!({}));
+        for _ in 0..4 {
+            if adapter.started().len() == 2 {
+                break;
+            }
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        let started = adapter.started();
+        let session = started.last().expect("a session");
+        assert_eq!(session.purpose, SessionPurpose::Decide);
+        assert_eq!(session.task_id, None);
+        assert!(
+            session
+                .initial_prompt
+                .contains("the branch conflicts with main")
+        );
+        let decisions = harness.events(&[EventKind::TeamDecided]);
+        let EventBody::TeamDecided(body) = &decisions[decisions.len() - 1].body else {
+            panic!("a decision");
+        };
+        assert_eq!(body.folder_change.as_ref().map(|n| n.get()), Some(change));
+        harness.gh.answers("list", "[]", "", 0);
+        harness
+            .gh
+            .answers("create", "https://github.com/o/r/pull/7\n", "", 0);
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert!(
+            matches!(&report, crate::orchestrator::TickReport::FolderChange { what, .. }
+                if what.starts_with("opened the pull request")),
+            "{report:?}"
+        );
+
+        // After three retries only a flag is offered, and a folder change's flag has no task.
+        for _ in 0..2 {
+            harness.project.record_by(
+                Some("pm"),
+                at(),
+                "",
+                "team.decided",
+                &json!({ "choice": "retry_folder_change", "reason": "Again.", "decided_by": "pm",
+                         "folder_change": change }),
+            );
+        }
+        harness.project.record(
+            "",
+            "folder_change.escalated",
+            &json!({ "change": change, "detail": "closed without merging" }),
+        );
+        let refusal = offered_in(
+            decided(
+                &harness,
+                "CTV-1",
+                json!({ "folder_change": change, "choice": "retry_folder_change", "reason": "x" }),
+            )
+            .await
+            .expect_err("a fourth retry is not offered"),
+        );
+        assert!(refusal.ends_with("offered: flag"), "{refusal}");
+        decided(
+            &harness,
+            "CTV-1",
+            json!({ "folder_change": change, "choice": "flag", "needs": "a look at the branch",
+                    "reason": "It keeps failing." }),
+        )
+        .await
+        .expect("the flag is recorded");
+        assert!(harness.events(&[EventKind::TaskFlagged]).is_empty());
+        let flagged = catervas_store::autopilot::flags(&harness.project.deps.log).expect("reads");
+        assert_eq!(flagged.len(), 1);
+        assert_eq!(
+            (flagged[0].task_id.is_none(), flagged[0].folder_change),
+            (true, Some(change))
+        );
+        let _ = std::fs::remove_dir_all(&origin);
     }
 }
