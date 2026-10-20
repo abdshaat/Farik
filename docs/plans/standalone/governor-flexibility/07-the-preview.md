@@ -19,7 +19,7 @@ At 06:33 UTC the designer's first task, CTV-14, was escalated before any work: t
 Files: `crates/runtime/src/transitions.rs`, `crates/runtime/src/preview.rs`
 - `says_a_preview_failure_in_its_error_lines` (preview.rs) — a `Prepare` tail of npm's help text ending with `npm error The \`npm ci\` command can only install with an existing package-lock.json` displays that line and no `--allow-scripts` line, and at most 9 lines in all.
 - `never_names_the_gate_in_an_escalation` (transitions.rs) — a preview escalation's channel line has no `governor_escalation`.
-- [ ] `fix(runtime): an escalation says what happened, in a few lines`
+- [x] `fix(runtime): an escalation says what happened, in a few lines`
 
 ### Task 31: a designer's first try starts without a preview that cannot exist yet
 
