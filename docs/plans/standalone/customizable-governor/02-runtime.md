@@ -82,7 +82,7 @@ Files: `runtime/src/tools/git.rs`, `runtime/src/tools.rs`, `runtime/src/tools/re
 Tests (`git.rs` `mod tests`, `#[ignore = "needs the git program: cargo xtask check --integration"]` like their neighbours):
 - `pushes_to_a_remote_the_owner_allows` — with `push_remotes: ["origin", "fork"]` and two bare repositories as remotes, `{ "remote": "fork" }` puts `refs/heads/<branch>` on `fork` and not on `origin`; `{}` pushes to `origin`; `{ "remote": "upstream" }` is refused `remote_not_allowed` and pushes nothing.
 
-- [ ] `feat(runtime): an agent pushes to the remotes the owner allows`
+- [x] `feat(runtime): an agent pushes to the remotes the owner allows`
 
 ### Task 10: the agent is told its rules, and the CLI shows the team's
 
