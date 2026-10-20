@@ -30,4 +30,4 @@ Files: `crates/runtime/src/orchestrator/session.rs` (and the explore/implement p
 ### Task 32: the spec says it
 
 Files: `docs/SPEC.md` (the preview section of 5.x and the 0.134 line)
-- [ ] `docs(spec): escalations say what happened, and a designer's first try needs no preview`
+- [x] `docs(spec): escalations say what happened, and a designer's first try needs no preview`
