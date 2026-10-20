@@ -538,7 +538,7 @@ impl Transitions {
         let mut escalation = None;
         for effect in &decision.effects {
             if let TransitionEffect::RaiseEscalation(reason) = effect {
-                let detail = self.escalation_detail(request, ask, decision)?;
+                let detail = self.escalation_detail(request, ask, decision, *reason)?;
                 self.append(
                     request,
                     ask,
@@ -582,6 +582,7 @@ impl Transitions {
         request: &TransitionRequest,
         ask: &TransitionAsk,
         decision: &TransitionDecision,
+        reason: EscalationReason,
     ) -> Result<String, TransitionError> {
         let gate = gate_wire(decision.row.gate).to_string();
         let mut words = ask
@@ -611,7 +612,13 @@ impl Transitions {
                     _ => None,
                 });
         }
+        // What a spent task spent is the whole sentence: the gate's name tells the owner nothing.
+        let says_what_was_spent = matches!(
+            reason,
+            EscalationReason::Budget | EscalationReason::Sessions
+        );
         Ok(match words.as_deref().map(str::trim) {
+            Some(words) if !words.is_empty() && says_what_was_spent => words.to_string(),
             Some(words) if !words.is_empty() => format!("{gate}: {words}"),
             _ => gate,
         })

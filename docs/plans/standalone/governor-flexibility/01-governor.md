@@ -95,7 +95,7 @@ Tests:
 - `leaves_a_ready_task_with_spent_sessions_alone` (rules.rs) — a `ready` task whose work sessions equal `max_sessions` is not escalated after a tick; the same task `in_progress` is.
 - `says_what_a_spent_task_spent` (rules.rs) — the channel line of a sessions escalation ends with "spent 2 of 2 sessions", and contains no `governor_escalation`.
 
-- [ ] `fix(runtime): the session budget counts work, and says what was spent`
+- [x] `fix(runtime): the session budget counts work, and says what was spent`
 
 ### Task 6: read-only git runs in exec
 

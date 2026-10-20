@@ -337,10 +337,18 @@ impl Projections {
                 vec![from.to_string(), to.to_string()],
             ),
         };
+        // A task's sessions are the ones that work on it; its triage, its assignment and its
+        // chats cost money but are not tries (ADR 0079).
+        let counted = if scope == CostScope::Task {
+            "COUNT(DISTINCT CASE WHEN purpose IN ('refine', 'explore', 'implement', 'verify')
+                                THEN session_id END)"
+        } else {
+            "COUNT(DISTINCT session_id)"
+        };
         let connection = self.connection();
         let mut statement = connection.prepare(&format!(
             "SELECT {column}, SUM(cost_usd), SUM(input_tokens), SUM(output_tokens),
-                    COUNT(DISTINCT session_id)
+                    {counted}
              FROM cost_records WHERE {column} IS NOT NULL AND {within}
              GROUP BY {column} ORDER BY {order}"
         ))?;
@@ -2283,6 +2291,34 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].key, "CTV-1");
         assert_eq!(tasks[0].sessions, 2);
+    }
+
+    #[test]
+    fn counts_only_work_sessions_toward_a_task() {
+        let (log, projections) = a_board();
+        record(&log, &projections, &about(EventKind::TaskCreated, "CTV-1"));
+        let purposes = [
+            "triage",
+            "plan",
+            "conversation",
+            "refine",
+            "implement",
+            "verify",
+        ];
+        for purpose in purposes {
+            let mut spent = cost(Some("CTV-1"), "x", purpose, "2026-09-22", (1.0, 1, 1));
+            let catervas_protocol::event::EventBody::CostRecorded(body) = &mut spent.body else {
+                panic!("a cost");
+            };
+            body.purpose = purpose.parse().expect("a purpose");
+            record(&log, &projections, &spent);
+        }
+        let tasks = projections.costs(CostScope::Task).expect("the costs read");
+        assert_eq!(tasks[0].sessions, 3);
+        assert!((tasks[0].usd - 6.0).abs() < f64::EPSILON);
+        // Other scopes count every session, as before.
+        let agents = projections.costs(CostScope::Agent).expect("the costs read");
+        assert_eq!(agents[0].sessions, 6);
     }
 
     #[test]

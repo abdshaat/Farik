@@ -1328,9 +1328,17 @@ fn budget(
     }
     // A task whose session runs is left to it (ADR 0064).
     let busy = deps.work.busy_tasks();
+    // A task that is `ready`, `assigned` or `blocked` starts no session, so it spends nothing
+    // (ADR 0079).
     for row in board.iter().filter(|row| {
         !is_terminal(row.status)
-            && row.status != TaskStatus::Escalated
+            && !matches!(
+                row.status,
+                TaskStatus::Escalated
+                    | TaskStatus::Ready
+                    | TaskStatus::Assigned
+                    | TaskStatus::Blocked
+            )
             && !row.waiting_on_human
             && !busy.contains(&row.task_id)
     }) {
@@ -1357,17 +1365,38 @@ fn escalate_if_spent(
         &SessionLedger::default(),
         deps.tools.clock.now(),
     )?;
-    let task_spent = check_budgets(&state).iter().any(|exhausted| {
-        matches!(
-            exhausted.scope,
-            BudgetScope::TaskUsd | BudgetScope::TaskSessions
-        )
-    });
-    if !task_spent || refused_since_entering(deps, &row.task_id, row.status, TaskStatus::Escalated)?
+    let exhausted = check_budgets(&state);
+    // The dollars first, as the governor's reason for the escalation reads them.
+    let spent = if exhausted
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::TaskUsd)
     {
+        Some(format!(
+            "spent ${:.2} of ${:.2}",
+            state.task_spent_usd, state.task_max_usd
+        ))
+    } else if exhausted
+        .iter()
+        .any(|exhausted| exhausted.scope == BudgetScope::TaskSessions)
+    {
+        Some(format!(
+            "spent {} of {} sessions",
+            state.task_sessions, state.task_max_sessions
+        ))
+    } else {
+        None
+    };
+    let Some(spent) = spent else {
+        return Ok(None);
+    };
+    if refused_since_entering(deps, &row.task_id, row.status, TaskStatus::Escalated)? {
         return Ok(None);
     }
-    match governor_moves(deps, team, row, TaskStatus::Escalated)? {
+    let ask = TransitionAsk {
+        reason: Some(spent),
+        ..TransitionAsk::default()
+    };
+    match governor_moves_with(deps, team, row, TaskStatus::Escalated, &ask)? {
         TransitionOutcome::Moved(_) => Ok(Some(TickReport::Acted {
             task_id: row.task_id.clone(),
             what: "escalated it: its dollars or sessions are spent".to_string(),
@@ -2395,15 +2424,16 @@ mod tests {
         harness.assigned("CTV-3", "dev-b", "dev-a");
         harness.ready("CTV-4");
         // A task in progress, whose implement session is work, and an epic in progress whose one
-        // task was cancelled, whose breakdown is planning. One session is all the epic has room
-        // for, so that its breakdown, which files nothing here, is not asked for again.
+        // task was cancelled, whose breakdown is planning. Its dollars are spent by the first
+        // breakdown (plan sessions no longer count, ADR 0079), which files nothing here, so it is
+        // not asked for again.
         harness.in_progress("CTV-5", "dev-b", "dev-a");
         harness
             .project
             .filed_with("CTV-6", "ready", "epic", None, |wire| {
                 wire["assignee_role"] = json!("product_manager");
                 wire["reviewer_role"] = json!("human");
-                wire["budget"]["max_sessions"] = json!(1);
+                wire["budget"]["max_cost_usd"] = json!(0.0001);
             });
         let pm = json!({ "actor": "product_manager", "requested_by": "pm", "assignee": "pm" });
         harness.project.moved("CTV-6", "ready", "assigned", &pm);
@@ -5407,7 +5437,7 @@ mod tests {
             wire["budget"]["max_sessions"] = json!(1);
         });
         harness.verifying("CTV-2");
-        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1(), implement_stops_early()]);
         let sandboxes = Arc::new(BrokenSandboxFactory::new(
             ExecError::SpawnFailed {
                 detail: "no shell".to_string(),
@@ -5437,10 +5467,14 @@ mod tests {
             escalation.detail
         );
         assert!(governor_runs(&harness).is_empty());
-        // The run went on to the ready task.
+        // The run went on to the ready task: planned, then worked until its one session was
+        // spent (a plan session is no try, ADR 0079).
         assert_eq!(
             sessions(&adapter),
-            vec![("pm".to_string(), SessionPurpose::Plan)]
+            vec![
+                ("pm".to_string(), SessionPurpose::Plan),
+                ("dev-a".to_string(), SessionPurpose::Implement)
+            ]
         );
     }
 
@@ -5501,6 +5535,53 @@ mod tests {
             vec![EscalationRaisedBodyReason::Sessions]
         );
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn leaves_a_ready_task_with_spent_sessions_alone() {
+        let harness = Harness::new("orch-budget-ready", |_| {});
+        harness.file("CTV-1", "ready", |wire| {
+            wire["budget"]["max_sessions"] = json!(2);
+        });
+        for session in 0..2 {
+            harness.spent(Some("CTV-1"), &format!("s-{session}"), 0.01);
+        }
+        let orchestrator = harness.orchestrator(harness.recorded(vec![plan_assigns_ctv_1()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(escalation_reasons(&harness), Vec::new());
+        assert_ne!(harness.row("CTV-1").status, TaskStatus::Escalated);
+
+        // The same task at work is escalated.
+        let harness = Harness::new("orch-budget-ready-at-work", |_| {});
+        in_progress_with_sessions(&harness, 2, 2);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Escalated);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_what_a_spent_task_spent() {
+        let harness = Harness::new("orch-budget-says", |_| {});
+        in_progress_with_sessions(&harness, 2, 2);
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let said = messages(&harness);
+        let line = said.last().expect("a channel line");
+        assert_eq!(line.kind, MessageKind::System);
+        assert!(
+            line.text.ends_with("spent 2 of 2 sessions"),
+            "{}",
+            line.text
+        );
+        assert!(!line.text.contains("governor_escalation"), "{}", line.text);
     }
 
     #[tokio::test]
