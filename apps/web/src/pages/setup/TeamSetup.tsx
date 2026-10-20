@@ -44,10 +44,22 @@ export type McpServer = {
 	oauth?: { clientId?: string; callbackPort?: number; scopes?: string[] };
 	tools?: Record<string, "network" | "paid" | "external_effect" | "denied">;
 };
+/** One session's limits as `team.yaml` holds them; what is left out keeps the role's default. */
+export type SessionLimits = {
+	maxInputTokens?: number;
+	maxOutputTokens?: number;
+	maxWallClockSeconds?: number;
+	maxToolCalls?: number;
+};
 export type Team = {
 	name: string;
 	agents: Agent[];
-	budgets: { dailyUsd?: number; [key: string]: unknown };
+	budgets: {
+		dailyUsd?: number;
+		/** Applied to every agent's session, before the agent's own (ADR 0080). */
+		session?: SessionLimits;
+		[key: string]: unknown;
+	};
 	policy: {
 		integration: string;
 		permissions?: { runCommands?: boolean; push?: boolean };
@@ -61,6 +73,13 @@ export type Team = {
 		documentsLocal?: boolean;
 		/** The remotes a task branch may be pushed to; absent means `origin`. */
 		pushRemotes?: string[];
+		/** How many times a task may fail its readiness check before it escalates; absent means 3. */
+		readinessAttempts?: number;
+		maxIterations?: number;
+		blockedLimitHours?: number;
+		/** How long an open escalation may wait on the owner; absent means 24. */
+		escalationAgeHours?: number;
+		wipLimitPerAgent?: number;
 		[key: string]: unknown;
 	};
 	rules: {

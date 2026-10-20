@@ -596,6 +596,47 @@ describe("settings directory", () => {
 			).toBe("/settings/allowed-actions");
 		});
 
+		it("sets_when_work_stops_and_how_long_a_session_runs", async () => {
+			const s = await rulesPage();
+			const limits = partOf(en.rulesLimitsTitle);
+			typeInto(limits, en.limitsReadiness, "5");
+			await saveOf(limits);
+			expect(
+				((await saved(s)).policy as Record<string, unknown>).readiness_attempts,
+			).toBe(5);
+			cleanup();
+
+			const again = await rulesPage();
+			const session = partOf(en.rulesSessionTitle);
+			typeInto(session, en.sessionMinutes, "10");
+			await saveOf(session);
+			expect(
+				((await saved(again)).budgets as { session: unknown }).session,
+			).toEqual({ max_wall_clock_seconds: 600 });
+			cleanup();
+
+			// Put back clears each from the saved team.
+			const set = rulesTeam({ readiness_attempts: 5 });
+			set.team.budgets = { session: { max_wall_clock_seconds: 600 } } as never;
+			const back = await rulesPage(set);
+			const lim = partOf(en.rulesLimitsTitle);
+			fireEvent.click(lim.getByRole("button", { name: en.putBack }));
+			await saveOf(lim);
+			expect(
+				((await saved(back)).policy as Record<string, unknown>)
+					.readiness_attempts,
+			).toBeUndefined();
+			cleanup();
+
+			const back2 = await rulesPage(set);
+			const ses = partOf(en.rulesSessionTitle);
+			fireEvent.click(ses.getByRole("button", { name: en.putBack }));
+			await saveOf(ses);
+			expect(
+				((await saved(back2)).budgets as Record<string, unknown>).session,
+			).toBeUndefined();
+		});
+
 		it("keeps_catervass_own_files_unwritable", async () => {
 			await rulesPage();
 			const own = within(row(".catervas/local/**"));

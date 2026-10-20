@@ -5,7 +5,12 @@ import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 import setup from "./setup/setup.module.css";
-import type { Team } from "./setup/TeamSetup.tsx";
+import {
+	PutBack,
+	type SessionLimits,
+	type Team,
+	useDefaults,
+} from "./setup/TeamSetup.tsx";
 import { Part, useChange } from "./TeamRules.tsx";
 
 type RulePart = Omit<Parameters<typeof useChange>[0], never>;
@@ -411,6 +416,232 @@ export function Remotes(part: RulePart) {
 					{t("remotesAddButton")}
 				</Button>
 			</div>
+			{foot}
+		</Part>
+	);
+}
+
+type LimitKey =
+	| "readinessAttempts"
+	| "maxIterations"
+	| "blockedLimitHours"
+	| "escalationAgeHours"
+	| "wipLimitPerAgent";
+/** The five limits: their words, range, and the number a team file without them runs on. */
+const LIMITS: {
+	key: LimitKey;
+	label:
+		| "limitsReadiness"
+		| "limitsIterations"
+		| "limitsBlocked"
+		| "limitsEscalation"
+		| "limitsWip";
+	min: number;
+	max: number;
+	usually: number;
+}[] = [
+	{
+		key: "readinessAttempts",
+		label: "limitsReadiness",
+		min: 1,
+		max: 100,
+		usually: 3,
+	},
+	{
+		key: "maxIterations",
+		label: "limitsIterations",
+		min: 1,
+		max: 100,
+		usually: 3,
+	},
+	{
+		key: "blockedLimitHours",
+		label: "limitsBlocked",
+		min: 1,
+		max: 720,
+		usually: 24,
+	},
+	{
+		key: "escalationAgeHours",
+		label: "limitsEscalation",
+		min: 1,
+		max: 720,
+		usually: 24,
+	},
+	{ key: "wipLimitPerAgent", label: "limitsWip", min: 0, max: 100, usually: 1 },
+];
+
+/** "When work stops and asks you": five whole numbers, each saved into `policy`. */
+export function Limits(part: RulePart) {
+	const { saved } = part;
+	const defaults = useDefaults();
+	const [typed, setTyped] = useState<Partial<Record<LimitKey, string>>>({});
+	const [cleared, setCleared] = useState(false);
+	const policy = { ...saved.policy };
+	let wrong = false;
+	for (const l of LIMITS) {
+		const text = typed[l.key];
+		if (text === undefined) continue;
+		const n = Number(text);
+		if (text.trim() === "") continue;
+		if (Number.isInteger(n) && n >= l.min && n <= l.max) policy[l.key] = n;
+		else wrong = true;
+	}
+	if (cleared)
+		for (const l of LIMITS) {
+			const was = defaults?.policy[l.key];
+			if (typeof was === "number") policy[l.key] = was;
+			else if (l.key === "readinessAttempts" || l.key === "escalationAgeHours")
+				delete policy[l.key];
+		}
+	const next = { ...saved, policy };
+	const { foot } = useChange(part, next, { wrong });
+	return (
+		<Part id="rules-limits" title={t("rulesLimitsTitle")}>
+			<p className={styles.muted}>{t("limitsLead")}</p>
+			{LIMITS.map((l) => {
+				const text = typed[l.key];
+				const n = Number(text);
+				const bad =
+					text !== undefined &&
+					text.trim() !== "" &&
+					!(Number.isInteger(n) && n >= l.min && n <= l.max);
+				const shown =
+					text ??
+					String(cleared ? (policy[l.key] ?? "") : (saved.policy[l.key] ?? ""));
+				return (
+					<TextField
+						key={l.key}
+						id={`limit-${l.key}`}
+						label={t(l.label)}
+						hint={t("limitsUsually", {
+							n: Number(defaults?.policy[l.key] ?? l.usually),
+						})}
+						value={shown}
+						onChange={(v) => setTyped({ ...typed, [l.key]: v })}
+						{...(bad && {
+							error: t("limitsWrong", { min: l.min, max: l.max }),
+						})}
+					/>
+				);
+			})}
+			<PutBack
+				onClick={() => {
+					setTyped({});
+					setCleared(true);
+				}}
+			/>
+			{foot}
+		</Part>
+	);
+}
+
+type SessionField =
+	| "maxInputTokens"
+	| "maxOutputTokens"
+	| "maxWallClockSeconds"
+	| "maxToolCalls";
+/** The four session limits: their words, and how many of the stored unit make one shown. */
+const SESSION_FIELDS: {
+	key: SessionField;
+	label: "sessionInput" | "sessionOutput" | "sessionMinutes" | "sessionCalls";
+	unit: number;
+}[] = [
+	{ key: "maxInputTokens", label: "sessionInput", unit: 1000 },
+	{ key: "maxOutputTokens", label: "sessionOutput", unit: 1000 },
+	{ key: "maxWallClockSeconds", label: "sessionMinutes", unit: 60 },
+	{ key: "maxToolCalls", label: "sessionCalls", unit: 1 },
+];
+
+/** The session limits as fields: blank keeps the role's. Used for the team and for one agent. */
+export function SessionFields({
+	idPrefix,
+	value,
+	onChange,
+}: {
+	idPrefix: string;
+	value: SessionLimits | undefined;
+	onChange: (next: SessionLimits | undefined, wrong: boolean) => void;
+}) {
+	const [typed, setTyped] = useState<Partial<Record<SessionField, string>>>({});
+	const change = (key: SessionField, unit: number, text: string) => {
+		const all = { ...typed, [key]: text };
+		setTyped(all);
+		const next: SessionLimits = { ...value };
+		let wrong = false;
+		for (const f of SESSION_FIELDS) {
+			const entry = all[f.key];
+			if (entry === undefined) continue;
+			delete next[f.key];
+			if (entry.trim() === "") continue;
+			const n = Math.round(Number(entry) * f.unit);
+			if (Number.isFinite(n) && n >= 1) next[f.key] = n;
+			else wrong = true;
+		}
+		onChange(Object.keys(next).length > 0 ? next : undefined, wrong);
+	};
+	return (
+		<>
+			{SESSION_FIELDS.map((f) => {
+				const stored = value?.[f.key];
+				const text = typed[f.key];
+				const bad =
+					text !== undefined &&
+					text.trim() !== "" &&
+					!(Math.round(Number(text) * f.unit) >= 1);
+				return (
+					<TextField
+						key={f.key}
+						id={`${idPrefix}-${f.key}`}
+						label={t(f.label)}
+						value={
+							text ?? (stored === undefined ? "" : String(stored / f.unit))
+						}
+						onChange={(v) => change(f.key, f.unit, v)}
+						{...(bad && { error: t("sessionWrong") })}
+					/>
+				);
+			})}
+		</>
+	);
+}
+
+/** "How long one session may run": the team's session limits, in minutes and thousands of tokens. */
+export function SessionBudget(part: RulePart) {
+	const { saved } = part;
+	const [mine, setMine] = useState<
+		{ value: SessionLimits | undefined } | undefined
+	>();
+	const [wrong, setWrong] = useState(false);
+	const [round, setRound] = useState(0);
+	const value = mine ? mine.value : saved.budgets.session;
+	const { session: _, ...rest } = saved.budgets;
+	const next = mine
+		? {
+				...saved,
+				budgets: { ...rest, ...(mine.value && { session: mine.value }) },
+			}
+		: saved;
+	const { foot } = useChange(part, next, { wrong });
+	return (
+		<Part id="rules-session" title={t("rulesSessionTitle")}>
+			<p className={styles.muted}>{t("sessionLead")}</p>
+			<SessionFields
+				key={round}
+				idPrefix="team-session"
+				value={value}
+				onChange={(v, bad) => {
+					setMine({ value: v });
+					setWrong(bad);
+				}}
+			/>
+			<PutBack
+				onClick={() => {
+					setMine({ value: undefined });
+					setWrong(false);
+					setRound(round + 1);
+				}}
+			/>
 			{foot}
 		</Part>
 	);

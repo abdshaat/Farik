@@ -1,5 +1,12 @@
 import { t } from "../../strings/t.ts";
-import { Commands, ForbiddenFiles, Git, Remotes } from "../GovernorRules.tsx";
+import {
+	Commands,
+	ForbiddenFiles,
+	Git,
+	Limits,
+	Remotes,
+	SessionBudget,
+} from "../GovernorRules.tsx";
 import styles from "../pages.module.css";
 import { RulesTitle, useRuleParts } from "../TeamRules.tsx";
 
@@ -13,6 +20,8 @@ export function Rules() {
 			{ready && <Commands key={key("commands")} {...part("commands")} />}
 			{ready && <Git key={key("git")} {...part("git")} />}
 			{ready && <Remotes key={key("remotes")} {...part("remotes")} />}
+			{ready && <Limits key={key("limits")} {...part("limits")} />}
+			{ready && <SessionBudget key={key("session")} {...part("session")} />}
 		</div>
 	);
 }

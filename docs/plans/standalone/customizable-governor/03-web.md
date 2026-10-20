@@ -59,7 +59,7 @@ Tests (`settings.test.tsx`):
 Tests (`settings.test.tsx`):
 - `sets when work stops and how long a session runs` — setting readiness attempts to 5 and session minutes to 10 saves `policy.readiness_attempts: 5` and `budgets.session.max_wall_clock_seconds: 600`; Put back clears both from the saved team.
 
-- [ ] `feat(web): limits and session budgets on the Rules page`
+- [x] `feat(web): limits and session budgets on the Rules page`
 
 ### Task 16: an agent's own rules
 
