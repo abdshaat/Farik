@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 
 use crate::channel::ChannelError;
 use crate::cost::CostError;
-use crate::daemon::{CommandHandler, DaemonState};
+use crate::daemon::{CommandHandler, DaemonState, SandboxRecreator};
 use crate::forge::{Forge, ForgeError};
 use crate::preview::PreviewFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
@@ -509,6 +509,8 @@ pub struct RecoveryReport {
 struct Held {
     sandbox: Arc<dyn Sandbox>,
     for_checks: bool,
+    /// The system packages it was made with (ADR 0081): a team whose list changed gets a new one.
+    packages: Vec<String>,
 }
 
 /// Whom a held sandbox is for.
@@ -889,8 +891,9 @@ impl Orchestrator {
             .sandboxes
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        let packages = team.sandbox_packages();
         if let Some(held) = sandboxes.get(task_id) {
-            if held.for_checks == for_checks {
+            if held.for_checks == for_checks && held.packages == packages {
                 return Ok(Arc::clone(&held.sandbox));
             }
             sandboxes.remove(task_id);
@@ -923,14 +926,13 @@ impl Orchestrator {
                 .collect();
         let project_id = &self.deps.tools.ids.project_id;
         let made = match whom {
-            SandboxFor::Checks(Some(store)) => self
-                .deps
-                .sandboxes
-                .create_checking(project_id, task_id, &folder, network, &reads, store)?,
+            SandboxFor::Checks(Some(store)) => self.deps.sandboxes.create_checking(
+                project_id, task_id, &folder, network, &reads, &packages, store,
+            )?,
             SandboxFor::Checks(None) | SandboxFor::Agent => self
                 .deps
                 .sandboxes
-                .create(project_id, task_id, &folder, network, &reads)?,
+                .create(project_id, task_id, &folder, network, &reads, &packages)?,
         };
         let sandbox: Arc<dyn Sandbox> = Arc::from(made);
         sandboxes.insert(
@@ -938,9 +940,22 @@ impl Orchestrator {
             Held {
                 sandbox: Arc::clone(&sandbox),
                 for_checks,
+                packages,
             },
         );
         Ok(sandbox)
+    }
+
+    /// Makes the task's sandbox again with the system packages `team` lists (ADR 0081), when they
+    /// are not the ones it was made with: what `catervas_install_system_packages` asks for. A
+    /// container sandbox is made under the same name, so the session's own handle reaches it.
+    fn recreate_sandbox(&self, task_id: &TaskId, team: &Team) -> Result<(), SandboxError> {
+        self.sandbox_for(task_id, team)
+            .map(|_| ())
+            .map_err(|error| match error {
+                OrchestratorError::Sandbox(error) => error,
+                other => SandboxError::Unavailable(other.to_string()),
+            })
     }
 
     /// Forgets the task's sandbox, so that the next session or criterion of the task gets a new
@@ -971,6 +986,13 @@ pub fn command_handler(orchestrator: Arc<Orchestrator>) -> CommandHandler {
         let orchestrator = Arc::clone(&orchestrator);
         Box::pin(async move { orchestrator.handle(command).await })
     })
+}
+
+/// The daemon's way to have a task's sandbox made again when a tool adds system packages (ADR
+/// 0081): `orchestrator`, the one driving the project in this process, makes it.
+#[must_use]
+pub fn sandbox_recreator(orchestrator: Arc<Orchestrator>) -> SandboxRecreator {
+    Arc::new(move |task_id, team| orchestrator.recreate_sandbox(task_id, team))
 }
 
 /// A command's outcome as the reply the daemon sends back.
@@ -1802,6 +1824,38 @@ mod tests {
             .expect("the agent's sandbox is reused");
         assert!(Arc::ptr_eq(&agent, &again));
         assert_eq!(sandboxes.created("CTV-1"), 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn recreates_a_sandbox_whose_packages_changed() {
+        use std::sync::Arc;
+
+        use crate::orchestrator::fixtures::CountingSandboxFactory;
+        use crate::tools::fixtures::a_team_of_three;
+
+        let harness = Harness::new("sandbox-packages", |_| {});
+        harness.assigned("CTV-1", "dev-a", "dev-b");
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let task: TaskId = "CTV-1".parse().expect("a task id");
+        let plain = orchestrator.deps.tools.files.read_team().expect("the team");
+        let tooled = a_team_of_three(|wire| {
+            wire["sandbox"] = serde_json::json!({ "packages": ["libnss3", "ffmpeg"] });
+        });
+
+        let first = orchestrator.sandbox_for(&task, &plain).expect("made");
+        let again = orchestrator.sandbox_for(&task, &plain).expect("reused");
+        assert!(Arc::ptr_eq(&first, &again), "no change, the held one");
+        let changed = orchestrator.sandbox_for(&task, &tooled).expect("recreated");
+        assert!(!Arc::ptr_eq(&first, &changed));
+        let held = orchestrator.sandbox_for(&task, &tooled).expect("reused");
+        assert!(Arc::ptr_eq(&changed, &held));
+        assert_eq!(
+            sandboxes.packages("CTV-1"),
+            [vec![], vec!["ffmpeg".to_string(), "libnss3".to_string()]]
+        );
     }
 
     #[test]

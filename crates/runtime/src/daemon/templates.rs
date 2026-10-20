@@ -220,6 +220,7 @@ fn apply(
             &applied.team,
             agent_id,
             AgentStatus::Retired,
+            None,
         )
         .map_err(|error| internal(&format!("{error:?}")))?;
     }
@@ -893,6 +894,10 @@ mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one scenario, each event of the apply checked in order"
+    )]
     fn applies_with_the_retirements_effects() {
         let (harness, folder) = templated("templates-apply", |wire| {
             wire["agents"][2]["display_name"] = json!("Sol");
@@ -964,6 +969,7 @@ mod tests {
                 "agent.updated",
                 "task.transitioned",
                 "task.transitioned",
+                "message.posted",
                 "team.updated"
             ]
         );
@@ -979,8 +985,9 @@ mod tests {
                 "agent retired by the user"
             );
         }
+        assert_eq!(after[3]["body"]["text"], "Sol has left the team.");
         assert_eq!(
-            after[3]["body"],
+            after[4]["body"],
             json!({
                 "team_name": "Catervas",
                 "agent_ids": ["pm", "dev-a", "dev-b", "noor"],

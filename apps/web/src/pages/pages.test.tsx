@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useConnection } from "../app/connection.tsx";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
-import { answerStatus, renderApp } from "../test/render-app.tsx";
+import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { refusedBy } from "../test/schema.ts";
 
 function Status() {
@@ -162,18 +162,32 @@ describe("pages", () => {
 		await expectNoAxeViolations(container);
 	});
 
-	it("lists_the_newest_events_first", async () => {
+	it("lists_the_newest_events_from_the_log", async () => {
 		const { container, socket } = await renderApp("/events");
 		await answerStatus(socket as never, false);
-		act(() => {
-			for (const seq of [1, 2, 3]) socket?.event(seq);
+		const wire = (seq: number) => ({
+			seq,
+			recorded_at: "2026-09-29T12:34:56.789012Z",
+			kind: "team.paused",
+			body: {},
 		});
-		const table = await screen.findByRole("table");
-		const rows = within(table).getAllByRole("row");
+		// A hundred and one rows come back newest first; the page shows a hundred.
+		await answerQuery(socket as never, "events.since", {
+			events: Array.from({ length: 101 }, (_, i) => wire(3000 - i)),
+		});
+		// The page asks the log for its newest events, not for the whole of it.
+		const asked = socket
+			?.calls("query")
+			.find((f) => f.params.name === "events.since");
+		expect(asked?.params.params).toEqual({ newest_first: true, limit: 100 });
+		expect(
+			refusedBy("eventsSinceQuery", asked?.params as Record<string, unknown>),
+		).toEqual([]);
+		let rows = within(await screen.findByRole("table")).getAllByRole("row");
+		expect(rows).toHaveLength(101);
 		expect(
 			within(rows[1] as HTMLElement).getAllByRole("cell")[0]?.textContent,
-		).toBe("3");
-		expect(rows).toHaveLength(4);
+		).toBe("3000");
 		// The time fits a phone: hours, minutes and seconds, with the full value on hover.
 		const time = within(rows[1] as HTMLElement).getAllByRole("cell")[1];
 		expect(time?.textContent).toMatch(/^\d\d:\d\d:56$/);
@@ -181,20 +195,16 @@ describe("pages", () => {
 			"2026-09-29T12:34:56.789012Z",
 		);
 		await expectNoAxeViolations(container);
-	});
 
-	it("lists_the_last_hundred_events", async () => {
-		const { socket } = await renderApp("/events");
-		await answerStatus(socket as never, false);
-		act(() => {
-			for (let seq = 1; seq <= 101; seq++) socket?.event(seq);
+		// An event streamed afterwards is added at the top.
+		act(() => socket?.event(3001));
+		await waitFor(() => {
+			rows = within(screen.getByRole("table")).getAllByRole("row");
+			expect(
+				within(rows[1] as HTMLElement).getAllByRole("cell")[0]?.textContent,
+			).toBe("3001");
 		});
-		const rows = within(await screen.findByRole("table")).getAllByRole("row");
-		// A header row and a hundred events, the newest first.
 		expect(rows).toHaveLength(101);
-		expect(
-			within(rows[1] as HTMLElement).getAllByRole("cell")[0]?.textContent,
-		).toBe("101");
 	});
 
 	it("says_there_is_no_page_here", async () => {

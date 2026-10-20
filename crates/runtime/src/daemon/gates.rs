@@ -134,6 +134,30 @@ fn design_reviews_waiting(deps: &ToolDeps, team: &Team) -> Result<Vec<Value>, Fa
             "line": line,
         }));
     }
+    // A Designer's task that is ready cannot be assigned while the team has no preview (ADR 0081):
+    // one row, for the first such task, links the owner to Settings.
+    if team.preview().is_none()
+        && !rows.iter().any(|row| row["kind"] == "preview_missing")
+        && let Some(agent) = team.designer()
+    {
+        for row in board.iter().filter(|row| row.status == TaskStatus::Ready) {
+            let contract = deps
+                .files
+                .read_contract(&row.task_id)
+                .map_err(|e| internal(&e))?;
+            if contract.assignee_role == catervas_core::contract::Role::UiUxDesigner {
+                let name = name_of(team, agent.id.as_str());
+                rows.push(json!({
+                    "task_id": row.task_id,
+                    "kind": "preview_missing",
+                    "agent_id": agent.id.to_string(),
+                    "title": row.title,
+                    "line": format!("{name} needs to know how to open your app"),
+                }));
+                break;
+            }
+        }
+    }
     Ok(rows)
 }
 
@@ -356,7 +380,24 @@ pub(super) fn query(
                         .unwrap_or(u32::MAX)
                         .saturating_add(extra_tries(&history(deps, &task_id)?))
                         .saturating_add(1);
-                    Ok(json!({ "try": row.iteration.saturating_add(1), "of": of }))
+                    // The sessions as the budget counts them, so that a sessions escalation shows
+                    // what it was about (ADR 0081).
+                    let budget = crate::cost::budget_state(
+                        &deps.projections,
+                        &team()?,
+                        contract.assignee_role,
+                        contract.assignee.as_deref(),
+                        Some(&contract),
+                        &catervas_core::budget::SessionLedger::default(),
+                        deps.clock.now(),
+                    )
+                    .map_err(|e| internal(&e))?;
+                    Ok(json!({
+                        "try": row.iteration.saturating_add(1),
+                        "of": of,
+                        "sessions": budget.task_sessions,
+                        "max_sessions": budget.task_max_sessions,
+                    }))
                 }
                 "escalation.choices" => escalation_choices(deps, &team()?, &task_id),
                 _ => Err(Failure::new(
@@ -3323,6 +3364,49 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lists_a_designer_task_waiting_for_a_preview() {
+        let ready_designer_task = |harness: &Harness| {
+            harness.file("CTV-1", "ready", |wire| {
+                wire["assignee_role"] = json!("ui_ux_designer");
+                wire["reviewer_role"] = json!("product_manager");
+            });
+        };
+        let harness = Harness::new("gates-designer-task-no-preview", |wire| {
+            crate::tools::fixtures::browsing(wire);
+            wire.as_object_mut().expect("a team").remove("preview");
+            wire["agents"][3]["display_name"] = json!("Iris");
+        });
+        ready_designer_task(&harness);
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(
+            waiting["waiting"],
+            json!([{
+                "task_id": "CTV-1", "kind": "preview_missing", "agent_id": "iris",
+                "title": "Add a login page", "line": "Iris needs to know how to open your app"
+            }])
+        );
+
+        let harness = Harness::new(
+            "gates-designer-task-with-preview",
+            crate::tools::fixtures::browsing,
+        );
+        ready_designer_task(&harness);
+        let waiting = query(
+            &harness.daemon,
+            "waiting.list",
+            &json!({}),
+            "waitingListResult",
+        );
+        assert_eq!(waiting["waiting"], json!([]));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn lists_a_design_review_that_waits_on_the_human() {
         let harness = Harness::new("gates-design-review-waits", |wire| {
             crate::tools::fixtures::browsing(wire);
@@ -4551,6 +4635,33 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn counts_the_sessions_of_a_task() {
+        let harness = driven("gates-sessions");
+        harness.file("CTV-1", "in_progress", |wire| {
+            wire["budget"]["max_sessions"] = json!(6);
+        });
+        for session in ["s-1", "s-2", "s-3"] {
+            harness
+                .project
+                .spent("dev-a", Some("CTV-1"), session, "2026-09-22", (0.1, 1000));
+        }
+        harness.project.record(
+            "CTV-1",
+            "task.room_granted",
+            &json!({ "sessions": 6, "cost_usd": 5.0, "granted_by": "human" }),
+        );
+        let tries = query(
+            &harness.daemon,
+            "task.tries",
+            &json!({ "task_id": "CTV-1" }),
+            "taskTriesResult",
+        );
+        assert_eq!(tries["sessions"], 3, "{tries}");
+        assert_eq!(tries["max_sessions"], 12, "{tries}");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     fn answers_tries() {
         let harness = driven("gates-tries");
         harness.rejected("CTV-1", 3, "C1 still fails");
@@ -4565,13 +4676,15 @@ pub(super) mod tests {
             "escalation.raised",
             &json!({ "reason": "iterations", "detail": "three tries" }),
         );
+        // The tries alone: the sessions are `counts_the_sessions_of_a_task`'s.
         let tries = |task: &str| {
-            query(
+            let answer = query(
                 &harness.daemon,
                 "task.tries",
                 &json!({ "task_id": task }),
                 "taskTriesResult",
-            )
+            );
+            json!({ "try": answer["try"], "of": answer["of"] })
         };
         // Three returns are allowed, so four tries: the fourth, sent back, escalated.
         assert_eq!(tries("CTV-1"), json!({ "try": 4, "of": 4 }));

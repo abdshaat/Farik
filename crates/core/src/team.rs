@@ -1237,6 +1237,20 @@ impl Team {
         })
     }
 
+    /// The Debian packages the owner (or an agent) put in the sandbox image, sorted (ADR 0081).
+    #[must_use]
+    pub fn sandbox_packages(&self) -> Vec<String> {
+        let mut packages: Vec<String> = self.sandbox.as_ref().map_or_else(Vec::new, |sandbox| {
+            sandbox
+                .packages
+                .iter()
+                .map(|name| String::clone(name))
+                .collect()
+        });
+        packages.sort();
+        packages
+    }
+
     /// The first active UI/UX Designer, the one a design review names.
     #[must_use]
     pub fn designer(&self) -> Option<&Agent> {
@@ -2001,6 +2015,35 @@ mod tests {
             }),
             "a port left out is found when the app starts"
         );
+    }
+
+    #[test]
+    fn validates_the_sandbox_packages() {
+        assert!(team(&a_team_wire()).sandbox_packages().is_empty());
+        let mut wire = a_team_wire();
+        wire["sandbox"] = json!({ "packages": ["libnss3", "ffmpeg", "g++-12"] });
+        assert_eq!(
+            team(&wire).sandbox_packages(),
+            ["ffmpeg", "g++-12", "libnss3"],
+            "sorted"
+        );
+        for (packages, at) in [
+            (json!(["ffmpeg", "rm -rf"]), "/sandbox/packages/1"),
+            (json!(["A"]), "/sandbox/packages/0"),
+            (json!(["ffmpeg", "ffmpeg"]), "/sandbox/packages"),
+            (
+                json!((0..41).map(|n| format!("pkg{n}")).collect::<Vec<_>>()),
+                "/sandbox/packages",
+            ),
+        ] {
+            let mut wire = a_team_wire();
+            wire["sandbox"] = json!({ "packages": packages });
+            assert_eq!(paths(&wire), [at], "{packages}");
+        }
+        let mut wire = a_team_wire();
+        wire["sandbox"] =
+            json!({ "packages": (0..40).map(|n| format!("pkg{n}")).collect::<Vec<_>>() });
+        assert!(validate_team(&wire).is_ok(), "forty are allowed");
     }
 
     #[test]

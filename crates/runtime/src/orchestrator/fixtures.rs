@@ -1358,9 +1358,21 @@ pub(crate) struct CountingSandboxFactory {
     based: Mutex<BTreeMap<String, u32>>,
     removed: Mutex<BTreeMap<String, u32>>,
     checked: Mutex<BTreeMap<String, Vec<PathBuf>>>,
+    packaged: Mutex<BTreeMap<String, Vec<Vec<String>>>>,
 }
 
 impl CountingSandboxFactory {
+    /// For each sandbox `create` made for `task`, in order, the system packages it was told to
+    /// install (ADR 0081).
+    pub(crate) fn packages(&self, task: &str) -> Vec<Vec<String>> {
+        self.packaged
+            .lock()
+            .expect("no test panics holding it")
+            .get(task)
+            .cloned()
+            .unwrap_or_default()
+    }
+
     /// For each sandbox `create_checking` made for `task`, in order, the git store it was given.
     pub(crate) fn stores(&self, task: &str) -> Vec<PathBuf> {
         self.checked
@@ -1425,6 +1437,7 @@ impl SandboxFactory for CountingSandboxFactory {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         self.created
             .lock()
@@ -1438,7 +1451,13 @@ impl SandboxFactory for CountingSandboxFactory {
             .entry(task_id.as_str().to_string())
             .or_default()
             .push(reads.to_vec());
-        HostSandboxFactory.create(project_id, task_id, worktree, network, reads)
+        self.packaged
+            .lock()
+            .expect("no test panics holding it")
+            .entry(task_id.as_str().to_string())
+            .or_default()
+            .push(packages.to_vec());
+        HostSandboxFactory.create(project_id, task_id, worktree, network, reads, packages)
     }
 
     fn create_checking(
@@ -1448,6 +1467,7 @@ impl SandboxFactory for CountingSandboxFactory {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
         git_store: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         self.checked
@@ -1456,7 +1476,7 @@ impl SandboxFactory for CountingSandboxFactory {
             .entry(task_id.as_str().to_string())
             .or_default()
             .push(git_store.to_path_buf());
-        self.create(project_id, task_id, worktree, network, reads)
+        self.create(project_id, task_id, worktree, network, reads, packages)
     }
 
     fn create_base(
@@ -1529,10 +1549,11 @@ impl SandboxFactory for BrokenSandboxFactory {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         let sandbox = self
             .counting
-            .create(project_id, task_id, worktree, network, reads)?;
+            .create(project_id, task_id, worktree, network, reads, packages)?;
         let broken = self
             .broken
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -1588,9 +1609,10 @@ impl SandboxFactory for UnremovableSandboxFactory {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         self.counting
-            .create(project_id, task_id, worktree, network, reads)
+            .create(project_id, task_id, worktree, network, reads, packages)
     }
 
     fn create_base(

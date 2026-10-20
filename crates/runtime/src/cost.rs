@@ -1,7 +1,7 @@
 //! What a session consumed, as money in the log, and what each budget of `docs/SPEC.md` 5.5 has
 //! left.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::time::Duration;
 
@@ -9,14 +9,14 @@ use catervas_core::budget::{
     BudgetConsequence, BudgetScope, BudgetState, Exhausted, SessionLedger, check_budgets,
     default_session_limits,
 };
-use catervas_core::contract::{Role, TaskContract};
+use catervas_core::contract::{Role, TaskContract, TaskId};
 use catervas_core::pricing::{PriceTable, PricingError, Usage, compute_cost_usd};
 use catervas_core::team::Team;
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{
     BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervasEvent,
     CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose, EventBody, EventIds,
-    EventKind, SessionEndedBodyReason, TokenUsage, new_event,
+    EventKind, SessionEndedBodyReason, SessionStartedBodyPurpose, TokenUsage, new_event,
 };
 use catervas_roles::{RoleError, load_role};
 use catervas_store::{CostProjection, CostScope, EventLog, EventQuery, Projections, StoreError};
@@ -212,6 +212,49 @@ pub fn day_spent(
         .any(|exhausted| exhausted.scope == BudgetScope::DayUsd))
 }
 
+/// How many of the task's sessions were the first `refine` session after the owner sent the task
+/// back into `refining` (ADR 0081): they are not counted against it. Only a session whose cost
+/// is recorded counts as one, since only those are in the task's count.
+fn sent_back_refines(projections: &Projections, task: &TaskId) -> Result<u32, CostError> {
+    let events = projections.log().read(&EventQuery {
+        task_id: Some(task.clone()),
+        kinds: vec![
+            EventKind::TaskTransitioned,
+            EventKind::SessionStarted,
+            EventKind::CostRecorded,
+        ],
+        ..EventQuery::default()
+    })?;
+    let paid: BTreeSet<&str> = events
+        .iter()
+        .filter(|event| event.body.kind() == EventKind::CostRecorded)
+        .filter_map(|event| event.envelope.ids.session_id.as_deref())
+        .collect();
+    let mut waiting = false;
+    let mut free = BTreeSet::new();
+    for event in &events {
+        match &event.body {
+            EventBody::TaskTransitioned(body)
+                if body.to.to_string() == "refining" && body.actor.to_string() == "human" =>
+            {
+                waiting = true;
+            }
+            EventBody::SessionStarted(body)
+                if waiting && body.purpose == SessionStartedBodyPurpose::Refine =>
+            {
+                waiting = false;
+                if let Some(session) = event.envelope.ids.session_id.as_deref()
+                    && paid.contains(session)
+                {
+                    free.insert(session);
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(u32::try_from(free.len()).unwrap_or(u32::MAX))
+}
+
 /// Everything `check_budgets` needs for one session, read from the projections at `now`.
 ///
 /// The session limits are the role's defaults with each field `team.budgets.session` sets put in
@@ -278,12 +321,14 @@ pub fn budget_state(
                         if body.reason == SessionEndedBodyReason::CredentialRefused)
                 })
                 .count();
+            let unheard = sent_back_refines(projections, &contract.id)?;
             (
                 spent.as_ref().map_or(0.0, |row| row.usd),
                 spent
                     .as_ref()
                     .map_or(0, |row| row.sessions)
-                    .saturating_sub(u32::try_from(refused).unwrap_or(u32::MAX)),
+                    .saturating_sub(u32::try_from(refused).unwrap_or(u32::MAX))
+                    .saturating_sub(unheard),
                 contract.budget.max_cost_usd + room_granted(&resolved).1,
                 u32::try_from(contract.budget.max_sessions.get())
                     .unwrap_or(u32::MAX)
@@ -917,6 +962,89 @@ mod tests {
             Some(&contract),
         );
         assert_eq!(read.task_sessions, 1);
+    }
+
+    /// Appends an event of `kind` about CTV-1 whose body is the fixture's with `body` merged over
+    /// it, by `session` when one is named.
+    fn happened(
+        (log, projections): (&EventLog, &Projections),
+        kind: EventKind,
+        session: Option<&str>,
+        body: &serde_json::Value,
+    ) {
+        let mut wire = catervas_protocol::event::fixtures::an_event_wire(kind);
+        for (key, value) in body.as_object().expect("a body") {
+            wire["body"][key] = value.clone();
+        }
+        wire["task_id"] = json!("CTV-1");
+        if let Some(session) = session {
+            wire["session_id"] = json!(session);
+            wire["agent_id"] = json!("linus");
+        }
+        let event = catervas_protocol::event::event_from_value(&wire).expect("a valid event");
+        let appended = log
+            .append(&catervas_protocol::event::NewEvent {
+                recorded_at: event.envelope.recorded_at,
+                ids: event.envelope.ids,
+                body: event.body,
+            })
+            .expect("appends");
+        projections.apply(&appended).expect("projects");
+    }
+
+    #[test]
+    fn does_not_count_the_refine_after_a_send_back() {
+        let (log, projections) = a_board();
+        filed(&log, &projections, "CTV-1");
+        let both = (&*log, &projections);
+        // Five sessions, the first of them a refine: it was not after a send-back, so it counts.
+        happened(
+            both,
+            EventKind::SessionStarted,
+            Some("a"),
+            &json!({ "purpose": "refine" }),
+        );
+        for session in ["a", "b", "c", "d", "e"] {
+            record_session_cost(
+                &log,
+                &projections,
+                &source(ids(Some("CTV-1"), session)),
+                &usage(0, 0),
+                &prices(),
+                &clock(),
+            )
+            .expect("recorded");
+        }
+        // The owner sends the task back to its plan, and a refine session runs and is paid.
+        happened(
+            both,
+            EventKind::TaskTransitioned,
+            None,
+            &json!({ "from": "escalated", "to": "refining", "actor": "human" }),
+        );
+        happened(
+            both,
+            EventKind::SessionStarted,
+            Some("f"),
+            &json!({ "purpose": "refine" }),
+        );
+        record_session_cost(
+            &log,
+            &projections,
+            &source(ids(Some("CTV-1"), "f")),
+            &usage(0, 0),
+            &prices(),
+            &clock(),
+        )
+        .expect("recorded");
+        let contract = a_contract("CTV-1", 5.0, 5);
+        let read = state(
+            &projections,
+            &a_team(None),
+            Role::SoftwareDeveloper,
+            Some(&contract),
+        );
+        assert_eq!((read.task_sessions, read.task_max_sessions), (5, 5));
     }
 
     #[test]

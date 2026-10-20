@@ -159,7 +159,7 @@ describe("connection", () => {
 		expect(sockets).toEqual([]);
 	});
 
-	it("reconnects_after_the_connection_is_lost", async () => {
+	it("subscribes_from_now_and_resumes_where_it_was", async () => {
 		vi.useFakeTimers();
 		const fetch = vi.fn(fakeFetch({ "GET /session": 204 }));
 		vi.stubGlobal("fetch", fetch);
@@ -175,9 +175,12 @@ describe("connection", () => {
 		expect(first.url).toBe(`ws://${location.host}/rpc`);
 		act(() => first.emit("open", {}));
 		expect(status()).toBe("open");
-		expect(first.calls("subscribe")[0]?.params).toEqual({ from_seq: 0 });
+		expect(first.calls("subscribe")[0]?.params).toEqual({});
+		const subscribed = first.calls("subscribe")[0];
+		if (!subscribed) throw new Error("no subscribe was sent");
+		await first.reply(subscribed, { head: 2 });
 		act(() => {
-			for (const seq of [1, 2, 3]) first.event(seq);
+			for (const seq of [3, 4]) first.event(seq);
 		});
 
 		act(() => first.close());
@@ -191,6 +194,6 @@ describe("connection", () => {
 		if (!second) throw new Error("no socket was reopened");
 		act(() => second.emit("open", {}));
 		expect(status()).toBe("open");
-		expect(second.calls("subscribe")[0]?.params).toEqual({ from_seq: 3 });
+		expect(second.calls("subscribe")[0]?.params).toEqual({ from_seq: 4 });
 	});
 });

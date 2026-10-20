@@ -140,13 +140,19 @@ test("the user saves a team, starts a project from it, and uses one on a live te
 			.poll(() => statuses(a.project))
 			.toEqual(["mira active", "theo retired", "noor active"]);
 		expect(teamOf(a.project)).toMatch(/run_commands: false/);
-		const last = events(a.project).slice(-2);
-		expect(last.map((e) => e.kind)).toEqual(["agent.updated", "team.updated"]);
+		// The retirement says so in the channel (ADR 0081) before the team's change is recorded.
+		const last = events(a.project).slice(-3);
+		expect(last.map((e) => e.kind)).toEqual([
+			"agent.updated",
+			"message.posted",
+			"team.updated",
+		]);
 		expect(last[0]?.body).toMatchObject({
 			agent_id: "theo",
 			status: "retired",
 		});
-		expect(last[1]?.body).toMatchObject({ template: "Pair" });
+		expect(last[1]?.body).toMatchObject({ text: "Theo has left the team." });
+		expect(last[2]?.body).toMatchObject({ template: "Pair" });
 
 		// 4. A refused result: a second Product Manager who never worked, and Mira paused, so Three
 		// of us (Mira, Ada and Theo) would leave no active Product Manager, and nothing changes.

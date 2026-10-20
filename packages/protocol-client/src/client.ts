@@ -95,7 +95,11 @@ export class RpcError extends Error {
 }
 
 export type DaemonClient = {
-	subscribe(fromSeq: number, onEvent: (e: Event) => void): Promise<void>;
+	/** Without `fromSeq` the subscription starts after the newest event; answers that event's seq (`head`). */
+	subscribe(
+		fromSeq: number | undefined,
+		onEvent: (e: Event) => void,
+	): Promise<number>;
 	command(c: Command): Promise<CommandReply>;
 	query(name: QueryName, params: object): Promise<unknown>;
 	call(method: MethodName, params: object): Promise<unknown>;
@@ -169,7 +173,11 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 	return {
 		async subscribe(fromSeq, onEvent) {
 			handlers.push(onEvent);
-			await request("subscribe", { fromSeq });
+			const result = (await request(
+				"subscribe",
+				fromSeq === undefined ? {} : { fromSeq },
+			)) as { head?: number };
+			return result.head ?? 0;
 		},
 		command: (command) =>
 			request("command", { command }) as Promise<CommandReply>,

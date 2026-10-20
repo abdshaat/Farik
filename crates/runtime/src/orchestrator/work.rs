@@ -28,8 +28,6 @@ pub struct Work {
     busy: Mutex<BTreeMap<String, Option<TaskId>>>,
     /// Each agent with a chat fork running beside its work (ADR 0064).
     chats: Mutex<BTreeSet<String>>,
-    /// Each re-plan asked for, by epic and the builders it was asked for (ADR 0078).
-    replans: Mutex<BTreeSet<String>>,
 }
 
 impl Work {
@@ -44,16 +42,6 @@ impl Work {
 
     fn chats(&self) -> std::sync::MutexGuard<'_, BTreeSet<String>> {
         self.chats.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
-    /// Records a re-plan asked for under `key`, answering whether it is the first: an epic is
-    /// re-planned once for the same idle builders, so tasks that truly wait on each other are not
-    /// asked about on every tick (ADR 0078). A new process asks once more.
-    pub(crate) fn first_replan(&self, key: String) -> bool {
-        self.replans
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(key)
     }
 
     /// Whether `agent_id` has a chat fork running.

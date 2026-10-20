@@ -1992,7 +1992,7 @@ fn replace(deps: &ToolDeps, state: &DaemonState, params: &Value) -> Result<(), F
         state,
         &agent_id,
         catervas_core::team::AgentStatus::Retired,
-        newcomer,
+        newcomer.as_ref(),
     );
     drop(writing);
     match report {
@@ -4679,7 +4679,11 @@ pub(super) mod tests {
         );
         assert_eq!(
             kinds(&harness)[seen..],
-            [EventKind::AgentUpdated, EventKind::TeamUpdated]
+            [
+                EventKind::AgentUpdated,
+                EventKind::MessagePosted,
+                EventKind::TeamUpdated
+            ]
         );
     }
 

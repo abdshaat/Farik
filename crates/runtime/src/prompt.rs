@@ -8,7 +8,7 @@ use catervas_core::folders::{
 };
 use catervas_core::governor::permissions::PermissionTier;
 use catervas_core::governor::team_rules::TeamRules;
-use catervas_core::team::{Agent, TeamPermissions};
+use catervas_core::team::{Agent, AgentStatus, TeamPermissions, plain_role};
 use catervas_core::text::tokens;
 use catervas_protocol::event::Thread;
 use catervas_roles::RoleDefinition;
@@ -74,6 +74,8 @@ pub struct PromptInput<'a> {
     /// Whether the team's documents are read from this computer's folder (ADR 0074), for the Team
     /// rules' line about finding them.
     pub documents_local: bool,
+    /// The agents of the team that are not retired, for the `Your team` section (ADR 0081).
+    pub team: &'a [&'a Agent],
     /// The remotes the team lets an agent push to (`policy.push_remotes`, ADR 0080), for the Team
     /// rules' line about them, said only to an agent that holds `git_remote`.
     pub push_remotes: &'a [String],
@@ -105,10 +107,11 @@ pub enum OwnRepo {
 
 /// The prompt's section titles, each written as a `## ` heading, in the one order every prompt
 /// keeps (ADR 0011).
-pub const PROMPT_SECTIONS: [&str; 11] = [
+pub const PROMPT_SECTIONS: [&str; 12] = [
     "Role",
     "Untrusted content",
     "You",
+    "Your team",
     "The project",
     "Your memory",
     "Team rules",
@@ -243,10 +246,11 @@ pub const CEREMONY_INSTRUCTIONS: [(Thread, &str); 2] = [
 ///
 /// The store's YAML writer's, for a contract or a library it cannot write.
 pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesError> {
-    let bodies: [Option<String>; 11] = [
+    let bodies: [Option<String>; 12] = [
         Some(role_section(input.role)),
         Some(untrusted_notice(input.connectors)),
         Some(you_section(input.agent, input.solo)),
+        team_section(input.agent, input.team, input.solo),
         input
             .project_scan
             .and_then(|scan| untrusted("project_scan", scan, 16 * KIB)),
@@ -522,6 +526,32 @@ fn you_section(agent: &Agent, solo: bool) -> String {
         Some(persona) => format!("{name}\n\n{persona}"),
         None => name,
     }
+}
+
+/// The team as it is now (ADR 0081): each agent that is not retired, by name and role, the
+/// session's own marked, and a warning that anyone else the notes name has left. `None` for an
+/// agent working alone or with nobody beside it.
+fn team_section(agent: &Agent, team: &[&Agent], solo: bool) -> Option<String> {
+    if solo || team.iter().all(|member| member.id == agent.id) {
+        return None;
+    }
+    let mut lines: Vec<String> = team
+        .iter()
+        .filter(|member| member.status != AgentStatus::Retired)
+        .map(|member| {
+            format!(
+                "- {}, {}{}",
+                member.display_name.as_str(),
+                plain_role(Role::from(member.role)),
+                if member.id == agent.id { " (you)" } else { "" }
+            )
+        })
+        .collect();
+    lines.push(String::new());
+    lines.push(
+        "Anyone else named in your notes, memory or the channel has left the team.".to_string(),
+    );
+    Some(lines.join("\n"))
 }
 
 /// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing,
@@ -813,6 +843,7 @@ mod tests {
                 document_format: DocumentFormat::Html,
                 attached: None,
                 documents_local: false,
+                team: &[],
                 push_remotes: &[],
             }
         }
@@ -877,7 +908,15 @@ mod tests {
     #[test]
     fn writes_the_sections_in_the_fixed_order() {
         let inputs = a_product_manager();
-        let prompt = assembled(&inputs.full(SessionPurpose::Implement));
+        let other = an_agent("architect", None);
+        let other = Agent {
+            id: "ada".parse().expect("an id"),
+            ..other
+        };
+        let prompt = assembled(&PromptInput {
+            team: &[&inputs.agent, &other],
+            ..inputs.full(SessionPurpose::Implement)
+        });
         assert_eq!(headings(&prompt), PROMPT_SECTIONS);
         assert_eq!(
             PROMPT_SECTIONS,
@@ -885,6 +924,7 @@ mod tests {
                 "Role",
                 "Untrusted content",
                 "You",
+                "Your team",
                 "The project",
                 "Your memory",
                 "Team rules",
@@ -1102,7 +1142,15 @@ mod tests {
             let wire = serde_json::to_value(role.id).expect("a role id is a string");
             let mut inputs = Inputs::new(role.id, wire.as_str().expect("a role id is a string"));
             inputs.role = role;
-            let prompt = assembled(&inputs.full(SessionPurpose::Implement));
+            let mate = an_agent("architect", None);
+            let mate = Agent {
+                id: "ada".parse().expect("an id"),
+                ..mate
+            };
+            let prompt = assembled(&PromptInput {
+                team: &[&inputs.agent, &mate],
+                ..inputs.full(SessionPurpose::Implement)
+            });
             assert_eq!(
                 prompt
                     .lines()
@@ -1466,6 +1514,45 @@ mod tests {
                 .last()
                 .is_some_and(|line| line.starts_with("- documents:")),
             "{rules}"
+        );
+    }
+
+    #[test]
+    fn names_the_current_team() {
+        let inputs = Inputs::new(Role::SoftwareDeveloper, "software_developer");
+        let member = |id: &str, name: &str, role: &str| {
+            let mut wire = an_agent_wire(id, role);
+            wire["display_name"] = json!(name);
+            serde_json::from_value::<Agent>(wire).expect("an agent")
+        };
+        let mira = member("mira", "Mira", "product_manager");
+        let ada = member("ada", "Ada", "architect");
+        let ivo = member("ivo", "Ivo", "ui_ux_designer");
+        let mut iris_wire = an_agent_wire("iris", "ui_ux_designer");
+        iris_wire["display_name"] = json!("Iris");
+        iris_wire["status"] = json!("retired");
+        let iris: Agent = serde_json::from_value(iris_wire).expect("an agent");
+        let everyone = [&mira, &ada, &ivo, &iris];
+        let prompt = assembled(&PromptInput {
+            team: &everyone,
+            ..inputs.full(SessionPurpose::Implement)
+        });
+        let team = section(&prompt, "Your team");
+        assert!(team.contains("- Mira, Product Manager"), "{team}");
+        assert!(team.contains("- Ada, Architect"), "{team}");
+        assert!(team.contains("- Ivo, UI/UX Designer"), "{team}");
+        assert!(!team.contains("Iris"), "{team}");
+        assert!(team.contains("has left the team"), "{team}");
+        assert!(!team.contains("(you)"), "Maya is not in this list: {team}");
+        // The session's own agent is marked.
+        let own = member("maya-chen", "Maya Chen", "software_developer");
+        let prompt = assembled(&PromptInput {
+            team: &[&mira, &own],
+            ..inputs.full(SessionPurpose::Implement)
+        });
+        assert!(
+            section(&prompt, "Your team").contains("- Maya Chen, Software Developer (you)"),
+            "{prompt}"
         );
     }
 

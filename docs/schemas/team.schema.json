@@ -39,6 +39,9 @@
     "preview": {
       "$ref": "#/$defs/preview"
     },
+    "sandbox": {
+      "$ref": "#/$defs/sandbox"
+    },
     "skills": {
       "type": "array",
       "maxItems": 20,
@@ -49,6 +52,25 @@
     }
   },
   "$defs": {
+    "sandbox": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "packages"
+      ],
+      "properties": {
+        "packages": {
+          "type": "array",
+          "maxItems": 40,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9+.-]*$"
+          },
+          "description": "Debian packages installed in the sandbox image that task and preview containers run (ADR 0081). When the list is not empty, the containers run an image built from the shipped one with these installed. The owner lists them in Settings, How work runs; an agent holding `execute` can add to it with catervas_install_system_packages."
+        }
+      }
+    },
     "preview": {
       "type": "object",
       "additionalProperties": false,
@@ -81,7 +103,7 @@
           "description": "The page to open first. Left out, /."
         }
       },
-      "description": "How Catervas opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under How to open your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
+      "description": "How Catervas opens the project's app for the ui_ux_designer (ADR 0026, the founder's D2): set once in Settings, under Your app. Without it a Designer's task is not assigned and a design review waits. Templates leave it out."
     },
     "mcpServer": {
       "type": "object",

@@ -266,6 +266,23 @@ describe("help page", () => {
 		expect(screen.queryByRole("list", { name: "What Theo tried" })).toBeNull();
 	});
 
+	it("shows_the_sessions_of_a_sessions_escalation", async () => {
+		await openedGate("/tasks/CTV-1/help", HELP, ESCALATED, undefined, {
+			"task.history": {
+				events: [raised(2, "sessions", "Spent 6 of its 6 sessions.")],
+			},
+			"task.tries": { try: 1, of: 4, sessions: 6, max_sessions: 6 },
+		});
+		const about = await screen.findByRole("region", {
+			name: "About this task",
+		});
+		const sessions = within(about).getByText(en.helpSessions);
+		expect(sessions.tagName).toBe("DT");
+		expect(sessions.nextElementSibling?.textContent).toBe("6 of 6");
+		// The tries are not what it was about.
+		expect(within(about).queryByText(en.gateTries)).toBeNull();
+	});
+
 	it("signs_the_agents_own_words_and_lists_what_it_tried_since", async () => {
 		await openedGate("/tasks/CTV-1/help", HELP, ESCALATED, undefined, {
 			"task.history": {

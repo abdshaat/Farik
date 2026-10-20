@@ -52,6 +52,7 @@ mod purchase_order;
 mod reading;
 pub(crate) mod refusal;
 mod retro;
+mod sandbox;
 pub(crate) mod seller;
 pub(crate) mod sheets;
 /// An address cut for an answer or a refusal.
@@ -394,6 +395,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Execute,
             "Run a shell command in the task's sandbox. This is your shell; git is not run here.",
         ),
+        tool::<sandbox::InstallInput>(
+            "catervas_install_system_packages",
+            Execute,
+            "Install Debian packages in the sandbox for the team, such as ffmpeg or a library a browser needs. Give 1 to 10 package names and why the task needs them. Catervas lists them in the team's sandbox settings, builds the sandbox image with them (about a minute the first time), makes this task's sandbox again (the worktree is kept) and tells the owner in the channel. Use it for a missing system tool instead of stopping to ask; it is not for project dependencies, which npm, pip or cargo install.",
+        ),
         tool::<NoInput>(
             "catervas_git_status",
             GitLocal,
@@ -553,6 +559,7 @@ pub async fn call_tool(
         }
         "catervas_read_seller_replies" => seller::read_seller_replies(&call, &parse(input)?),
         "catervas_exec" => exec::exec(&call, parse(input)?).await,
+        "catervas_install_system_packages" => sandbox::install(&call, parse(input)?).await,
         "catervas_git_status" => nothing_in(input).and_then(|()| git::status(&call)),
         "catervas_git_diff" => nothing_in(input).and_then(|()| git::diff(&call)),
         "catervas_git_commit" => git::commit(&call, &parse(input)?),
@@ -812,6 +819,7 @@ mod tests {
             writing,
             [
                 "catervas_exec",
+                "catervas_install_system_packages",
                 "catervas_git_commit",
                 "catervas_git_push",
                 "catervas_propose_marketing_plan",
@@ -917,6 +925,7 @@ mod tests {
             "catervas_read_seller_messages",
             "catervas_read_seller_replies",
             "catervas_exec",
+            "catervas_install_system_packages",
             "catervas_git_status",
             "catervas_git_diff",
             "catervas_git_commit",

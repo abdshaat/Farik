@@ -165,7 +165,8 @@ impl fmt::Display for PreviewError {
 impl std::error::Error for PreviewError {}
 
 /// The lines of a failed command's tail an owner needs: at most 8 that say `error` or `ERR`, not
-/// option help (a line starting `--` or `-<letter>`), in order; the last 8 lines when none do.
+/// option help (a line starting `--` or `-<letter>`), in order; the last 8 lines without npm's
+/// `notice` and `warn` lines when none do.
 /// The full tail stays in the session's log.
 fn error_lines(tail: &str) -> String {
     const MOST: usize = 8;
@@ -180,7 +181,14 @@ fn error_lines(tail: &str) -> String {
         .take(MOST)
         .collect();
     if errors.is_empty() {
-        let lines: Vec<&str> = tail.lines().collect();
+        // npm's update notices say nothing about the failure (ADR 0081).
+        let lines: Vec<&str> = tail
+            .lines()
+            .filter(|line| {
+                let line = line.trim();
+                !(line.starts_with("npm notice") || line.starts_with("npm warn"))
+            })
+            .collect();
         lines[lines.len().saturating_sub(MOST)..].join("\n")
     } else {
         errors.join("\n")
@@ -239,11 +247,16 @@ pub trait PreviewFactory: Send + Sync {
     fn settle(&self) {}
     /// Prepares the preview when `preview.prepare` is set, then starts it and waits for it to
     /// answer. `tree` is the task branch's `HEAD^{tree}` the preview is of. `env` is the owner's
-    /// environment file, passed to `prepare` and `start` alone (ADR 0067).
+    /// environment file, passed to `prepare` and `start` alone (ADR 0067). `packages` are the
+    /// Debian packages the containers need besides the shipped ones (ADR 0081).
     ///
     /// # Errors
     ///
     /// `Prepare`, `NeverAnswered`, or `DockerUnavailable`.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "a preview's whole launch: where, what, of which tree, with which environment and packages"
+    )]
     fn start(
         &self,
         project_id: &str,
@@ -252,6 +265,7 @@ pub trait PreviewFactory: Send + Sync {
         preview: &Preview,
         tree: &str,
         env: Option<&PreviewEnv>,
+        packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError>;
 }
 
@@ -271,6 +285,7 @@ impl PreviewFactory for NoPreviews {
         _preview: &Preview,
         _tree: &str,
         _env: Option<&PreviewEnv>,
+        _packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         Err(PreviewError::DockerUnavailable {
             detail: "Catervas runs without Docker's sandbox".to_string(),
@@ -387,9 +402,10 @@ impl PreviewFactory for PolledPreviews {
         preview: &Preview,
         tree: &str,
         env: Option<&PreviewEnv>,
+        packages: &[String],
     ) -> Result<Box<dyn RunningPreview>, PreviewError> {
         self.inner
-            .start(project_id, task_id, worktree, preview, tree, env)
+            .start(project_id, task_id, worktree, preview, tree, env, packages)
     }
 }
 
@@ -795,6 +811,7 @@ pub(crate) mod fixtures {
             preview: &Preview,
             _tree: &str,
             env: Option<&PreviewEnv>,
+            _packages: &[String],
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             crate::locked(&self.envs).push(env.map(|env| env.path().to_path_buf()));
             crate::locked(&self.prepared).push(preview.prepare.clone());
@@ -824,6 +841,7 @@ pub(crate) mod fixtures {
             _preview: &Preview,
             _tree: &str,
             _env: Option<&PreviewEnv>,
+            _packages: &[String],
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a preview factory was asked to start a preview");
         }
@@ -914,6 +932,7 @@ pub(crate) mod fixtures {
             _preview: &Preview,
             _tree: &str,
             _env: Option<&PreviewEnv>,
+            _packages: &[String],
         ) -> Result<Box<dyn RunningPreview>, PreviewError> {
             panic!("a held factory was asked to start a preview");
         }
@@ -1139,6 +1158,28 @@ mod tests {
         assert!(text.contains("can only install with an existing package-lock.json"));
         assert!(!text.contains("--allow-scripts"), "{text}");
         assert!(text.lines().count() <= 9, "{text}");
+    }
+
+    #[test]
+    fn drops_npm_notices_from_a_preview_error() {
+        let tail = "Remotion needs a browser to render\n\
+                    Install Chrome or set the browser executable\n\
+                    npm notice\n\
+                    npm notice New major version of npm available! 10.8.2 -> 11.6.0\n\
+                    npm warn Using the latest npm\n\
+                    npm notice To update run: npm install -g npm@11.6.0\n";
+        let text = super::PreviewError::Prepare {
+            tail: tail.to_string(),
+        }
+        .to_string();
+
+        assert!(
+            text.contains("Remotion needs a browser to render"),
+            "{text}"
+        );
+        assert!(text.contains("Install Chrome"), "{text}");
+        assert!(!text.contains("npm notice"), "{text}");
+        assert!(!text.contains("npm warn"), "{text}");
     }
 
     #[test]

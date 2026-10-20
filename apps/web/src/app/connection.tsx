@@ -65,7 +65,7 @@ export function ConnectionProvider(props: {
 
 	useEffect(() => {
 		let stopped = false;
-		let lastSeq = 0;
+		let lastSeq: number | undefined;
 		let retry: ReturnType<typeof setTimeout> | undefined;
 		let current: DaemonClient | null = null;
 		// While Catervas restarts on a chosen project: until when to keep trying, and whether it was tried yet.
@@ -97,11 +97,16 @@ export function ConnectionProvider(props: {
 				if (s !== "open") return;
 				reopenUntil = undefined;
 				setStatus("open");
-				// From the last seq held, so a reconnect has no gap and no repeat.
+				// The first subscribe starts from now; a reconnect resumes from the last seq held, so
+				// that it has no gap and no repeat.
 				c.subscribe(lastSeq, (e) => {
 					lastSeq = e.seq;
 					setEvents((list) => [...list.slice(1 - KEEP), e]);
-				}).catch(() => {}); // a closed socket rejects it, and its close reconnects
+				})
+					.then((head) => {
+						lastSeq = Math.max(lastSeq ?? 0, head);
+					})
+					.catch(() => {}); // a closed socket rejects it, and its close reconnects
 			});
 		};
 		async function check() {

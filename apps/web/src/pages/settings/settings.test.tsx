@@ -384,6 +384,45 @@ describe("settings directory", () => {
 		expect(main().queryByRole("region", { name: en.uiPathsTitle })).toBeNull();
 	});
 
+	it("edits_the_sandbox_tools", async () => {
+		const rules = {
+			team: {
+				name: "Corner Bakery",
+				agents: [],
+				budgets: {},
+				policy: {},
+				rules: {},
+			},
+			agents: [],
+			max_agents: 7,
+		};
+		const defaults = {
+			budgets: {},
+			rules: {},
+			policy: {},
+			ui_paths: ["**/*.tsx"],
+		};
+		const { s } = await open("/settings/work", rules);
+		await answerQuery(s, "settings.defaults", defaults);
+		fireEvent.click(
+			await main().findByRole("button", { name: en.advancedSwitch }),
+		);
+		const region = await main().findByRole("region", {
+			name: en.sandboxToolsTitle,
+		});
+		fireEvent.change(within(region).getByLabelText(en.sandboxToolsLabel), {
+			target: { value: "ffmpeg\nlibnss3\n" },
+		});
+		fireEvent.click(within(region).getByRole("button", { name: en.agentSave }));
+		const save = await waitFor(() => {
+			const f = s.calls("team.save").at(-1);
+			if (!f) throw new Error("no team.save was sent");
+			return f;
+		});
+		const sent = (save.params as { team: { sandbox?: unknown } }).team;
+		expect(sent.sandbox).toEqual({ packages: ["ffmpeg", "libnss3"] });
+	});
+
 	it("keeps_advanced_settings_to_their_own_section", async () => {
 		localStorage.setItem("catervas.advanced", "true");
 		const rules = {

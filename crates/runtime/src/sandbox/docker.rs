@@ -3,11 +3,14 @@
 //! container made for Catervas's checks also sees the repository's git store, read-only.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::time::Duration;
 
 use catervas_core::contract::TaskId;
+use sha2::{Digest as _, Sha256};
 
 use crate::exec::{ExecError, ExecResult, Executor, Finished, supervise, workspace_relative};
 use crate::preview::docker::container_name as preview_container;
@@ -46,11 +49,13 @@ impl DockerSandbox {
             (worktree, &[], None),
             network,
             image,
+            &[],
         )
     }
 
     /// `create`, under the container name `name`, with `mounts` as the worktree, the other
-    /// repositories it can read, and the git store it sees read-only.
+    /// repositories it can read, and the git store it sees read-only. With `packages`, the
+    /// container runs the image built from `image` with them installed (ADR 0081).
     fn start(
         name: String,
         project_id: &str,
@@ -58,14 +63,23 @@ impl DockerSandbox {
         (worktree, reads, git_store): (&Path, &[(String, PathBuf)], Option<&Path>),
         network: bool,
         image: &str,
+        packages: &[String],
     ) -> Result<DockerSandbox, SandboxError> {
         let labels = [
             ("catervas.project".to_string(), project_id.to_string()),
             ("catervas.task".to_string(), task_id.as_str().to_string()),
         ];
         let user = format!("{}:{}", id("-u")?, id("-g")?);
+        let run_image = package_image(image, packages);
         let arguments = run_args(
-            &name, worktree, reads, git_store, network, &user, &labels, image,
+            &name,
+            worktree,
+            reads,
+            git_store,
+            network,
+            &user,
+            &labels,
+            run_image.as_deref().unwrap_or(image),
         )?;
         if !docker(&["version"]).is_ok_and(|output| output.status.success()) {
             return Err(SandboxError::DockerUnavailable);
@@ -75,6 +89,7 @@ impl DockerSandbox {
                 image: image.to_owned(),
             });
         }
+        ensure_package_image(image, packages)?;
         // Absent is the usual answer, and not an error.
         docker(&["rm", "-f", &name])?;
         let output = docker(&arguments.iter().map(String::as_str).collect::<Vec<_>>())?;
@@ -246,6 +261,7 @@ impl SandboxFactory for DockerSandboxFactory {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         let sandbox = DockerSandbox::start(
             container_name(project_id, task_id),
@@ -254,6 +270,7 @@ impl SandboxFactory for DockerSandboxFactory {
             (worktree, reads, None),
             network,
             &self.image,
+            packages,
         )?;
         Ok(Box::new(sandbox))
     }
@@ -265,6 +282,7 @@ impl SandboxFactory for DockerSandboxFactory {
         worktree: &Path,
         network: bool,
         reads: &[(String, PathBuf)],
+        packages: &[String],
         git_store: &Path,
     ) -> Result<Box<dyn Sandbox>, SandboxError> {
         let sandbox = DockerSandbox::start(
@@ -274,6 +292,7 @@ impl SandboxFactory for DockerSandboxFactory {
             (worktree, reads, Some(git_store)),
             network,
             &self.image,
+            packages,
         )?;
         Ok(Box::new(sandbox))
     }
@@ -291,6 +310,7 @@ impl SandboxFactory for DockerSandboxFactory {
             (worktree, &[], None),
             false,
             &self.image,
+            &[],
         )?;
         Ok(Box::new(sandbox))
     }
@@ -310,6 +330,88 @@ impl SandboxFactory for DockerSandboxFactory {
         }
         Ok(())
     }
+}
+
+/// The tag of the image with `packages` installed over `base`: `<base>-p<12 hex>` of the sorted
+/// list, so that the same packages in any order are the same image. None without packages (ADR 0081).
+pub(crate) fn package_image(base: &str, packages: &[String]) -> Option<String> {
+    if packages.is_empty() {
+        return None;
+    }
+    let mut sorted = packages.to_vec();
+    sorted.sort();
+    let digest = Sha256::digest(sorted.join("\n").as_bytes());
+    let hex = digest[..6].iter().fold(String::new(), |mut hex, byte| {
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    });
+    Some(format!("{base}-p{hex}"))
+}
+
+/// The Dockerfile that installs `packages` over `base`, as the root user: containers run as the
+/// owner's own user anyway (`--user`).
+pub(crate) fn package_dockerfile(base: &str, packages: &[String]) -> String {
+    let mut sorted = packages.to_vec();
+    sorted.sort();
+    format!(
+        "FROM {base}\nUSER root\nRUN apt-get update && apt-get install -y --no-install-recommends \
+         {} && rm -rf /var/lib/apt/lists/* && find /tmp -mindepth 1 -delete\n",
+        sorted.join(" ")
+    )
+}
+
+/// Builds the image `package_image` names, unless this machine has it, and answers its tag; the
+/// shipped `base` when there are no packages. The build needs the network.
+///
+/// # Errors
+///
+/// `DockerUnavailable`, or `Unavailable` with the last lines of the build when it fails.
+pub(crate) fn ensure_package_image(
+    base: &str,
+    packages: &[String],
+) -> Result<String, SandboxError> {
+    let Some(tag) = package_image(base, packages) else {
+        return Ok(base.to_owned());
+    };
+    if docker(&["image", "inspect", &tag])?.status.success() {
+        return Ok(tag);
+    }
+    let unavailable = |said: &str| {
+        SandboxError::Unavailable(format!(
+            "the sandbox's system tools could not be installed: {said}"
+        ))
+    };
+    let mut build = Command::new("docker")
+        .args(["build", "-t", &tag, "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| SandboxError::DockerUnavailable)?;
+    let dockerfile = package_dockerfile(base, packages);
+    if let Some(mut stdin) = build.stdin.take() {
+        stdin
+            .write_all(dockerfile.as_bytes())
+            .map_err(|error| unavailable(&error.to_string()))?;
+    }
+    let output = build
+        .wait_with_output()
+        .map_err(|error| unavailable(&error.to_string()))?;
+    if output.status.success() {
+        return Ok(tag);
+    }
+    let said = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lines: Vec<&str> = said
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    Err(unavailable(
+        &lines[lines.len().saturating_sub(8)..].join("\n"),
+    ))
 }
 
 /// `catervas-<project>-<task_id>-base`: the task's own name with a suffix, so the base run never
@@ -392,9 +494,44 @@ mod tests {
 
     use super::{
         DockerSandbox, SandboxError, base_container_name, container_name, is_container_gone,
-        removed, run_args, whole_seconds,
+        package_dockerfile, package_image, removed, run_args, whole_seconds,
     };
     use crate::exec::{Executor, Finished};
+    use crate::sandbox::SANDBOX_IMAGE;
+
+    #[test]
+    fn names_an_image_for_the_packages() {
+        let list = |names: &[&str]| names.iter().map(ToString::to_string).collect::<Vec<_>>();
+        let tag = package_image(SANDBOX_IMAGE, &list(&["ffmpeg", "libnss3"]))
+            .expect("a list names an image");
+        let suffix = tag
+            .strip_prefix(&format!("{SANDBOX_IMAGE}-p"))
+            .expect("the tag extends the shipped image's");
+        assert_eq!(suffix.len(), 12, "{tag}");
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()), "{tag}");
+        assert_eq!(
+            package_image(SANDBOX_IMAGE, &list(&["libnss3", "ffmpeg"])).as_ref(),
+            Some(&tag),
+            "the order does not matter"
+        );
+        assert_ne!(
+            package_image(SANDBOX_IMAGE, &list(&["ffmpeg"])),
+            Some(tag),
+            "another list is another image"
+        );
+        assert_eq!(
+            package_image(SANDBOX_IMAGE, &[]),
+            None,
+            "no packages, no image"
+        );
+
+        let dockerfile = package_dockerfile(SANDBOX_IMAGE, &list(&["libnss3", "ffmpeg"]));
+        assert!(dockerfile.starts_with(&format!("FROM {SANDBOX_IMAGE}\nUSER root\n")));
+        assert!(dockerfile.contains(
+            "apt-get install -y --no-install-recommends ffmpeg libnss3 && \
+             rm -rf /var/lib/apt/lists/* && find /tmp -mindepth 1 -delete"
+        ));
+    }
 
     #[test]
     fn mounts_each_other_member_read_only_after_the_worktree() {

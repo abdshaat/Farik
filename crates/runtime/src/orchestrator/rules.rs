@@ -1349,6 +1349,12 @@ fn budget(
             && !row.waiting_on_human
             && !busy.contains(&row.task_id)
     }) {
+        // A task the owner sent back to its plan is refined before it is judged spent (ADR 0081).
+        if row.status == TaskStatus::Refining
+            && requests::sent_back_unheard(&super::verify::history(deps, &row.task_id)?)
+        {
+            continue;
+        }
         if let Some(report) = escalate_if_spent(deps, team, row)? {
             return Ok(Some(report));
         }
@@ -5601,6 +5607,26 @@ mod tests {
             vec![EscalationRaisedBodyReason::Sessions]
         );
         assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn lets_a_sent_back_task_be_refined() {
+        let harness = Harness::new("orch-budget-sent-back", |_| {});
+        in_progress_with_sessions(&harness, 2, 2);
+        // The owner sends the task back to its plan: its refine session has not run yet.
+        harness.project.moved(
+            "CTV-1",
+            "in_progress",
+            "refining",
+            &json!({ "actor": "human", "requested_by": "human" }),
+        );
+        let orchestrator = harness.orchestrator(harness.recorded(vec![implement_stops_early()]));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(escalation_reasons(&harness), Vec::new());
+        assert_ne!(harness.row("CTV-1").status, TaskStatus::Escalated);
     }
 
     #[tokio::test]

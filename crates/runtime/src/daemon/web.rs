@@ -478,6 +478,8 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
     let mut sent: Option<u64> = None;
     // How many polls running have failed to read the log.
     let mut failed = 0;
+    // Whether the last round was full, so that more of the log is waiting.
+    let mut more = false;
     // ponytail: the log is re-read every 500 ms, because other processes append to it too and the
     // in-process `EventLog::subscribe` channel misses those; a cross-process notify replaces the
     // poll if 500 ms ever shows.
@@ -539,9 +541,11 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
                     });
                 }
             }
+            // A backlog longer than a round goes on at once, after anything waiting is heard.
+            () = std::future::ready(()), if more => {}
             _ = poll.tick(), if sent.is_some() => {}
         }
-        if !push(&mut socket, &state, &mut sent, &mut failed).await {
+        if !push(&mut socket, &state, &mut sent, &mut failed, &mut more).await {
             return;
         }
     }
@@ -550,21 +554,28 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
 /// How many polls running may fail to read the log before the socket is closed.
 const READS_TRIED: u32 = 3;
 
-/// Sends the subscription every event past `sent`, oldest first. Answers `false` when the socket
-/// is gone. A log that cannot be read is read again at the next poll; after `READS_TRIED` polls
-/// running have failed (`failed` counts them), the socket is closed with 1011, so that the page
-/// shows the failure rather than wait in silence.
+/// How many events one round of `push` sends, so that a request is answered between rounds.
+const ROUND: usize = 200;
+
+/// Sends the subscription the events past `sent`, oldest first, at most `ROUND` of them; `more`
+/// says whether a full round was sent, so that the next one is due at once. Answers `false` when
+/// the socket is gone. A log that cannot be read is read again at the next poll; after
+/// `READS_TRIED` polls running have failed (`failed` counts them), the socket is closed with 1011,
+/// so that the page shows the failure rather than wait in silence.
 async fn push(
     socket: &mut WebSocket,
     state: &Arc<DaemonState>,
     sent: &mut Option<u64>,
     failed: &mut u32,
+    more: &mut bool,
 ) -> bool {
+    *more = false;
     let Some(after) = *sent else {
         return true;
     };
     let query = EventQuery {
         after_seq: Some(after),
+        limit: Some(ROUND),
         ..EventQuery::default()
     };
     // A daemon with no project has no log, and nothing to send.
@@ -585,6 +596,7 @@ async fn push(
         return false;
     };
     *failed = 0;
+    *more = events.len() == ROUND;
     for event in events {
         *sent = Some(event.envelope.seq);
         let note = json!({
@@ -670,8 +682,27 @@ fn read_frame(text: &str) -> (Value, bool) {
     )
 }
 
-/// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, and an
-/// `unsubscribe` clears it.
+/// The sequence number of the newest event, 0 for an empty log, a log that cannot be read (the
+/// poll closes the socket then) and setup mode, which has no log.
+async fn log_head(state: &Arc<DaemonState>) -> u64 {
+    let Some(deps) = state.deps().cloned() else {
+        return 0;
+    };
+    let query = EventQuery {
+        newest_first: true,
+        limit: Some(1),
+        ..EventQuery::default()
+    };
+    tokio::task::spawn_blocking(move || deps.log.read(&query))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .and_then(|events| events.first().map(|event| event.envelope.seq))
+        .unwrap_or(0)
+}
+
+/// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, or to the head of
+/// the log without one, and an `unsubscribe` clears it.
 pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
     let Ok(request) = serde_json::from_str::<Value>(text) else {
         return failure(
@@ -727,8 +758,10 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
     }
     let result = match method {
         "subscribe" => {
-            *sent = params["from_seq"].as_u64();
-            Ok(json!({}))
+            let head = log_head(state).await;
+            // Without a `from_seq` the subscription starts after the newest event.
+            *sent = Some(params["from_seq"].as_u64().unwrap_or(head));
+            Ok(json!({ "head": head }))
         }
         "unsubscribe" => {
             *sent = None;
@@ -814,6 +847,7 @@ fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failu
                 limit: params["limit"]
                     .as_u64()
                     .and_then(|limit| usize::try_from(limit).ok()),
+                newest_first: params["newest_first"].as_bool().unwrap_or(false),
                 ..EventQuery::default()
             };
             let events = deps.log.read(&query).map_err(|error| internal(&error))?;
@@ -2048,7 +2082,10 @@ pub(super) mod tests {
         let mut socket = open(handle.info.port, &secret).await;
 
         let answer = call(&mut socket, 1, "subscribe", &json!({ "from_seq": 1 })).await;
-        assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 1, "result": {} }));
+        assert_eq!(
+            answer,
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "head": 3 } })
+        );
         for seq in [2, 3] {
             let note = next(&mut socket).await;
             assert_eq!(note["method"], "event", "{note}");
@@ -2061,6 +2098,75 @@ pub(super) mod tests {
         let note = next(&mut socket).await;
         assert_eq!(note["params"]["event"]["seq"], appended, "{note}");
         assert_eq!(note["params"]["event"]["kind"], "team.paused", "{note}");
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn subscribes_from_the_head_without_a_sequence() {
+        let daemon = TestDaemon::new("rpc-head", |_| {});
+        let log = &daemon.project.deps.log;
+        let seqs: Vec<u64> = (0..5).map(|_| paused_through(log)).collect();
+        let head = seqs[4];
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        let answer = call(&mut socket, 1, "subscribe", &json!({})).await;
+        assert_eq!(
+            answer,
+            json!({ "jsonrpc": "2.0", "id": 1, "result": { "head": head } })
+        );
+        let appended = paused_through(log);
+        let note = next(&mut socket).await;
+        assert_eq!(note["params"]["event"]["seq"], appended, "{note}");
+
+        let from = json!({ "from_seq": seqs[2] });
+        let answer = call(&mut socket, 2, "subscribe", &from).await;
+        assert_eq!(answer["result"]["head"], appended, "{answer}");
+        for seq in [seqs[3], seqs[4], appended] {
+            let note = next(&mut socket).await;
+            assert_eq!(note["params"]["event"]["seq"], seq, "{note}");
+        }
+        drop(socket);
+        handle.shutdown().await.expect("the daemon stops");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn sends_a_long_backlog_in_rounds() {
+        let daemon = TestDaemon::new("rpc-backlog", |_| {});
+        let log = &daemon.project.deps.log;
+        let seqs: Vec<u64> = (0..1000).map(|_| paused_through(log)).collect();
+        let head = seqs[999];
+        let (handle, secret) = on_a_socket(&daemon.state, &daemon.project.repo.path).await;
+        let mut socket = open(handle.info.port, &secret).await;
+
+        // Both frames are written before anything is read, as a page that asks at once does.
+        let from = json!({ "jsonrpc": "2.0", "id": 1, "method": "subscribe",
+            "params": { "from_seq": 0 } });
+        send_text(&mut socket, from.to_string()).await;
+        let status = json!({ "name": "serve.status", "params": {} });
+        let request = json!({ "jsonrpc": "2.0", "id": 2, "method": "query", "params": status });
+        send_text(&mut socket, request.to_string()).await;
+        let (mut events, mut last, mut answered) = (0, 0, false);
+        while !answered {
+            let frame = next(&mut socket).await;
+            if frame["id"] == 2 {
+                answered = true;
+            } else if frame["method"] == "event" {
+                events += 1;
+                last = frame["params"]["event"]["seq"].as_u64().expect("a seq");
+            }
+        }
+        assert!(events < 1000, "the query waited for {events} events");
+        // The rest of the backlog still arrives, in order, to the last one.
+        while last < head {
+            let note = next(&mut socket).await;
+            let seq = note["params"]["event"]["seq"].as_u64().expect("a seq");
+            assert_eq!(seq, last + 1, "{note}");
+            last = seq;
+        }
         drop(socket);
         handle.shutdown().await.expect("the daemon stops");
     }
@@ -2089,7 +2195,7 @@ pub(super) mod tests {
         let (handle, secret) = on_a_socket(&state, &daemon.project.repo.path).await;
         let mut socket = open(handle.info.port, &secret).await;
         let answer = call(&mut socket, 1, "subscribe", &json!({ "from_seq": 0 })).await;
-        assert_eq!(answer["result"], json!({}), "{answer}");
+        assert_eq!(answer["result"], json!({ "head": 0 }), "{answer}");
 
         rusqlite::Connection::open(&path)
             .expect("a second connection opens")
@@ -2616,7 +2722,7 @@ pub(super) mod tests {
         assert_eq!(nope["id"], 7, "{nope}");
         conforms(&nope, "rpcFailure");
 
-        let bare = call(&mut socket, 8, "subscribe", &json!({})).await;
+        let bare = call(&mut socket, 8, "subscribe", &json!({ "from_seq": "x" })).await;
         assert_eq!(bare["error"]["code"], -32602, "{bare}");
         assert_eq!(bare["id"], 8, "{bare}");
         conforms(&bare, "rpcFailure");
@@ -2678,7 +2784,10 @@ pub(super) mod tests {
         assert!(answer.get("result").is_some(), "{answer}");
         let from = json!({ "from_seq": newest - 1 });
         let answer = call(&mut socket, 3, "subscribe", &from).await;
-        assert_eq!(answer, json!({ "jsonrpc": "2.0", "id": 3, "result": {} }));
+        assert_eq!(
+            answer,
+            json!({ "jsonrpc": "2.0", "id": 3, "result": { "head": newest } })
+        );
         let note = next(&mut socket).await;
         assert_eq!(note["params"]["event"]["seq"], newest, "{note}");
 
@@ -2745,9 +2854,15 @@ pub(super) mod tests {
         }
         for id in 1..=3 {
             let answer = next(&mut socket).await;
+            // Only an unsubscribe answers `{}`; a subscribe answers the head of the log.
+            let result = if id == 2 {
+                json!({})
+            } else {
+                json!({ "head": newest })
+            };
             assert_eq!(
                 answer,
-                json!({ "jsonrpc": "2.0", "id": id, "result": {} }),
+                json!({ "jsonrpc": "2.0", "id": id, "result": result }),
                 "{answer}"
             );
         }
@@ -2767,7 +2882,7 @@ pub(super) mod tests {
         let mut socket = open(handle.info.port, &secret).await;
 
         let answer = call(&mut socket, 1, "subscribe", &json!({ "from_seq": newest })).await;
-        assert_eq!(answer["result"], json!({}), "{answer}");
+        assert_eq!(answer["result"], json!({ "head": newest }), "{answer}");
         let answer = call(&mut socket, 2, "unsubscribe", &json!({})).await;
         assert_eq!(answer["result"], json!({}), "{answer}");
         let missed = paused_through(log);

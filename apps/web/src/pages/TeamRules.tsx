@@ -1,4 +1,11 @@
-import { Button, Dialog, InfoTip, Switch, TextField } from "@catervas/ui";
+import {
+	Button,
+	Dialog,
+	InfoTip,
+	Switch,
+	TextArea,
+	TextField,
+} from "@catervas/ui";
 import { type ReactNode, useState } from "react";
 import { useConnection } from "../app/connection.tsx";
 import { type Refusal, refusalsOf, said, saidAll } from "../app/refusals.ts";
@@ -646,6 +653,42 @@ export function UiPaths(part: Part) {
 				</Button>
 				<PutBack onClick={defaults && (() => setMine(defaults.uiPaths))} />
 			</div>
+			{foot}
+		</Part>
+	);
+}
+
+/** What a package name may be: Debian's, in lower case. */
+const PACKAGE_NAME = /^[a-z0-9][a-z0-9+.-]*$/;
+
+/** Advanced: the system packages the sandbox's image holds besides the shipped ones (ADR 0081). */
+export function SandboxTools(part: Part) {
+	const { saved } = part;
+	const [text, setText] = useState((saved.sandbox?.packages ?? []).join("\n"));
+	const packages = text.split(/[\s,]+/).filter((name) => name !== "");
+	const wrong =
+		packages.length > 40 ||
+		new Set(packages).size !== packages.length ||
+		packages.some((name) => !PACKAGE_NAME.test(name));
+	const { sandbox: _, ...rest } = saved;
+	const next: Team =
+		packages.length > 0 ? { ...rest, sandbox: { packages } } : rest;
+	const { foot } = useChange(part, wrong ? saved : next, { wrong });
+	return (
+		<Part id="rules-sandbox" title={t("sandboxToolsTitle")}>
+			<div className={styles.titled}>
+				<Bullets text={t("sandboxToolsLead")} />
+				<InfoTip id="sandboxTools-info">
+					<Bullets text={t("sandboxToolsMore")} />
+				</InfoTip>
+			</div>
+			<TextArea
+				id="sandbox-packages"
+				label={t("sandboxToolsLabel")}
+				value={text}
+				onChange={setText}
+				{...(wrong && { error: t("refuseSandboxPackage") })}
+			/>
 			{foot}
 		</Part>
 	);

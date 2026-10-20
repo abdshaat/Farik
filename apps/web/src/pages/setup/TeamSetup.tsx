@@ -115,6 +115,8 @@ export type Team = {
 		[key: string]: unknown;
 	};
 	preview?: Preview;
+	/** Debian packages installed in the sandbox image (ADR 0081). */
+	sandbox?: { packages: string[] };
 };
 export type Criterion = {
 	name: string;
