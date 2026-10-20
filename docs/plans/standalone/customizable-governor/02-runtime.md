@@ -37,6 +37,8 @@ runtime/src/claude.rs                    modifies: per-agent deny rules (T8); te
 runtime/src/tools/git.rs                 modifies: push to an allowed remote (T9); tests
 runtime/src/prompt.rs                    modifies: rules section (T10); tests
 runtime/src/cost.rs, its five callers    modifies: agent session limits (T12); tests
+runtime/src/daemon/team.rs               modifies: kit rows' plan_approved (T12b); tests
+runtime/src/daemon/hooks.rs              modifies: ask()'s words for an ask tool (T12b); tests
 cli/src/team.rs, cli/src/doctor.rs       modifies: show and check the new lists (T10)
 docs/schemas/event.schema.json           modifies: refusal names, if enumerated (T7, T9)
 ```
@@ -106,6 +108,18 @@ Files: `runtime/src/cost.rs` and its callers in `transitions.rs`, `orchestrator/
 Tests (`cost.rs`): `an_agents_session_limits_override_the_teams` — team `budgets.session.max_tool_calls: 100`, agent `ada` `session.max_tool_calls: 50` and `max_wall_clock_seconds: 600`: `ada`'s state has 50 calls and 10 minutes, `theo`'s 100 and the role's 30 minutes, `None` the team's.
 
 - [x] `feat(runtime): an agent's own session budget`
+
+### Task 12b: the web app learns which tools the owner's plan marks, and an asking tool does not say it costs money
+
+Added 2026-10-20 after plan 3: its `ToolChoice` hides the choice for a plan-marked tool (decision 10), which it reads from a kit row's `plan_approved` (`apps/web/src/pages/Team.tsx` `KitService.planApproved`), and nothing sends it.
+
+Files: `runtime/src/daemon/team.rs` (the kit rows built near line 754), `runtime/src/daemon/hooks.rs` (`ask`), `docs/schemas/rpc.schema.json` (the kit row, if it is described there)
+Decisions: a kit row gains `plan_approved`, an array of tool names, sorted, set only when not empty: the tools `plan_tools_of` would mark for that connector (read from the kit entry itself, the same source). `ask(...)` gains the tool's `ConnectorTag`; for a session about no task it says "{tool} of {server} costs money" for `paid` and "{tool} of {server} asks you first" for `ask`, the rest of the sentence unchanged.
+Tests:
+- `team.rs`: `a_kit_row_names_the_tools_the_owners_plan_approves` — the Marketing Specialist's kit row for a connector with plan-marked tools carries them in `plan_approved`; a connector with none has no `plan_approved` key.
+- `hooks.rs`: `an_ask_tool_outside_a_task_says_it_asks_not_that_it_costs` — an `ask` tool called from a session about no task is denied with text containing "asks you first" and not "costs money".
+
+- [ ] `feat(runtime): the web app learns which tools the owner's plan marks`
 
 ## Verification
 
