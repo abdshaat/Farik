@@ -3,7 +3,7 @@
 Status: ready
 Branch: `feat/customizable-governor` (its own pull request to `main`); the web plan may run on `feat/customizable-governor-web` in its own worktree, after plan 1's Task 1 (the schema) is committed, and is merged into this branch before the record task
 Decision: ADR 0080
-Spec: `docs/SPEC.md` 5.5, 5.6, 5.7, 5.12, 5.14, 8.6 (revision 0.135)
+Spec: `docs/SPEC.md` 5.5, 5.6, 5.7, 5.12, 5.14, 8.6 (revision 0.136)
 Depends on: `origin/main` at `d581bb6b` (pull requests #83 and #84 merged)
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-20, against the three readiness rules (ADR 0065)
 
