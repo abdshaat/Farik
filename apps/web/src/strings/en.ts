@@ -26,7 +26,7 @@ export const en = {
 	noPage: "No page here",
 	noPageHome: "Go to the start page",
 	linkUsed:
-		"This start link was already used. Each link works once, so run catervas serve again for a new one.",
+		"This start link was already used. In your project folder, run catervas open for a new one.",
 	noSessionTitle: "Open Catervas from its start link",
 	noSessionBody:
 		"For your safety, this page only works when opened from the link Catervas gives you. Each link works once, so an old one from your history will not open it.",
@@ -196,6 +196,7 @@ export const en = {
 	browserNote:
 		"A folder that is not a git project can’t be used yet. For a new project, go back and choose “No, start a new one”: Catervas makes the folder and sets up git for you.",
 	opening: "Opening your project…",
+	openingCatervas: "Opening Catervas…",
 	changeProject: "Change project…",
 	changeShort: "Change",
 	projectWord: "project",
@@ -416,7 +417,7 @@ export const en = {
 	teamCostTitle: "What a team like this costs",
 	teamCostNote: "It is a guide, not a limit.",
 	teamCostDesigner:
-		"{designer} uses the same model as {developer}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
+		"{designer} works with {model}, so a day costs more.\nBefore changing a screen, {designer} writes a plan, which costs a little too.",
 	teamCostLimitBefore: "Set a limit in ",
 	teamCostLimitAfter: ".",
 	agentBack: "Back to your team",
@@ -782,7 +783,9 @@ export const en = {
 	helpNothing: "There is nothing to choose here yet.",
 	helpTried: "What {name} tried",
 	helpNow: "What should happen now?",
-	helpNote: "Add a note for {name} (optional)",
+	helpNote: "Add a note for {name}",
+	helpNoteNeeded: "Write what {name} should know",
+	helpCancelled: "Cancelled by the owner",
 	helpWaiting: "Waiting since",
 	helpSpent: "Spent",
 	helpSpentOf: "{spent} of {max}",
@@ -1147,7 +1150,7 @@ export const en = {
 	draftPlanSent:
 		"Drafting it as {id}. Your team starts building once it is done.",
 	channelIntro:
-		"Where the team talks. Nothing said here starts work: to ask for something, use the request box on Today.",
+		"Where the team talks. A message to no one goes to {name}. To ask for work, use the request box on Today.",
 	channelMessages: "Messages",
 	channelYou: "You",
 	channelWhy: "Why: {reason}",
@@ -2630,7 +2633,6 @@ export const en = {
 	goalPlanning: "{name} is planning the next steps",
 	goalUnderWay: "{open} tasks under way, {done} done",
 	goalUnderWayOne: "1 task under way, {done} done",
-	goalWaitingOnYou: "Waiting on you ({count})",
 	goalPaused: "Paused",
 	goalNextRound: "The next steps are planned when the team is free",
 	goalPlannerOff: "{name} is {status}",

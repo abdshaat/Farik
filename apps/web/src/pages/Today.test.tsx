@@ -2741,6 +2741,30 @@ describe("suggested connections", () => {
 		expect(fewer.getAttribute("aria-expanded")).toBe("true");
 	});
 
+	it("holds_suggestions_while_something_waits_on_you", async () => {
+		const question = {
+			task_id: "CTV-3",
+			kind: "question",
+			agent_id: "mira",
+			title: "the launch post",
+			line: "question line",
+		};
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION)],
+			waiting: [question],
+		});
+		await screen.findByRole("heading", { name: "Waiting on you (1)" });
+		expect(
+			screen.queryByRole("heading", { name: en.suggestionsTitle }),
+		).toBeNull();
+		cleanup();
+		await today({ team: only(mira), kits: [pmKit(KIT_NOTION)] });
+		expect(
+			await screen.findByRole("heading", { name: en.suggestionsTitle }),
+		).toBeTruthy();
+	});
+
 	it("puts_what_moved_before_the_suggested_connections", async () => {
 		await today({
 			team: only(mira, ada),

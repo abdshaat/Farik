@@ -227,6 +227,9 @@ export function Today() {
 		{},
 	);
 	const keyRefused = account?.keyRefused === true;
+	// Suggestions wait until nothing else waits on the owner.
+	const nothingWaits =
+		(waiting?.waiting.length ?? 0) === 0 && cards.length === 0 && !keyRefused;
 	const agents = team?.team.agents ?? [];
 	const agent = (id: string | null) => agents.find((a) => a.id === id);
 	const pm = agents.find(
@@ -335,7 +338,7 @@ export function Today() {
 							),
 						})}
 					</h2>
-					{waiting.waiting.length === 0 && cards.length === 0 && !keyRefused ? (
+					{nothingWaits ? (
 						<p className={styles.muted}>{t("waitingNone")}</p>
 					) : (
 						GROUP_ORDER.map((group) => {
@@ -405,7 +408,7 @@ export function Today() {
 					)}
 				</section>
 			)}
-			{team && (
+			{team && waiting && nothingWaits && (
 				<SuggestedConnections
 					team={team.team}
 					kits={team.kits ?? []}

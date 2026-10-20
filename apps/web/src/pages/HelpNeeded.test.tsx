@@ -88,7 +88,7 @@ describe("help page", () => {
 			"help-note",
 		]);
 
-		fireEvent.change(screen.getByLabelText("Add a note for Theo (optional)"), {
+		fireEvent.change(screen.getByLabelText("Add a note for Theo"), {
 			target: { value: "Try the slow network." },
 		});
 		fireEvent.click(screen.getByRole("button", { name: "Give 2 more tries" }));
@@ -114,8 +114,8 @@ describe("help page", () => {
 			en.refuseExtraTries,
 		);
 
-		fireEvent.change(screen.getByLabelText("Add a note for Theo (optional)"), {
-			target: { value: "" },
+		fireEvent.change(screen.getByLabelText("Add a note for Theo"), {
+			target: { value: "Change the amounts." },
 		});
 		fireEvent.click(
 			screen.getByRole("button", { name: "Ask Mira to change the plan" }),
@@ -126,7 +126,7 @@ describe("help page", () => {
 				body: {
 					task_id: "CTV-1",
 					to: "refining",
-					message: "Ask Mira to change the plan",
+					message: "Change the amounts.",
 				},
 			},
 		});
@@ -140,6 +140,45 @@ describe("help page", () => {
 		])
 			expect(within(about).getByText(text)).toBeTruthy();
 		await expectNoAxeViolations(container);
+	});
+
+	it("wants_a_note_before_answering", async () => {
+		const { s } = await openedGate("/tasks/CTV-1/help", HELP, ESCALATED);
+		const button = (name: string) =>
+			screen.getByRole("button", { name }) as HTMLButtonElement;
+		await screen.findByLabelText("Add a note for Theo");
+		expect(button("Give 2 more tries").disabled).toBe(true);
+		expect(button("Ask Mira to change the plan").disabled).toBe(true);
+		expect(button("Cancel the task").disabled).toBe(false);
+		expect(
+			screen.getByText(en.helpNoteNeeded.replace("{name}", "Theo")),
+		).toBeTruthy();
+		fireEvent.change(screen.getByLabelText("Add a note for Theo"), {
+			target: { value: "The file is on main now." },
+		});
+		expect(button("Give 2 more tries").disabled).toBe(false);
+		expect(button("Ask Mira to change the plan").disabled).toBe(false);
+		fireEvent.click(button("Give 2 more tries"));
+		expect(
+			((await sentCommand(s)).params as { command: { body: object } }).command
+				.body,
+		).toMatchObject({ message: "The file is on main now." });
+	});
+
+	it("names_the_reviewer_who_raised_the_block", async () => {
+		await openedGate("/tasks/CTV-1/help", HELP, ESCALATED, undefined, {
+			"task.history": {
+				events: [
+					event(
+						2,
+						"task.transitioned",
+						{ from: "verifying", to: "blocked", requested_by: "ada" },
+						"2026-09-25T07:00:00Z",
+					),
+				],
+			},
+		});
+		expect(await screen.findByLabelText("Add a note for Ada")).toBeTruthy();
 	});
 
 	it("signs_the_agents_own_words_and_lists_what_it_tried_since", async () => {

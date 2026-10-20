@@ -120,7 +120,7 @@ export function ConnectionProvider(props: {
 			} else if (answer.status === 401) setStatus("no_session");
 			else lose();
 		}
-		async function start() {
+		async function redeem() {
 			const code = /^#([0-9a-f]{64})$/i.exec(location.hash)?.[1];
 			if (code) {
 				const sent = fetch("/connect", {
@@ -141,8 +141,18 @@ export function ConnectionProvider(props: {
 					} else setLinkUsed(true);
 				} catch {}
 			}
+		}
+		async function start() {
+			await redeem();
 			await check();
 		}
+		// A start link opened in this tab only changes the hash.
+		const onHash = () => {
+			redeem().then(() => {
+				if (!stopped && current === null) check();
+			});
+		};
+		addEventListener("hashchange", onHash);
 		disconnect.current = async () => {
 			const answer = await fetch("/disconnect", {
 				method: "POST",
@@ -164,6 +174,7 @@ export function ConnectionProvider(props: {
 		start();
 		return () => {
 			stopped = true;
+			removeEventListener("hashchange", onHash);
 			clearTimeout(retry);
 			current?.close();
 		};

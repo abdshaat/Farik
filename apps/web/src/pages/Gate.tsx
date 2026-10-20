@@ -26,6 +26,7 @@ export type HistoryEvent = {
 	kind: string;
 	agentId?: string;
 	body: {
+		requestedBy?: string;
 		kind?: string;
 		text?: string;
 		writtenBy?: string;
