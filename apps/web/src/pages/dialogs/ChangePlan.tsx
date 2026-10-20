@@ -19,7 +19,7 @@ export function ChangePlan({
 	return (
 		<Dialog
 			open
-			title={t("taskChangePlanTitle").replace("{title}", title)}
+			title={t("taskChangePlanTitle").replace("{id}", id)}
 			onClose={onClose}
 			actions={
 				<>
@@ -40,6 +40,7 @@ export function ChangePlan({
 				</>
 			}
 		>
+			<p>{title}</p>
 			<TextArea
 				id="change-plan-why"
 				label={t("taskChangePlanWhy")}

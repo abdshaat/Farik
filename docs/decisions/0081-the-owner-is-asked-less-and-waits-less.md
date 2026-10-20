@@ -28,6 +28,10 @@ Amends SPEC 5.5 (the session budget), 5.9 (the team's prompts), 5.16 (the re-pla
 7. **The help page of a sessions escalation shows sessions.** `task.tries` gains `sessions` and `max_sessions` (from the budget state); "About this task" shows "Sessions 6 of 6".
 8. **A preview error without an error line shows its last lines without npm's `notice` and `warn` lines.**
 
+9. **Git reads work in an agent's sandbox.** Found the same evening: an agent's container mounted the task's worktree but not the project's git store, so its `.git` file pointed nowhere and every read-only git command (ADR 0079 decision 9) failed; only the checks' container mounted the store (ADR 0069). Every task container now mounts the git store read-only, as the checks' does. Writes still go through Catervas's git tools.
+10. **"Idle" names what waits on the owner.** The same evening the driver printed "idle: nothing on the board needs doing" for three hours while a task waited for the owner's verdict (a `human` criterion) and another waited on it as a dependency. When nothing runs, the idle line names each task waiting for the owner's acceptance ("CTV-21 waits for you to accept it") and each ready task held only by an unaccepted dependency ("CTV-23 waits for CTV-21"); Today's waiting list shows the first as an acceptance row.
+11. **The send-back dialog's heading is short:** "Send CTV-23 back to its plan?", the title below it.
+
 ## Alternatives rejected
 
 - **Install packages in a running container with `docker exec -u 0`.** A task container without the network tier has no network, the preview runs in other containers, and a recreated container loses them.
