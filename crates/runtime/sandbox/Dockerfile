@@ -8,6 +8,10 @@
 # the Rust toolchain lives under /usr/local, world-writable, so that cargo, npm and pnpm can write
 # their caches whoever runs them. The image's /tmp must be empty: root's npm cache, left there by
 # the build, would be the user's uid's to write, and it could not.
+#
+# The libraries a headless Chrome needs (libnss3, libnspr4, ...) are installed, because a project's
+# own browser binary (Remotion, Playwright, Puppeteer) fails to start without them and an agent
+# cannot install system packages here. The browser itself is not: projects bring it through npm.
 FROM node:24-bookworm-slim
 
 ENV HOME=/tmp \
@@ -17,6 +21,9 @@ ENV HOME=/tmp \
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates coreutils curl git python3 build-essential \
+        libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libgbm1 \
+        libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 libcairo2 \
+        libasound2 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # The toolchain pinned in rust-toolchain.toml.
