@@ -16,4 +16,4 @@ Writes revision 0.134 (2026-10-20, ADR 0079) at the end of the revision paragrap
 - 8.5: the gate `dependency_cancelled`.
 No test: the spec is prose (hard rule 8 is the check).
 
-- [ ] `docs(spec): the governor gets out of the way, revision 0.134 (ADR 0079)`
+- [x] `docs(spec): the governor gets out of the way, revision 0.134 (ADR 0079)`
