@@ -791,6 +791,7 @@ mod tests {
             private_folder_busy: false,
             lane_builder: None,
             solo: false,
+            past_limit_allowed: false,
         }
     }
 

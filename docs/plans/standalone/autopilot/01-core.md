@@ -171,7 +171,7 @@ Produces: `AssignmentInput.past_limit_allowed`.
 Tests (`gates.rs` `mod tests`):
 - `an_idle_agent_under_autopilot_takes_work_past_its_limit` — with `wip_limit: 1` and `assignee_open_tasks: 1` the assignment is refused with the limit's words when `past_limit_allowed` is false and passes when true; with `wip_limit: 0` it is refused either way.
 
-- [ ] `feat(core): an idle agent takes work past its limit under autopilot`
+- [x] `feat(core): an idle agent takes work past its limit under autopilot`
 
 ### Task 5: a paid or asking call runs under autopilot, within its rate
 

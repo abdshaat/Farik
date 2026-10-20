@@ -1642,6 +1642,7 @@ fn assignment(
         // Filled by `context`, which reads the contracts of the tasks in the lane.
         lane_builder: None,
         solo: team.is_solo(),
+        past_limit_allowed: false,
     })
 }
 
