@@ -1,6 +1,8 @@
 //! Catervas's harness: schemas, the task state machine, the governor, and the cost model.
 //! This crate performs no I/O.
 
+/// What the team may decide for the owner under autopilot (ADR 0082).
+pub mod autopilot;
 /// The one place a task's branch name is made.
 pub mod branch;
 /// Budgets and limits: session limits, the session ledger, and the budget check.

@@ -152,7 +152,7 @@ Tests (`autopilot.rs` `mod tests`):
 - `offers_the_owners_choices_for_each_reason_within_the_teams_limits` — asserts the lists of Decisions for `iterations` (with `Spent::default()`), `budget` with and without `before`, `blocked` with `blocked_from` `in_progress` and `refining`, `readiness_failures`, `integration` with 2 and 3 reopens, `approval` (`approve_plan` first), `acceptance` (`[accept_result, flag]`), `permission` with `before` `in_progress` (`carry_on` first) and with `before` `refining` (no `carry_on`), `preview`, `folder_change` with 3 retries (`[flag]`), `something_new`; that `iterations` and `sessions` with `grants: 3` give `[back_to_plan, cancel, flag]`; that every list ends with `flag`; and that `move_of` gives `To { in_progress, Some(2), false }` for `more_tries`, `To { verifying, None, false }` for `answer_block` from `verifying`, `None` for `more_room` with no `before`, `Reopen` for `reopen_integration`, `ApprovePlan` for `approve_plan`, and `To { in_progress, None, false }` for `carry_on` from `in_progress`.
 - `asks_the_architect_technical_questions_unless_it_asks_or_is_missing` — asserts `answerer` gives the Product Manager for `product`, the Architect for `technical` from a Developer with an Architect, and the Product Manager for `technical` with no Architect and for the Architect's own question.
 
-- [ ] `feat(core): the team's choices for what waits on it`
+- [x] `feat(core): the team's choices for what waits on it`
 
 ### Task 3: the Product Manager takes the owner's moves under autopilot
 
