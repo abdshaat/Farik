@@ -99,7 +99,7 @@ Files: `runtime/src/preview.rs`
 ### Task 9: the spec says it
 
 Files: `docs/SPEC.md` (5.5, 5.9, 5.16, 8.3, 8.6, the rpc and team file formats, revision 0.136)
-- [ ] `docs(spec): the owner is asked less and waits less, revision 0.136 (ADR 0081)`
+- [x] `docs(spec): the owner is asked less and waits less, revision 0.136 (ADR 0081)`
 
 ## Verification
 
