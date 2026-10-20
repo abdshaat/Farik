@@ -88,7 +88,7 @@ Tests (`permissions.rs` `mod tests`):
 - `a_read_only_path_is_read_and_never_written` — asserts that with `read_only_paths: [".env"]` and `allowed_paths: [".env", "src/**"]` a `read` call on `.env` passes and a `write_workspace` call on `.env` is `PathReadOnly { path: ".env" }`.
 - `catervas_state_is_never_written_and_its_keys_never_read` — asserts that with `protected_paths` empty (everything lifted) and `allowed_paths: ["**"]`: a `read` of `.catervas/local/catervas.db` passes; a `write_workspace` of it is `PathReadOnly`; a `read` of `.catervas/local/daemon.json` and of `.catervas/local/sessions/s1/settings.json` is `PathProtected`.
 
-- [ ] `feat(core): read-only paths, and Catervas's own state is never written`
+- [x] `feat(core): read-only paths, and Catervas's own state is never written`
 
 ### Task 4: the owner's git subcommands run in commands
 

@@ -732,6 +732,7 @@ impl Call<'_> {
             &ToolCallContext {
                 allowed_paths,
                 protected_paths: self.team.rules().protected_paths,
+                read_only_paths: self.team.rules().read_only_paths,
                 approved_calls: Vec::new(),
             },
         )

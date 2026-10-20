@@ -372,6 +372,10 @@ fn tool(refusal: &ToolRefusal) -> (&'static str, String) {
             "path_protected",
             format!("{path} is protected, and no tool reads or writes it (5.12)"),
         ),
+        ToolRefusal::PathReadOnly { path } => (
+            "path_read_only",
+            format!("{path} is read only: the owner lets agents read it, not change it"),
+        ),
         ToolRefusal::PathsMissing => (
             "paths_missing",
             "the call names no path, so none could be checked".to_string(),

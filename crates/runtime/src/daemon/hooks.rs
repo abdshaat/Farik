@@ -377,6 +377,7 @@ fn judge_call(
         &ToolCallContext {
             allowed_paths,
             protected_paths: team.rules().protected_paths,
+            read_only_paths: team.rules().read_only_paths,
             approved_calls: Vec::new(),
         },
     )

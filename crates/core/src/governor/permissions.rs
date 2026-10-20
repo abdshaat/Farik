@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 
 use super::paths::{GlobError, PathRefusal, check_allowed_paths, check_protected_paths};
-use super::team_rules::TeamRules;
+use super::team_rules::{CATERVAS_KEYS, CATERVAS_STATE, TeamRules};
 use crate::contract::{Role, TaskId};
 use crate::team::canonical_json;
 
@@ -101,12 +101,15 @@ pub struct ToolCallContext {
     pub allowed_paths: Vec<String>,
     /// The team's `protected_paths` (spec 5.12).
     pub protected_paths: Vec<String>,
+    /// The paths no `write_workspace` call may change though a read may see them (ADR 0080
+    /// decision 3).
+    pub read_only_paths: Vec<String>,
     /// The external-effect calls the human has approved.
     pub approved_calls: Vec<ApprovedCall>,
 }
 
 /// Why a tool call is refused. The first reason found, in the order tier, protected paths,
-/// allowed paths, approval.
+/// read-only paths, allowed paths, approval.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolRefusal {
     /// The agent does not hold the tool's tier.
@@ -122,6 +125,12 @@ pub enum ToolRefusal {
     /// The call touches a protected path, whatever its tier; an absolute, empty, or climbing
     /// path is refused under this reason too, because the path check refuses it outright.
     PathProtected {
+        /// The first such path.
+        path: String,
+    },
+    /// A `write_workspace` call touches a read-only path, or Catervas's own state, which no rule
+    /// lifts (ADR 0080 decisions 3 and 4).
+    PathReadOnly {
         /// The first such path.
         path: String,
     },
@@ -381,8 +390,8 @@ pub fn check_design_plan(
 }
 
 /// Decides one tool call (`docs/SPEC.md` section 5.6): the agent must hold the tool's tier;
-/// no path may be protected, even for a `read` tool; a `write_workspace` call names at least one
-/// path and stays within the contract's allowed paths; an `external_effect` call needs the tool
+/// no path may be protected or one of Catervas's keys, even for a `read` tool; a `write_workspace`
+/// call names at least one path, none read only or under Catervas's state, and stays within the contract's allowed paths; an `external_effect` call needs the tool
 /// to be pre-authorised or this exact input approved by the human.
 ///
 /// # Errors
@@ -397,12 +406,19 @@ pub fn evaluate_tool_call(
     if !grants.tiers.contains(&tier) {
         return Err(ToolRefusal::TierNotGranted { tier });
     }
+    let keys: Vec<String> = CATERVAS_KEYS.iter().map(|key| (*key).to_string()).collect();
+    check_protected_paths(&request.paths, &keys)
+        .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathProtected { path }))?;
     check_protected_paths(&request.paths, &context.protected_paths)
         .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathProtected { path }))?;
     if tier == PermissionTier::WriteWorkspace {
         if request.paths.is_empty() {
             return Err(ToolRefusal::PathsMissing);
         }
+        let mut read_only = context.read_only_paths.clone();
+        read_only.push(CATERVAS_STATE.to_string());
+        check_protected_paths(&request.paths, &read_only)
+            .map_err(|refusal| first_path(refusal, |path| ToolRefusal::PathReadOnly { path }))?;
         check_allowed_paths(&request.paths, &context.allowed_paths).map_err(|refusal| {
             first_path(refusal, |path| ToolRefusal::PathOutsideAllowed { path })
         })?;
@@ -1202,6 +1218,7 @@ mod tests {
         ToolCallContext {
             allowed_paths: strings(&["src/login/**"]),
             protected_paths: TeamRules::default().protected_paths,
+            read_only_paths: Vec::new(),
             approved_calls: Vec::new(),
         }
     }
@@ -1365,6 +1382,74 @@ mod tests {
                 path: ".env".to_string()
             })
         );
+    }
+
+    #[test]
+    fn a_read_only_path_is_read_and_never_written() {
+        let mut context = a_context();
+        context.read_only_paths = strings(&[".env"]);
+        context.protected_paths = Vec::new();
+        context.allowed_paths = strings(&[".env", "src/**"]);
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("read_file", T::Read, &[".env"]),
+                &developer_grants(),
+                &context
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("write_file", T::WriteWorkspace, &[".env"]),
+                &developer_grants(),
+                &context
+            ),
+            Err(ToolRefusal::PathReadOnly {
+                path: ".env".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn catervas_state_is_never_written_and_its_keys_never_read() {
+        let mut context = a_context();
+        context.protected_paths = Vec::new();
+        context.allowed_paths = strings(&["**"]);
+        let grants = developer_grants();
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call("read_file", T::Read, &[".catervas/local/catervas.db"]),
+                &grants,
+                &context
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            evaluate_tool_call(
+                &a_call(
+                    "write_file",
+                    T::WriteWorkspace,
+                    &[".catervas/local/catervas.db"]
+                ),
+                &grants,
+                &context
+            ),
+            Err(ToolRefusal::PathReadOnly {
+                path: ".catervas/local/catervas.db".to_string()
+            })
+        );
+        for key in [
+            ".catervas/local/daemon.json",
+            ".catervas/local/sessions/s1/settings.json",
+        ] {
+            assert_eq!(
+                evaluate_tool_call(&a_call("read_file", T::Read, &[key]), &grants, &context),
+                Err(ToolRefusal::PathProtected {
+                    path: key.to_string()
+                }),
+                "{key}"
+            );
+        }
     }
 
     #[test]
