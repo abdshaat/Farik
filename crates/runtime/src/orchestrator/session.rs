@@ -16,8 +16,8 @@ use catervas_core::governor::transition::TransitionRequest;
 use catervas_core::governor::transition_table::TransitionActor;
 use catervas_core::pricing::Usage;
 use catervas_core::team::{
-    Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, custom_server,
-    private_folder,
+    Agent, CustomServer, CustomTransport, Effort, Preview, RoleWire, Team, changes_code,
+    custom_server, may_build, private_folder,
 };
 use catervas_protocol::event::{
     AgentSleptBody, EventBody, EventIds, EventKind, NoteWrittenBody, NoteWrittenBodyKind,
@@ -961,7 +961,7 @@ fn session_skills_of(
         ..EventQuery::default()
     })?;
     // The kit's skills are Catervas's own: loaded on demand beside the agent's and the team's.
-    let kit = (deps.tools.kits)(Role::from(ask.agent.role))?;
+    let kit = (deps.tools.kits)(working_role(ask))?;
     Ok(session_skills(
         deps.tools.files.root(),
         team,
@@ -1139,7 +1139,7 @@ fn closing_instruction(ask: &SessionAsk<'_>) -> Option<&'static str> {
 /// `network`. The browser's alone: a custom connector's tag governs its calls whatever the tiers,
 /// and widening them would let `WebFetch` through for an agent without `network` (finding S2).
 fn registered_tiers(ask: &SessionAsk<'_>, team: &Team, browses: bool) -> Vec<PermissionTier> {
-    let held = ask.agent.tiers(&team.permissions());
+    let held = held_tiers(ask, team);
     let mut tiers = if matches!(ask.purpose, SessionPurpose::Explore | SessionPurpose::Chat) {
         let mut tiers = vec![PermissionTier::Read];
         if held.contains(&PermissionTier::Network) {
@@ -1151,6 +1151,39 @@ fn registered_tiers(ask: &SessionAsk<'_>, team: &Team, browses: bool) -> Vec<Per
     };
     if browses && !tiers.contains(&PermissionTier::Network) {
         tiers.push(PermissionTier::Network);
+    }
+    tiers
+}
+
+/// The role `ask`'s session works as: the task's, when its agent builds a task of another role
+/// it may build (the Architect a Software Developer's, ADR 0077), so it works with that role's
+/// instructions and skills; otherwise the agent's own.
+fn working_role(ask: &SessionAsk<'_>) -> Role {
+    let own = Role::from(ask.agent.role);
+    match ask.contract {
+        Some(contract)
+            if ask.purpose == SessionPurpose::Implement
+                && contract.assignee_role != own
+                && may_build(own, contract.assignee_role) =>
+        {
+            contract.assignee_role
+        }
+        _ => own,
+    }
+}
+
+/// The tiers `ask`'s agent holds for its session: its own, and `git_remote` too when it builds a
+/// task of a role that changes code and the team lets builders push, as that role's agents may.
+fn held_tiers(ask: &SessionAsk<'_>, team: &Team) -> Vec<PermissionTier> {
+    let permissions = team.permissions();
+    let mut tiers = ask.agent.tiers(&permissions);
+    let working = working_role(ask);
+    if working != Role::from(ask.agent.role)
+        && changes_code(working)
+        && permissions.push
+        && !tiers.contains(&PermissionTier::GitRemote)
+    {
+        tiers.push(PermissionTier::GitRemote);
     }
     tiers
 }
@@ -1330,7 +1363,7 @@ fn session_spec_without(
     left_out: &BTreeSet<String>,
 ) -> Result<SessionSpec, OrchestratorError> {
     let files = &deps.tools.files;
-    let role_id = Role::from(ask.agent.role);
+    let role_id = working_role(ask);
     let mut role = load_role(role_id)?;
     let skills = session_skills_of(deps, team, ask)?;
     // A confirmed skill of a shipped skill's name replaces it: it is loaded on demand, and the
@@ -1356,8 +1389,7 @@ fn session_spec_without(
         files.read_memory(&ask.agent.id)?
     };
     let criteria = files.read_criteria()?;
-    let tiers: BTreeSet<PermissionTier> =
-        ask.agent.tiers(&team.permissions()).into_iter().collect();
+    let tiers: BTreeSet<PermissionTier> = held_tiers(ask, team).into_iter().collect();
     let builtin_tools = builtins_of(ask, &tiers);
     let tools = offered_tools(deps, team, ask);
     // A session given one tool has it whatever the agent's tiers.
@@ -2603,6 +2635,72 @@ mod tests {
         assert!(
             !prompt.contains("docs/catervas/architecture/ (Architect)"),
             "{prompt}"
+        );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn the_architect_builds_a_developers_task_as_a_developer() {
+        let harness = Harness::new("session-architect-builds", |wire| {
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .push(catervas_core::team::fixtures::an_agent_wire(
+                    "arch",
+                    "architect",
+                ));
+            wire["policy"]["permissions"] = json!({ "push": true, "run_commands": true });
+        });
+        harness.assigned("CTV-1", "arch", "dev-a");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let deps = &orchestrator.deps;
+        let team = deps.tools.files.read_team().expect("the team");
+        let contract = deps
+            .tools
+            .files
+            .read_contract(&"CTV-1".parse().expect("a task id"))
+            .expect("the contract");
+        let spec_for = |purpose: SessionPurpose| {
+            session_spec(
+                deps,
+                &team,
+                &SessionAsk {
+                    agent: agent(&team, "arch"),
+                    contract: Some(&contract),
+                    purpose,
+                    cwd: deps.tools.files.root().to_path_buf(),
+                    executor: None,
+                    read_only: false,
+                    only_tool: None,
+                    tools: None,
+                    in_reply_to: None,
+                    thread: None,
+                    initial_prompt: String::new(),
+                },
+            )
+            .expect("the spec")
+        };
+
+        let work = spec_for(SessionPurpose::Implement);
+        assert!(
+            work.system_prompt
+                .contains("### You are a Software Developer"),
+            "{}",
+            work.system_prompt
+        );
+        assert!(
+            work.catervas_tools
+                .iter()
+                .any(|tool| tool == "catervas_git_push"),
+            "{:?}",
+            work.catervas_tools
+        );
+        // Any other session of its is the Architect's own.
+        let chat = spec_for(SessionPurpose::Chat);
+        assert!(
+            chat.system_prompt.contains("### You are the Architect"),
+            "{}",
+            chat.system_prompt
         );
     }
 
