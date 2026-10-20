@@ -26,10 +26,15 @@ Since ADR 0061 the owner is asked only about money, and ADRs 0079 and 0081 cut t
 9. **What autopilot does not change.** Credentials never enter an agent's context; Catervas's own state is never written; the protected paths and every rule of ADR 0080 apply; the daily limit and the marketing budget are hard stops; the team never places a purchase order; the owner can pause the team, turn autopilot off, and do anything the owner does now.
 10. **"Done on its own".** Today gains a list of the last seven days' autopilot acts: questions the team answered, decisions, approved spend, messages sent, merges, each with the agent and its reason.
 
+11. **The owner's approvals and remaining choices.** Asked after the plans were drafted, the founder answered "The Product Manager", "Yes, after its own checks" and "Team decides, else flag":
+    - The Product Manager approves an epic or a high-risk contract (escalation reasons `approval`, `risk_gate`) and accepts a result waiting on the owner, a `human` criterion's included, with the choices `approve_plan` and `accept_result`, each with its reason.
+    - A repository with no checks at all is merged once Catervas's own Definition of Done has passed (5.4); a failed check is never merged over and a pending one is waited for.
+    - The Product Manager may take the owner's "Carry on" (`carry_on`) after a permission, explicit-request or preview escalation, and retry a folder change whose integration failed (`retry_folder_change`). "Fix how your app opens" is a Settings change and is flagged.
+
 ## Consequences
 
 - With autopilot on, the team spends what its work costs, up to the daily limit; with nothing ready it stops. The switch's confirmation says so.
-- New event kinds `autopilot.changed`, `team.question_asked`, `team.question_answered`, `team.decided`, `task.flagged`; a new session purpose `decide`; a new gate `Autopilot`. Every addition is optional on the wire, so every log stays readable.
+- New event kinds `autopilot.changed`, `team.question_asked`, `team.question_answered`, `team.decided`, `task.flagged`, `tool.approved`; a new session purpose `decide`; a new gate `Autopilot`. Every addition is optional on the wire, so every log stays readable.
 - Phase 11 step 01 (ask or auto) is dropped from the project plan; its mockups' "Done on its own" list is reused.
 
 ## Alternatives rejected
