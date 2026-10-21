@@ -177,6 +177,15 @@ pub struct CliIo<'a> {
     /// real keychain, and the keychain then the file in `main`.
     #[cfg(unix)]
     pub credential_stores: CredentialStores,
+    /// Whether the key an earlier version kept in the OS keychain is removed too, on the first
+    /// start (ADR 0084): `true` in `main`, `false` here and with `--no-keychain`, so that no test
+    /// touches a real keychain.
+    #[cfg(unix)]
+    pub forget_keychain: bool,
+    /// Whether this start removed the key an earlier version kept: the AI account's page says so
+    /// until the daemon stops.
+    #[cfg(unix)]
+    pub kept_key_removed: bool,
     /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
     /// test replaces with a fixture kit whose server is its own.
     pub kits: catervas_runtime::KitSource,
@@ -271,6 +280,10 @@ impl<'a> CliIo<'a> {
                 let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
                 Arc::new(move || vec![Arc::clone(&memory)])
             },
+            #[cfg(unix)]
+            forget_keychain: false,
+            #[cfg(unix)]
+            kept_key_removed: false,
             kits: Arc::new(catervas_roles::load_kit),
             registered_apps: catervas_runtime::registered_apps::REGISTERED_APPS,
             own_program: None,
@@ -1770,6 +1783,7 @@ fn human_command(
 fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
     use catervas_runtime::orchestrator::TickRules;
 
+    state::forget_kept_key(io);
     if let Commands::Serve { port, no_open } = command {
         return serve::serve(*port, *no_open, io);
     }

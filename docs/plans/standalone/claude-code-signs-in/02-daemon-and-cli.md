@@ -125,7 +125,7 @@ Tests:
   - `catervas start` with a `credential.json` in its state folder prints the removal sentence once, and the file is gone.
   - A second start does not print it.
 
-- [ ] `feat(runtime): remove the key catervas kept, unread`
+- [x] `feat(runtime): remove the key catervas kept, unread`
 
 ### Task 8: The daemon signs in, checks and signs out through Claude Code
 

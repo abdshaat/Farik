@@ -172,6 +172,7 @@ fn main() -> std::process::ExitCode {
     }));
     io.interrupts = Interrupts::CtrlC;
     io.credential_stores = catervas::system_credential_stores(&io.env, keychain);
+    io.forget_keychain = keychain;
     let arguments = ["catervas", "serve", "--no-open", "--port", &port].map(String::from);
     let code = run_cli(&arguments, &mut io);
     drop(io);

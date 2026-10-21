@@ -166,6 +166,21 @@ impl CredentialStore for MemoryStore {
     }
 }
 
+/// Removes, unread, the key an earlier version kept (ADR 0084): the keychain entry when
+/// `keychain` is true, and `credential.json` in `state_dir`. Neither is ever read: the keychain
+/// entry is deleted without `get_password`, and the file is removed without being opened. A
+/// computer with no keychain, and nothing kept, are not errors. Answers whether anything was
+/// removed.
+#[must_use]
+pub fn forget_kept_key(state_dir: &std::path::Path, keychain: bool) -> bool {
+    let from_keychain = keychain
+        && keyring::Entry::new(SERVICE, PROVIDER)
+            .and_then(|entry| entry.delete_credential())
+            .is_ok();
+    let from_file = std::fs::remove_file(state_dir.join("credential.json")).is_ok();
+    from_keychain || from_file
+}
+
 /// The credential to run on, and where it came from.
 #[must_use]
 pub fn load_credential(
@@ -324,6 +339,19 @@ mod tests {
 
     fn platform(text: &str) -> keyring::Error {
         keyring::Error::PlatformFailure(Box::new(std::io::Error::other(text.to_string())))
+    }
+
+    #[test]
+    fn forgets_the_kept_key_without_reading_it() {
+        let dir = scratch("forget");
+        let file = dir.join("credential.json");
+        std::fs::write(&file, "not even a key").expect("a kept file");
+        // Unreadable: removing it still works, which is the proof that it is not read.
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000))
+            .expect("the mode is set");
+        assert!(forget_kept_key(&dir, false));
+        assert!(!file.exists());
+        assert!(!forget_kept_key(&dir, false));
     }
 
     #[test]

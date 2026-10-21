@@ -140,6 +140,40 @@ fn refuses_to_run_without_a_credential() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
+fn says_once_that_the_kept_key_was_removed() {
+    let repository = a_project("run-kept-key");
+    let (_directory, path) = a_claude_saying("kept-key-claude", "2.1.280 (Claude Code)");
+    let state = scratch("kept-key-state");
+    let kept = state.join("catervas/credential.json");
+    std::fs::create_dir_all(kept.parent().expect("a parent")).expect("the state folder");
+    std::fs::write(
+        &kept,
+        r#"{"provider":"anthropic","kind":"api_key","secret":"sk-ant-api-old"}"#,
+    )
+    .expect("a kept key");
+    let sentence = "Catervas no longer keeps your AI account's key, so it removed the one it kept. \
+                    Sign in through Claude Code: in the web app, or with claude auth login.";
+    let set = |io: &mut catervas::CliIo<'_>| {
+        io.env.insert("PATH".to_string(), path.clone());
+        io.env
+            .insert("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string());
+        io.env
+            .insert("XDG_CONFIG_HOME".to_string(), state.display().to_string());
+    };
+
+    let first = run_with(&repository.path, &["run"], set);
+    assert_eq!(first.code, 0, "{}", first.err);
+    assert_eq!(first.err.matches(sentence).count(), 1, "{}", first.err);
+    assert!(!kept.exists());
+    assert!(!first.err.contains("sk-ant-api-old") && !first.out.contains("sk-ant-api-old"));
+
+    let second = run_with(&repository.path, &["run"], set);
+    assert_eq!(second.code, 0, "{}", second.err);
+    assert!(!second.err.contains("no longer keeps"), "{}", second.err);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn refuses_a_claude_code_older_than_the_minimum() {
     let repository = a_project("run-old-claude");
     let (_directory, path) = a_claude_saying("old-claude", "2.1.200 (Claude Code)");
