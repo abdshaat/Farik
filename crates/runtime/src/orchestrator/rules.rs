@@ -166,6 +166,16 @@ pub(super) async fn tick(
     let in_scope = in_scope(scope, &busy);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
+    // Under autopilot a task the team flagged for the owner stays where it is, whatever status it
+    // is in (ADR 0082 decision 4); turned off, a standing flag holds nothing.
+    let held: BTreeSet<TaskId> = if catervas_store::autopilot::autopilot_on(&deps.tools.log)? {
+        catervas_store::autopilot::flags(&deps.tools.log)?
+            .into_iter()
+            .filter_map(|flag| flag.task_id)
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
     // The tasks each agent may work: those past its limit are "returning", and wait for a hand-over.
     let within = transitions::within_limit(&team, &board);
     if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
@@ -219,7 +229,7 @@ pub(super) async fn tick(
         return Ok(report);
     }
     if runs(3) {
-        for row in waiting_on_nobody(&board, TaskStatus::Rejected)
+        for row in waiting_on_nobody(&board, TaskStatus::Rejected, &held)
             .filter(in_scope)
             .filter(|row| within.contains(&row.task_id))
         {
@@ -229,14 +239,14 @@ pub(super) async fn tick(
         }
     }
     if runs(4) {
-        for row in waiting_on_nobody(&board, TaskStatus::Blocked).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Blocked, &held).filter(in_scope) {
             if let Some(report) = blocked(deps, &team, row)? {
                 return Ok(report);
             }
         }
     }
     if runs(5) {
-        for row in waiting_on_nobody(&board, TaskStatus::Verifying).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Verifying, &held).filter(in_scope) {
             if let Some(report) = verifying(orchestrator, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
@@ -251,7 +261,7 @@ pub(super) async fn tick(
     // implement session.
     let epics_only = scope.rules == TickRules::Planning;
     if runs(6) || epics_only {
-        for row in waiting_on_nobody(&board, TaskStatus::InProgress)
+        for row in waiting_on_nobody(&board, TaskStatus::InProgress, &held)
             .filter(in_scope)
             .filter(|row| within.contains(&row.task_id))
             .filter(|row| !epics_only || requests::is_epic(row))
@@ -262,7 +272,7 @@ pub(super) async fn tick(
         }
     }
     if runs(7) {
-        for row in waiting_on_nobody(&board, TaskStatus::Assigned)
+        for row in waiting_on_nobody(&board, TaskStatus::Assigned, &held)
             .filter(in_scope)
             .filter(|row| within.contains(&row.task_id))
         {
@@ -274,7 +284,7 @@ pub(super) async fn tick(
     // A task whose dependency was cancelled goes back to the Product Manager (ADR 0079), before
     // the plan of a ready task is asked for.
     if scope.rules == TickRules::All {
-        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Ready, &held).filter(in_scope) {
             if let Some(report) = dependency_cancelled(deps, &team, &board, row)? {
                 return Ok(report);
             }
@@ -282,7 +292,7 @@ pub(super) async fn tick(
     }
     if runs(8) {
         // The tasks given in a chat go first (ADR 0063): next in their agent's queue.
-        let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready)
+        let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready, &held)
             .filter(in_scope)
             .partition(|row| {
                 catervas_store::requests::given_to(&deps.tools.log, &row.task_id)
@@ -302,14 +312,14 @@ pub(super) async fn tick(
         }
     }
     if runs(9) {
-        for row in waiting_on_nobody(&board, TaskStatus::Refining).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Refining, &held).filter(in_scope) {
             if let Some(report) = requests::refining(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     if runs(10) {
-        for row in waiting_on_nobody(&board, TaskStatus::Draft).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Draft, &held).filter(in_scope) {
             if let Some(report) = requests::draft(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
@@ -1235,14 +1245,15 @@ fn rule_runs(rules: TickRules, rule: u8) -> bool {
 }
 
 /// The tasks in `status`, in the board's order, but those waiting on the human's answer to a
-/// question, which rules 3 to 10 pass over.
-fn waiting_on_nobody(
-    board: &[TaskProjection],
+/// question and those the team flagged for the owner (`held`), which rules 3 to 10 pass over.
+fn waiting_on_nobody<'a>(
+    board: &'a [TaskProjection],
     status: TaskStatus,
-) -> impl Iterator<Item = &TaskProjection> {
-    board
-        .iter()
-        .filter(move |row| row.status == status && !row.waiting_on_human)
+    held: &'a BTreeSet<TaskId>,
+) -> impl Iterator<Item = &'a TaskProjection> {
+    board.iter().filter(move |row| {
+        row.status == status && !row.waiting_on_human && !held.contains(&row.task_id)
+    })
 }
 
 /// Rule 3: a task `rejected` goes back to `in_progress` for its next iteration, or, when the
@@ -1288,15 +1299,6 @@ fn blocked(
     team: &Team,
     row: &TaskProjection,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    // A block the team flagged for the owner stays where it is while the team decides
-    // (ADR 0082 decision 4).
-    if catervas_store::autopilot::team_decides(&deps.tools.log, team)?
-        && catervas_store::autopilot::flags(&deps.tools.log)?
-            .iter()
-            .any(|flag| flag.task_id.as_ref() == Some(&row.task_id))
-    {
-        return Ok(None);
-    }
     let Some(blocked_at) = last_move_into(deps, &row.task_id, TaskStatus::Blocked)?
         .map(|event| event.envelope.recorded_at)
     else {
@@ -7004,6 +7006,34 @@ mod tests {
         harness
             .project
             .record("", "autopilot.changed", &json!({ "on": on }));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_flagged_under_autopilot_gets_no_session_until_the_owner_acts() {
+        let harness = Harness::new("orch-autopilot-flagged", |_| {});
+        autopilot(&harness, true);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.project.record(
+            "CTV-1",
+            "task.flagged",
+            &json!({ "needs": "dev-a kept calling search", "flagged_by": "catervas" }),
+        );
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..2 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // Turned off, a standing flag holds nothing: the task runs as it does now.
+        autopilot(&harness, false);
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
     }
 
     #[tokio::test]

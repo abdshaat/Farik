@@ -97,7 +97,7 @@ Tests (`hooks.rs` `mod tests`, on the harness its `paid` tests use; `rules.rs` `
 - `hooks.rs`: `a_paid_call_over_its_rate_is_refused_and_the_third_refusal_ends_the_session_and_flags_its_task` — under autopilot, with the harness's team (no `paid_calls_per_hour`, so 30), `dev-a`'s three calls of `search` with one input on `CTV-1` are allowed and each appends `tool.approved`; the fourth is denied with a reason starting `rate_limited: ` that says "same input" and the `HH:MM` an hour after the first, and appends no `tool.approved`; the sixth call, the session's third such denial, also leaves the session's `stop_reason` "rate_limited: <dev-a's name> kept calling search" and one `task.flagged { flagged_by: "catervas", needs: "<dev-a's name> kept calling search" }` about `CTV-1` in the log, and a `Read` is then denied `session_stopped`; in a new session of `dev-a` (the count read from the log, as after a restart) a call of `search` with another input passes, and with the team's `paid_calls_per_hour: 3` (one per tool) the next is denied naming "a third of the team's 3"; a `tool.approved` of 61 minutes ago is not counted; with autopilot off no call is rate limited.
 - `rules.rs`: `a_task_flagged_under_autopilot_gets_no_session_until_the_owner_acts` — under autopilot an `in_progress` task with a standing `task.flagged { flagged_by: "catervas" }` gets no implement session from a tick, and no other rule starts one about it; after `autopilot.set { on: false }` the tick starts its implement session.
 
-- [ ] `feat(runtime): paid and asking calls run under autopilot, within their rate`
+- [x] `feat(runtime): paid and asking calls run under autopilot, within their rate`
 
 ### Task 14: marketing plans are approved under autopilot
 

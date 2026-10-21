@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
+use catervas_core::autopilot::{RATE_LIMITED_PER_SESSION, RateLimit, RecentCall, rate_limit};
 use catervas_core::contract::Role;
 use catervas_core::governor::permissions::{
     AgentGrants, ApprovalKey, ConnectorRefusal, ConnectorTag, PermissionTier, ToolCallContext,
@@ -17,6 +18,7 @@ use catervas_protocol::event::{
     ToolDeniedBody, ToolReturnedBody, new_event,
 };
 use catervas_store::EventQuery;
+use catervas_store::autopilot::autopilot_on;
 use catervas_store::marketing::marketing_plans;
 use catervas_store::waiting::open_grants;
 use serde::{Deserialize, Serialize, Serializer};
@@ -96,6 +98,8 @@ const JSON_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const ALLOWED: &str = "allowed by the governor";
 /// The kind of the denial of every call of a session told to stop.
 const SESSION_STOPPED: &str = "session_stopped";
+/// What the denial of the third call refused for its rate adds (ADR 0082 decision 12).
+const THIRD_RATE_REFUSAL: &str = " This is the third refusal for the rate in this session: it ends, and the task waits for the owner.";
 /// The kind of the denial of a connector's call that waits for the human, and the start of the
 /// stop and the end's detail it gives its session (ADR 0031).
 pub(crate) const APPROVAL_NEEDED: &str = "approval_needed";
@@ -152,7 +156,16 @@ pub fn decide_pre_tool_use(request: &HookRequest, state: &DaemonState) -> HookDe
             state,
         ),
     };
-    let verdict = verdict.map_err(|denial| {
+    let verdict = verdict.map_err(|mut denial| {
+        // The third refusal for the rate ends the session, and its task waits for the owner.
+        if let Some(words) = denial.rate_limited.take() {
+            session.rate_limited += 1;
+            if session.rate_limited >= RATE_LIMITED_PER_SESSION {
+                denial.reason.push_str(THIRD_RATE_REFUSAL);
+                denial.stop = Some(format!("rate_limited: {words}"));
+                flag_for_the_rate(deps, &session.registration, &words);
+            }
+        }
         if let Some(stop) = denial.stop {
             session.stop_reason.get_or_insert(stop);
             state.stops().notify_waiters();
@@ -200,11 +213,18 @@ struct Pass {
 struct Denial {
     reason: String,
     stop: Option<String>,
+    /// For a call refused for its rate under autopilot: the words that flag the task if this is
+    /// the session's third such refusal (ADR 0082 decision 12).
+    rate_limited: Option<String>,
 }
 
 impl From<String> for Denial {
     fn from(reason: String) -> Self {
-        Self { reason, stop: None }
+        Self {
+            reason,
+            stop: None,
+            rate_limited: None,
+        }
     }
 }
 
@@ -281,6 +301,7 @@ fn judge(
                     }
                     .to_string(),
                 ),
+                rate_limited: None,
             });
         }
     }
@@ -643,6 +664,10 @@ fn judge_connector(
     let mut used = 0;
     let mut plan = None;
     let tag = connector.and_then(|connector| connector.tools.get(tool).copied());
+    // Money follows the switch, not a decider (ADR 0082 decision 5): no grant is looked up and no
+    // allowance counted, and the day's limit is the stop.
+    let autopilot = autopilot_on(&deps.log)
+        .map_err(|error| Denial::from(format!("autopilot_unreadable: {error}")))?;
     if matches!(
         tag,
         Some(ConnectorTag::Paid | ConnectorTag::Ask | ConnectorTag::ExternalEffect)
@@ -652,7 +677,7 @@ fn judge_connector(
             // The owner's plan approves it or nothing does: no grant is looked up and no allowance
             // counted, and the log is read for the active plan only for such a tool.
             plan = active_marketing_plan(deps)?;
-        } else if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::Ask)) {
+        } else if matches!(tag, Some(ConnectorTag::Paid | ConnectorTag::Ask)) && !autopilot {
             // Only a call that costs money, or one the owner chose to be asked about, asks (ADR
             // 0061, ADR 0080): an `external_effect` call runs.
             granted = grant_for(deps, registration, server, tool, &request.tool_input)?;
@@ -675,13 +700,25 @@ fn judge_connector(
         granted,
         used,
         active,
-        false,
+        autopilot,
     ) {
-        Ok(pass) => Ok(Pass {
-            approval: pass.approval,
-            allowance: pass.allowance,
-            marketing_plan: plan.filter(|_| pass.plan_approved),
-        }),
+        Ok(pass) => {
+            if pass.autopilot_approved {
+                approve_under_autopilot(
+                    deps,
+                    registration,
+                    team,
+                    server,
+                    tool,
+                    &request.tool_input,
+                )?;
+            }
+            Ok(Pass {
+                approval: pass.approval,
+                allowance: pass.allowance,
+                marketing_plan: plan.filter(|_| pass.plan_approved),
+            })
+        }
         Err(ConnectorRefusal::ApprovalNeeded) => Err(ask(
             deps,
             registration,
@@ -717,6 +754,113 @@ fn judge_connector(
                     .unwrap_or_default()
             ),
         })),
+    }
+}
+
+/// A paid or asking call the switch lets run (ADR 0082 decisions 5 and 12): refused when the agent
+/// has made too many in the past hour, else recorded `tool.approved` with its whole input, before
+/// the hook records `tool.called`.
+fn approve_under_autopilot(
+    deps: &ToolDeps,
+    registration: &SessionRegistration,
+    team: &Team,
+    server: &str,
+    tool: &str,
+    input: &Value,
+) -> Result<(), Denial> {
+    let per_hour = team.paid_calls_per_hour();
+    let sha = input_sha256(input);
+    let now = deps.clock.now();
+    let recent = recent_paid_calls(deps, &registration.agent_id, per_hour)?;
+    if let Err(limited) = rate_limit(&recent, server, tool, &sha, per_hour, now) {
+        let at = limited.frees_at.format("%H:%M");
+        let reason = match limited.limit {
+            RateLimit::SameInput => format!(
+                "rate_limited: you have called {tool} of {server} with this same input {} times in the past hour, which is a loop, not work: take another way. The same call is allowed again at {at} UTC.",
+                limited.calls
+            ),
+            RateLimit::ThisTool => format!(
+                "rate_limited: you have made {} calls of {tool} of {server} in the past hour, the most one agent may make of one tool (a third of the team's {per_hour} paid calls an hour); the next is allowed at {at} UTC.",
+                limited.calls
+            ),
+            RateLimit::AllTools => format!(
+                "rate_limited: you have made {} paid or asking calls in the past hour, the most one agent may make (the team's limit); the next is allowed at {at} UTC.",
+                limited.calls
+            ),
+        };
+        let name = catervas_store::waiting::name_of(team, &registration.agent_id);
+        return Err(Denial {
+            reason,
+            stop: None,
+            rate_limited: Some(format!("{name} kept calling {tool}")),
+        });
+    }
+    let approved = (|| {
+        Some(EventBody::ToolApproved(
+            catervas_protocol::generated::event::ToolApprovedBody {
+                server: server.to_string().try_into().ok()?,
+                tool: tool.to_string().try_into().ok()?,
+                input: input.to_string(),
+                input_sha256: sha.try_into().ok()?,
+                by: catervas_protocol::generated::event::ToolApprovedBodyBy::Autopilot,
+            },
+        ))
+    })()
+    .ok_or_else(|| format!("{server} {tool} cannot be named in an approval"));
+    approved
+        .and_then(|body| append(deps, ids_of(deps, registration), body))
+        .map(|_| ())
+        .map_err(|detail| Denial::from(format!("record_failed: {detail}")))
+}
+
+/// The paid or asking calls `agent` made in the past hour that autopilot let run, oldest first,
+/// read from the `per_hour` newest `tool.approved` events it made: when all of them are in the
+/// hour the agent is over the limit whatever else, and when one is older every call of the hour
+/// is among them, so the read stays small (ADR 0082 decision 12).
+fn recent_paid_calls(
+    deps: &ToolDeps,
+    agent: &str,
+    per_hour: u32,
+) -> Result<Vec<RecentCall>, Denial> {
+    let mut newest = deps
+        .log
+        .read(&EventQuery {
+            agent_id: Some(agent.to_string()),
+            kinds: vec![EventKind::ToolApproved],
+            newest_first: true,
+            limit: Some(usize::try_from(per_hour).unwrap_or(usize::MAX)),
+            ..EventQuery::default()
+        })
+        .map_err(|error| Denial::from(format!("calls_unreadable: {error}")))?;
+    newest.reverse();
+    Ok(newest
+        .into_iter()
+        .filter_map(|event| match event.body {
+            EventBody::ToolApproved(body) => Some(RecentCall {
+                server: body.server.to_string(),
+                tool: body.tool.to_string(),
+                input_sha256: body.input_sha256.to_string(),
+                at: event.envelope.recorded_at,
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Flags the session's task when the session is ended for the rate of its paid calls (ADR 0082
+/// decision 12), in Catervas's own name. A session about no task only ends. A flag the log would
+/// not take is passed over: the session ends all the same.
+fn flag_for_the_rate(deps: &ToolDeps, registration: &SessionRegistration, words: &str) {
+    if registration.task_id.is_none() {
+        return;
+    }
+    let flagged = serde_json::from_value(json!({ "needs": words, "flagged_by": "catervas" }));
+    if let Ok(flagged) = flagged {
+        let _ = append(
+            deps,
+            ids_of(deps, registration),
+            EventBody::TaskFlagged(flagged),
+        );
     }
 }
 
@@ -840,6 +984,7 @@ fn ask(
                 "{APPROVAL_NEEDED}: {server} {tool} waits for the human (approval {seq})"
             ),
             stop: Some(format!("{APPROVAL_NEEDED}: approval {seq}")),
+            rate_limited: None,
         },
         Err(detail) => Denial::from(format!("record_failed: {detail}")),
     }
@@ -1028,6 +1173,8 @@ mod tests {
     use catervas_core::budget::DEFAULT_SESSION_LIMITS;
     use catervas_core::budget::SessionLimits;
     use catervas_protocol::event::{EventBody, EventKind};
+    use chrono::TimeZone as _;
+    use chrono::Utc;
     use serde_json::{Value, json};
 
     use super::{HookDecision, HookRequest, cut, decide_pre_tool_use, record_post_tool_use};
@@ -3844,5 +3991,192 @@ mod tests {
             "{}",
             secret.reason
         );
+    }
+
+    /// The owner's switch, as the log leaves it.
+    fn autopilot(daemon: &TestDaemon, on: bool) {
+        daemon
+            .project
+            .record("", "autopilot.changed", &json!({ "on": on }));
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_paid_call_runs_under_autopilot_and_is_recorded_as_approved() {
+        use catervas_core::governor::permissions::ConnectorTag;
+
+        let daemon = TestDaemon::new("hook-autopilot-paid", |_| {});
+        with_github(&daemon);
+        autopilot(&daemon, true);
+        let input = json!({ "title": "x" });
+
+        let decision = create_issue(&daemon, "session-github", &input);
+
+        assert!(decision.allow, "{decision:?}");
+        assert!(daemon.events(EventKind::ToolApprovalRequested).is_empty());
+        let approved = daemon.events(EventKind::ToolApproved);
+        assert_eq!(approved.len(), 1);
+        let EventBody::ToolApproved(body) = &approved[0].body else {
+            panic!("a tool.approved body");
+        };
+        assert_eq!(
+            (
+                body.server.as_str(),
+                body.tool.as_str(),
+                body.by.to_string().as_str()
+            ),
+            ("github", "create_issue", "autopilot")
+        );
+        assert_eq!(body.input, input.to_string());
+        assert_eq!(
+            body.input_sha256.as_str(),
+            catervas_core::governor::permissions::input_sha256(&input)
+        );
+        assert_eq!(approved[0].envelope.ids.agent_id.as_deref(), Some("dev-a"));
+        assert!(
+            approved[0].envelope.seq < daemon.events(EventKind::ToolCalled)[0].envelope.seq,
+            "approved before it is called"
+        );
+
+        // An asking tool runs too, and from a session about no task.
+        {
+            let mut sessions = daemon.state.sessions();
+            let registration = &mut sessions
+                .get_mut("session-github")
+                .expect("registered")
+                .registration;
+            registration.task_id = None;
+            registration.connectors[0]
+                .tools
+                .insert("close_issue".to_string(), ConnectorTag::Ask);
+        }
+        let decision = decide_pre_tool_use(
+            &daemon.call(
+                "session-github",
+                "mcp__github__close_issue",
+                &json!({ "id": 1 }),
+            ),
+            &daemon.state,
+        );
+        assert!(decision.allow, "{decision:?}");
+        assert_eq!(daemon.events(EventKind::ToolApproved).len(), 2);
+
+        // Off, the same call asks.
+        autopilot(&daemon, false);
+        github_session(&daemon, "session-github-2", "dev-a");
+        let decision = create_issue(&daemon, "session-github-2", &input);
+        denied_for(&decision, "approval_needed");
+        assert_eq!(daemon.events(EventKind::ToolApprovalRequested).len(), 1);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    fn a_paid_call_over_its_rate_is_refused_and_the_third_refusal_ends_the_session_and_flags_its_task()
+     {
+        let daemon = TestDaemon::new("hook-autopilot-rate", |_| {});
+        with_github(&daemon);
+        autopilot(&daemon, true);
+        let input = json!({ "title": "same" });
+        let hour_on = (at() + chrono::Duration::hours(1))
+            .format("%H:%M")
+            .to_string();
+
+        for _ in 0..3 {
+            assert!(create_issue(&daemon, "session-github", &input).allow);
+        }
+        assert_eq!(daemon.events(EventKind::ToolApproved).len(), 3);
+        let fourth = create_issue(&daemon, "session-github", &input);
+        denied_for(&fourth, "rate_limited");
+        assert!(fourth.reason.contains("same input"), "{}", fourth.reason);
+        assert!(fourth.reason.contains(&hour_on), "{}", fourth.reason);
+        assert_eq!(daemon.events(EventKind::ToolApproved).len(), 3);
+        denied_for(
+            &create_issue(&daemon, "session-github", &input),
+            "rate_limited",
+        );
+        assert!(daemon.events(EventKind::TaskFlagged).is_empty());
+
+        // The third refusal in the session ends it and flags its task.
+        let sixth = create_issue(&daemon, "session-github", &input);
+        denied_for(&sixth, "rate_limited");
+        assert!(sixth.reason.contains("third refusal"), "{}", sixth.reason);
+        assert_eq!(
+            daemon.state.stop_reason("session-github").as_deref(),
+            Some("rate_limited: dev-a kept calling create_issue")
+        );
+        let flagged = daemon.events(EventKind::TaskFlagged);
+        assert_eq!(flagged.len(), 1);
+        let EventBody::TaskFlagged(body) = &flagged[0].body else {
+            panic!("a flag");
+        };
+        assert_eq!(
+            (body.needs.as_str(), body.flagged_by.as_str()),
+            ("dev-a kept calling create_issue", "catervas")
+        );
+        assert_eq!(
+            flagged[0]
+                .envelope
+                .ids
+                .task_id
+                .as_ref()
+                .map(|id| id.to_string())
+                .as_deref(),
+            Some("CTV-1")
+        );
+        denied_for(
+            &decide_pre_tool_use(
+                &daemon.call(
+                    "session-github",
+                    "Read",
+                    &json!({ "file_path": daemon.inside("a") }),
+                ),
+                &daemon.state,
+            ),
+            "session_stopped",
+        );
+
+        // A new session of the same agent: the count comes from the log, and another input passes.
+        github_session(&daemon, "session-github-2", "dev-a");
+        assert!(create_issue(&daemon, "session-github-2", &json!({ "title": "other" })).allow);
+        // The calls of an hour ago and more are not counted.
+        let old = Utc
+            .with_ymd_and_hms(2026, 9, 22, 10, 59, 0)
+            .single()
+            .expect("a time");
+        for n in 0..30 {
+            daemon.project.record_by(
+                Some("dev-a"),
+                old,
+                "CTV-1",
+                "tool.approved",
+                &json!({ "server": "github", "tool": format!("t{n}"), "input": "{}",
+                         "input_sha256": "0".repeat(64), "by": "autopilot" }),
+            );
+        }
+        assert!(create_issue(&daemon, "session-github-2", &json!({ "title": "later" })).allow);
+
+        // With the team's 3 an hour, one for a tool, the second call of a tool is refused.
+        let few = TestDaemon::on_team(
+            "hook-autopilot-rate-few",
+            |wire| wire["policy"]["paid_calls_per_hour"] = json!(3),
+            |_| {},
+        );
+        with_github(&few);
+        autopilot(&few, true);
+        assert!(create_issue(&few, "session-github", &json!({ "title": "a" })).allow);
+        let second = create_issue(&few, "session-github", &json!({ "title": "b" }));
+        denied_for(&second, "rate_limited");
+        assert!(
+            second.reason.contains("a third of the team's 3"),
+            "{}",
+            second.reason
+        );
+
+        // Off, nothing is rate limited: the call asks.
+        autopilot(&few, false);
+        github_session(&few, "session-github-3", "dev-a");
+        let asked = create_issue(&few, "session-github-3", &json!({ "title": "a" }));
+        denied_for(&asked, "approval_needed");
     }
 }

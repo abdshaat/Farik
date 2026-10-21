@@ -1667,7 +1667,9 @@ fn ended_detail(
 ) -> String {
     match deps.daemon.stop_reason(session_id) {
         Some(stop)
-            if reason == EndReason::Aborted && stop.starts_with(crate::daemon::APPROVAL_NEEDED) =>
+            if reason == EndReason::Aborted
+                && (stop.starts_with(crate::daemon::APPROVAL_NEEDED)
+                    || stop.starts_with("rate_limited")) =>
         {
             stop
         }
