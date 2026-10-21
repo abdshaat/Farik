@@ -299,7 +299,7 @@ Files: `state.rs` (`claude_json`, `claude_desktop_dirs`, unit tests beside `clau
 
 `docs/plans/project-plan.md`, phase 10's table: step 03b's Spec becomes "3, 6.7, 8.4, 8.6".
 
-- [ ] `docs(spec): record the services used through claude`
+- [x] `docs(spec): record the services used through claude`
 
 ## Verification
 

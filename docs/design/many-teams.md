@@ -201,6 +201,16 @@ A connector is how the owner's Claude reaches another service: Zoho Books, Excel
 - **In the reminder and analytics:** a connector Claude Code has marked as needing to be signed in again (`mcp-needs-auth-cache.json`, undocumented, read only if present) is a reminder, "Zoho Books needs you to sign in again in Claude"; usage per team counts each service's calls.
 - **Kept once.** A service is keyed by its catalog entry, else by its name and host, so the same Zoho Books from Claude Code's settings, a claude.ai connector, Claude Desktop and the web-only picker is one record with all four sources.
 
+- **Settled in step 03b (revision 0.142).**
+  - *The catalog* is a `const` table in `catervas-core`, checked by the compiler, not a data file; the same servers are matched by host, then name, then program.
+  - *"Mostly", exactly:* a session at home is work of one kind when at least `MIN_WORK_CALLS = 3` of its calls are of that kind and more than half of all its calls to services are. All such sessions form one project, `"<Work> (<service>)"`, the service with the most such calls. Rejected: summing every home session first, which lets one long session drown many short ones; no minimum, which makes one stray call a project.
+  - *Spreadsheet services are bookkeeping work.* Bookkeeping, spreadsheets, payments, selling and marketing form projects; code and unknown services form nothing (code belongs in a repository, an unknown kind cannot propose a team).
+  - *Microsoft 365 is not only Excel:* a call to it counts as spreadsheets work only when its tool name contains `excel`, `workbook`, `worksheet` or `sheet`; the service keeps the kind spreadsheets.
+  - *A folder of spreadsheets:* a present folder with no git whose owner sessions made at least three calls of `Read`, `Write`, `Edit` or `MultiEdit` on a `.xlsx`, `.xls` or `.csv` file (compared without case) is marked bookkeeping; only that a file had such an extension is kept, never its path.
+  - *Not services:* Catervas's own (`catervas`, `farik`), Claude Code's session and remote-control servers and IDE bridge, the Claude app's browser, preview, device and Chrome surfaces, and Claude Docs.
+  - *Plugins:* only user-scope installs of enabled plugins are read; project-scoped installs and project `settings.json` files are not, since a plugin actually used is found by its `mcp__plugin_<plugin>_<server>__` calls.
+  - *Claude Desktop on Windows, seen from WSL:* the Microsoft Store install (`AppData/Local/Packages/Claude_*/LocalCache/Roaming/Claude`) is looked for beside `AppData/Roaming/Claude`, only when exactly one Windows user has a Claude Desktop folder (with several, none is read and `--json` says `desktop: "several_windows_users"`), and only when `WSL_DISTRO_NAME` is set.
+
 ## 3. Finding the jobs
 
 - **In each found repository:** GitHub Actions workflows with `on.schedule`, `vercel.json` `crons`, Kubernetes `CronJob` manifests, `render.yaml` services of type cron, Terraform `schedule_expression`. Each job keeps its name, schedule, file and repository.
