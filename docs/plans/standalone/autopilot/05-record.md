@@ -22,7 +22,7 @@ Writes revision 0.138 (2026-10-20, ADR 0082; standalone plan `autopilot`) at the
 - 8.6: under autopilot a `paid` or `ask` connector call runs with no grant or allowance and is recorded `tool.approved { by: autopilot }` with its whole input; `denied` and plan-marked tools are unchanged; credentials and Catervas's own state are unchanged (decision 9). Such calls are rate limited per agent, counted from `tool.approved` in the log over the past hour (decision 12): refused `rate_limited` at `policy.paid_calls_per_hour` calls of any tool, at a third of it (at least 1) of one tool, and at 3 calls of one tool with the same input (its `input_sha256`), the refusal saying which and when the hour frees; the third such refusal in one session ends the session and flags its task by Catervas (`task.flagged { flagged_by: catervas }`, needs "<agent> kept calling <tool>"), and a flagged task gets no session while autopilot is on. The daily limit stays the hard stop above it.
 - 4.2 (where "What waits on you" and Today are described, near line 176): Today's "Flagged by the team", before "Waiting on you", and "Done on its own", the last seven days' autopilot acts with each agent and reason.
 
-- [ ] `docs(spec): autopilot, revision 0.138 (ADR 0082)`
+- [x] `docs(spec): autopilot, revision 0.138 (ADR 0082)`
 
 ## Task 22: phase 11 step 01 is dropped
 
