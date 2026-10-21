@@ -35,6 +35,29 @@ const COULD_NOT_KEEP: &str =
 /// slow server never holds a tick and two checks never read one message twice.
 static CHECKING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
+/// A project's place in `CHECKING`, taken when its check starts and given back when the check ends
+/// by any road, a cancelled one included: a check dropped mid-read (its runtime shut down) would
+/// otherwise hold the project's mailbox closed for good.
+struct Checking(PathBuf);
+
+impl Checking {
+    /// The place, or `None` when a check is running already in this project.
+    fn take(root: PathBuf) -> Option<Self> {
+        let mut running = crate::locked(&CHECKING);
+        if running.contains(&root) {
+            return None;
+        }
+        running.push(root.clone());
+        Some(Self(root))
+    }
+}
+
+impl Drop for Checking {
+    fn drop(&mut self) {
+        crate::locked(&CHECKING).retain(|running| *running != self.0);
+    }
+}
+
 /// What Catervas knows of the mail it sent, from the log: the `Message-ID` of every message sent and
 /// the addresses they went to.
 fn known_of(mail: &SellerMail, settings: &MailboxSettings) -> Known {
@@ -301,16 +324,12 @@ pub(crate) fn start_check(deps: &Arc<ToolDeps>, daemon: &Arc<DaemonState>) -> bo
     if !check_is_due(deps, deps.clock.now()) {
         return false;
     }
-    let root = deps.files.root().to_path_buf();
-    {
-        let mut running = crate::locked(&CHECKING);
-        if running.contains(&root) {
-            return false;
-        }
-        running.push(root.clone());
-    }
+    let Some(checking) = Checking::take(deps.files.root().to_path_buf()) else {
+        return false;
+    };
     let (deps, daemon) = (Arc::clone(deps), Arc::clone(daemon));
     tokio::spawn(async move {
+        let _checking = checking;
         let secrets = daemon.connector_secrets();
         if let Ok(at) = daemon.mailbox_at(deps.files.root()) {
             let mailer = Mailer {
@@ -320,7 +339,6 @@ pub(crate) fn start_check(deps: &Arc<ToolDeps>, daemon: &Arc<DaemonState>) -> bo
             };
             let _ = check_now(&deps, &mailer).await;
         }
-        crate::locked(&CHECKING).retain(|running| *running != root);
     });
     true
 }
@@ -335,17 +353,10 @@ pub(crate) async fn check_by_hand(
     deps: &ToolDeps,
     mailer: &Mailer<'_>,
 ) -> Result<u32, MailboxRefusal> {
-    let root = deps.files.root().to_path_buf();
-    {
-        let mut running = crate::locked(&CHECKING);
-        if running.contains(&root) {
-            return Ok(0);
-        }
-        running.push(root.clone());
-    }
-    let done = check_now(deps, mailer).await;
-    crate::locked(&CHECKING).retain(|running| *running != root);
-    done
+    let Some(_checking) = Checking::take(deps.files.root().to_path_buf()) else {
+        return Ok(0);
+    };
+    check_now(deps, mailer).await
 }
 
 /// Waits until no check is running, for a test that started one by a tick.
