@@ -622,7 +622,8 @@ fn merges_into_a_kept_branch_and_leaves_its_conflicts() {
     assert_eq!(outcome, MergeOutcome::Conflicts(vec!["f.txt".to_string()]));
     assert!(git.is_merging(&worktree).expect("the read works"));
     let text = std::fs::read_to_string(worktree.join("f.txt")).expect("read");
-    assert!(text.contains("
+    assert!(text.contains("<<<<<<< "), "{text}");
+
     // A change that does not touch main's merges clean.
     git.remove_worktree(&worktree).expect("it is taken away");
     let clean = repository.path.join(".catervas/local/worktrees/b");
@@ -1841,7 +1842,6 @@ fn knows_a_local_branch() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-<<<<<<< HEAD
 fn prunes_stale_worktrees() {
     // A worktree whose folder was deleted from under git stays registered, and keeps its branch
     // from being checked out anywhere else, until the repository is told to forget it.
@@ -1929,34 +1929,6 @@ fn held_document_keeps_the_format_it_finds() {
         held_document(&adapter, "HEAD", stem, Html).expect("reads"),
         Some("docs/catervas/product/spec.md".to_string())
     );
-fn finds_a_repositorys_main_worktree() {
-    let repository = TempRepo::new("main-worktree");
-    let root = repository
-        .path
-        .canonicalize()
-        .expect("the repository exists")
-        .to_string_lossy()
-        .into_owned();
-    let inside = repository.path.join("sub/folder");
-    std::fs::create_dir_all(&inside).expect("a subfolder");
-    let linked = repository.path.join(".claude/worktrees/x");
-    repository.git(&["worktree", "add", "-b", "x", &linked.to_string_lossy()]);
-
-    for folder in [repository.path.clone(), inside, linked] {
-        assert_eq!(
-            Git::open(folder).main_worktree().expect("git answers"),
-            Some(root.clone())
-        );
-    }
-    let plain = std::env::temp_dir().join(format!("catervas-plain-{}", std::process::id()));
-    std::fs::create_dir_all(&plain).expect("a plain folder");
-    assert_eq!(
-        Git::open(plain.clone())
-            .main_worktree()
-            .expect("git answers"),
-        None
-    );
-    let _ = std::fs::remove_dir_all(&plain);
 }
 
 #[test]
@@ -1996,6 +1968,42 @@ fn finds_a_worktrees_git_store_and_a_password_in_its_settings() {
         "AUTHORIZATION: basic eA==",
     ]);
     assert!(git.config_holds_a_secret().expect("the read works"));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_a_repositorys_main_worktree() {
+    let repository = TempRepo::new("main-worktree");
+    let root = repository
+        .path
+        .canonicalize()
+        .expect("the repository exists")
+        .to_string_lossy()
+        .into_owned();
+    let inside = repository.path.join("sub/folder");
+    std::fs::create_dir_all(&inside).expect("a subfolder");
+    let linked = repository.path.join(".claude/worktrees/x");
+    repository.git(&["worktree", "add", "-b", "x", &linked.to_string_lossy()]);
+
+    for folder in [repository.path.clone(), inside, linked] {
+        assert_eq!(
+            Git::open(folder).main_worktree().expect("git answers"),
+            Some(root.clone())
+        );
+    }
+    let plain = std::env::temp_dir().join(format!("catervas-plain-{}", std::process::id()));
+    std::fs::create_dir_all(&plain).expect("a plain folder");
+    assert_eq!(
+        Git::open(plain.clone())
+            .main_worktree()
+            .expect("git answers"),
+        None
+    );
+    let _ = std::fs::remove_dir_all(&plain);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
 fn knows_who_committed() {
     let repository = TempRepo::new("who-committed");
     repository.git(&["config", "user.email", "me@example.invalid"]);
