@@ -2,13 +2,15 @@
 //! for as long as it drives, and a command typed anywhere else is sent to that process's daemon,
 //! or handled here, under the lock, when nothing drives.
 
+use std::collections::BTreeMap;
 use std::fs::{File, TryLockError};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use catervas_protocol::command::{Command, command_to_value, reply_from_value};
+use catervas_runtime::account::{AccountPort, ClaudeAccount};
 use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
 use catervas_runtime::credential::{Source, load_credential};
 use catervas_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
@@ -536,11 +538,7 @@ async fn start_listening(
     tools.transitions.set_sandbox(settings.sandbox);
     let (sandboxes, previews) = told_factories(&tools, settings.sandbox, sandbox_image(io)).await?;
     let daemon = connected_daemon(&tools, io);
-    let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
-    let web = options
-        .web
-        .then(|| web(&project.root, io, in_use))
-        .transpose()?;
+    let web = options.web.then(|| web(&project.root, io)).transpose()?;
     let daemon_file = Some(project.root.join(DAEMON_FILE));
     let handle = if let Some(listener) = options.listener {
         serve_held(listener, daemon_file, Arc::clone(&daemon)).await
@@ -698,11 +696,7 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
 /// credential the sessions start with, shared so that connecting the account again replaces it.
 /// The sessions are kept in the state folder, made here when it is not there yet, or in memory
 /// when there is none.
-pub(crate) fn web(
-    root: &Path,
-    io: &CliIo<'_>,
-    in_use: Option<SharedCredential>,
-) -> Result<(WebState, String), String> {
+pub(crate) fn web(root: &Path, io: &CliIo<'_>) -> Result<(WebState, String), String> {
     let state = state_dir(&io.env);
     let file = match &state {
         Some(directory) => {
@@ -718,24 +712,45 @@ pub(crate) fn web(
         codes,
         sessions,
         project_root: root.to_path_buf(),
-        credential: in_use.as_ref().map(|credential| {
-            credential
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .kind()
-        }),
+        account: account(io),
+        kept_key_removed: io.kept_key_removed,
         port: 0,
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
         leaving: std::sync::Mutex::default(),
-        stores: (io.credential_stores)(),
         env: io.env.clone(),
-        in_use,
         templates: state.map(|directory| Templates::new(directory.join("templates"))),
         #[cfg(feature = "e2e")]
         admit_local_preview: io.admit_local_preview,
     };
     Ok((web, code))
+}
+
+/// What the browser routes ask of Claude Code's account (ADR 0084): the `claude` found on `PATH`,
+/// run with the environment a session gets, and the check run in an empty folder of its own in
+/// the state folder.
+pub(crate) fn account(io: &CliIo<'_>) -> Arc<dyn AccountPort> {
+    let check_dir = state_dir(&io.env).map_or_else(
+        || std::env::temp_dir().join("catervas-account-check"),
+        |directory| directory.join("account-check"),
+    );
+    Arc::new(ClaudeAccount::new(
+        on_path("claude", io).unwrap_or_else(|| PathBuf::from("claude")),
+        session_env(io),
+        check_dir,
+    ))
+}
+
+/// The environment a `claude` program is run in: `SESSION_ENV`'s variables, each only when set.
+fn session_env(io: &CliIo<'_>) -> BTreeMap<String, String> {
+    SESSION_ENV
+        .iter()
+        .filter_map(|name| {
+            io.env
+                .get(*name)
+                .map(|value| ((*name).to_string(), value.clone()))
+        })
+        .collect()
 }
 
 /// The adapter sessions start through: the engine's factory's, or Claude Code's once its version
@@ -767,14 +782,7 @@ fn adapter(
                     })
                     .unwrap_or_default(),
                 team_file: project.root.join(".catervas/team.yaml"),
-                env: SESSION_ENV
-                    .iter()
-                    .filter_map(|name| {
-                        io.env
-                            .get(*name)
-                            .map(|value| ((*name).to_string(), value.clone()))
-                    })
-                    .collect(),
+                env: session_env(io),
             };
             let adapter = ClaudeAdapter::new(config).map_err(|error| error.to_string())?;
             Ok(Arc::new(adapter))

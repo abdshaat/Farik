@@ -32,9 +32,10 @@ use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
 use super::{board, documents, gates, repos, team, templates};
-use crate::claude::CredentialKind;
+use catervas_core::claude_account::AccountStatus;
+
+use crate::account::AccountPort;
 use crate::computer::{check_computer, pull_browser_image};
-use crate::credential::CredentialStore;
 use crate::locked;
 
 /// What the browser routes need, which only `catervas serve` gives the daemon (`DaemonState::set_web`).
@@ -45,8 +46,12 @@ pub struct WebState {
     pub sessions: BrowserSessions,
     /// The project the daemon drives.
     pub project_root: PathBuf,
-    /// Which credential the sessions run on, or `None` when they are given one.
-    pub credential: Option<CredentialKind>,
+    /// Claude Code's account: asked whether it is signed in, checked, signed in to and out of
+    /// (ADR 0084). Catervas keeps no key of its own.
+    pub account: Arc<dyn AccountPort>,
+    /// Whether this start removed the key an earlier version kept, which `account.status` says
+    /// until the daemon stops.
+    pub kept_key_removed: bool,
     /// The daemon's own port, which every browser request's `Origin` and `Host` must name.
     pub port: u16,
     /// The time sessions are issued and checked at, which in setup mode no project's tools give.
@@ -57,13 +62,8 @@ pub struct WebState {
     /// The project being left, which `project.leave` sets and `serve.status` tells the page; in
     /// setup mode, the one the wizard was reached from, so **Stay on** can go back to it.
     pub leaving: Mutex<Option<PathBuf>>,
-    /// Where the AI account's credential is kept, in the order they are tried.
-    pub stores: Vec<Arc<dyn CredentialStore>>,
-    /// The environment `catervas serve` was given, which a credential may come from.
+    /// The environment `catervas serve` was given, which an AI account's key may come from.
     pub env: BTreeMap<String, String>,
-    /// The credential the sessions start with, which connecting the account again replaces;
-    /// `None` in setup mode or when the sessions are given one.
-    pub in_use: Option<crate::claude::SharedCredential>,
     /// Where saved teams are kept: the state folder's `templates/`, or `None` when there is no
     /// state folder.
     pub templates: Option<crate::templates::Templates>,
@@ -645,18 +645,22 @@ pub(super) const NO_PROJECT: i64 = -32004;
 pub(super) const REFUSED: i64 = -32005;
 
 /// The methods the first-run wizard calls, which setup mode's host answers.
-const SETUP_METHODS: [&str; 6] = [
+const SETUP_METHODS: [&str; 8] = [
     "project.open",
     "project.create",
     "project.create_folder",
-    "account.connect",
+    "account.sign_in",
+    "account.sign_in_code",
+    "account.check",
     "sandbox.build",
     "browser.pull",
 ];
+/// What the wizard's project steps are refused with while Claude Code is not signed in.
+pub(super) const NO_ACCOUNT: &str = "connect your AI account first";
 /// The methods whose params hold a secret, whose refusal never quotes them: the schema's errors
 /// quote the whole frame.
 const SECRET_METHODS: [&str; 4] = [
-    "account.connect",
+    "account.sign_in_code",
     "connector.connect",
     "connector.tools",
     "procurement_mailbox.connect",
@@ -777,15 +781,21 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
             documents::call(state, method, params).await
         }
         method if repos::METHODS.contains(&method) => repos::call(state, method, params).await,
-        "account.connect" if state.host().is_none() => team::connect(state, params).await,
         "query" => {
-            // The store and the files are read off the async workers.
+            // Claude Code is asked on the async workers; the store and the files are read off
+            // them.
+            let name = params["name"].as_str().unwrap_or_default();
+            let account = match (name, state.web()) {
+                ("serve.status" | "account.status", Some(web)) => Some(web.account.status().await),
+                _ => None,
+            };
             let (state, params) = (Arc::clone(state), params.clone());
             tokio::task::spawn_blocking(move || {
                 query(
                     &state,
                     params["name"].as_str().unwrap_or_default(),
                     &params["params"],
+                    account.as_ref(),
                 )
             })
             .await
@@ -827,12 +837,22 @@ async fn command(state: &DaemonState, wire: &Value) -> Result<Value, Failure> {
 
 /// `query { name, params }`, whose params the schema already passed. A `match` rather than a
 /// registry until there are enough queries to want one.
-fn query(state: &DaemonState, name: &str, params: &Value) -> Result<Value, Failure> {
+fn query(
+    state: &DaemonState,
+    name: &str,
+    params: &Value,
+    account: Option<&AccountStatus>,
+) -> Result<Value, Failure> {
     let internal = |error: &dyn std::fmt::Display| Failure::new(INTERNAL_ERROR, error.to_string());
     match name {
-        "serve.status" => return serve_status(state),
-        "account.status" if state.host().is_none() => return team::account_status(state),
-        "folders.list" | "computer.check" | "account.status" => {
+        "serve.status" => return serve_status(state, account.is_some_and(|a| a.signed_in)),
+        "account.status" => {
+            return account.map_or_else(
+                || Err(internal(&"the browser routes are off")),
+                |status| team::account_status(state, status),
+            );
+        }
+        "folders.list" | "computer.check" => {
             return wizard_query(state, host_of(state)?, name, params);
         }
         _ => {}
@@ -945,10 +965,10 @@ fn screenshot(deps: &crate::tools::ToolDeps, params: &Value) -> Result<Value, Fa
     Ok(json!({ "png_base64": base64::engine::general_purpose::STANDARD.encode(png) }))
 }
 
-/// `serve.status`: the project and whether its team is paused, or in setup mode no project and the
-/// credential read afresh; why the last take-on failed, if it did; and whether the project waits
+/// `serve.status`: the project and whether its team is paused, or in setup mode no project;
+/// whether Claude Code is `signed_in`, asked afresh; why the last take-on failed, if it did; and whether the project waits
 /// for the team's setup.
-fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
+fn serve_status(state: &DaemonState, signed_in: bool) -> Result<Value, Failure> {
     let web = state
         .web()
         .ok_or_else(|| Failure::new(INTERNAL_ERROR, "the browser routes are off"))?;
@@ -958,30 +978,18 @@ fn serve_status(state: &DaemonState) -> Result<Value, Failure> {
         .deps()
         .and_then(|_| crate::connectors::keys_copied(&web.project_root))
         .map(|(from, count)| json!({ "from": from, "count": count }));
-    let (project_root, paused, credential) = match state.deps() {
+    let (project_root, paused) = match state.deps() {
         Some(deps) => (
             json!(web.project_root.display().to_string()),
             crate::pause::paused(&deps.log)
                 .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?,
-            // The key in use, which connecting the account again may have replaced.
-            web.in_use
-                .as_ref()
-                .map(|in_use| crate::locked(in_use).kind())
-                .or(web.credential),
         ),
-        None => (
-            Value::Null,
-            false,
-            state
-                .host()
-                .and_then(|host| host.account())
-                .map(|(kind, _)| kind),
-        ),
+        None => (Value::Null, false),
     };
     Ok(json!({
         "project_root": project_root,
         "paused": paused,
-        "credential": credential,
+        "signed_in": signed_in,
         "port": web.port,
         "take_on_error": *locked(&web.take_on_error),
         "setup_pending": setup_pending,
@@ -1017,12 +1025,10 @@ fn wizard_query(
             serde_json::to_value(checked)
                 .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))
         }
-        _ => Ok(match host.account() {
-            Some((kind, source)) => {
-                json!({ "provider": "anthropic", "kind": kind, "source": source })
-            }
-            None => json!({ "provider": null, "kind": null, "source": null }),
-        }),
+        _ => Err(Failure::new(
+            INTERNAL_ERROR,
+            format!("{name} is not a wizard query"),
+        )),
     }
 }
 
@@ -1036,6 +1042,11 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
             .start(&host.env())
             .map(|()| json!({ "image": crate::SANDBOX_IMAGE }))
             .map_err(|sentence| Failure::new(REFUSED, sentence));
+    }
+    // The wizard's project steps wait on an AI account, which Claude Code is asked for.
+    let account = team::web_of(state)?.account.status().await;
+    if method.starts_with("project.") && !account.signed_in {
+        return Err(Failure::new(REFUSED, NO_ACCOUNT));
     }
     let (method, params) = (method.to_string(), params.clone());
     tokio::task::spawn_blocking(move || {
@@ -1078,16 +1089,10 @@ async fn setup_call(state: &DaemonState, method: &str, params: &Value) -> Result
                     .map(root)
             }
             _ => {
-                let kind = serde_json::from_value::<CredentialKind>(params["kind"].clone())
-                    .map_err(|_| {
-                        Failure::new(
-                            INVALID_PARAMS,
-                            "the params of account.connect are not right",
-                        )
-                    })?;
-                host.connect(kind, text("secret")).map(
-                    |(source, taking_on)| json!({ "stored_in": source, "taking_on": taking_on }),
-                )
+                return Err(Failure::new(
+                    INVALID_PARAMS,
+                    "there is no such wizard method",
+                ));
             }
         };
         answered.map_err(|error| match error {
@@ -1214,8 +1219,9 @@ pub(super) mod tests {
     use rust_embed::RustEmbed;
 
     use super::{BrowserSessions, ConnectCodes, WebState};
-    use crate::claude::CredentialKind;
-    use crate::credential::{Source, credential_of_kind};
+    use catervas_core::claude_account::{AccountKind, AccountStatus, CheckOutcome};
+
+    use crate::account::fixtures::FakeAccount;
     use crate::daemon::app::fixtures::{Fixture, Unbuilt};
     use crate::daemon::fixtures::TestDaemon;
     use crate::daemon::{
@@ -1336,14 +1342,13 @@ pub(super) mod tests {
             codes,
             sessions: BrowserSessions::open(file).expect("the sessions open"),
             project_root: daemon.project.repo.path.clone(),
-            credential: None,
+            account: Arc::new(crate::account::fixtures::FakeAccount::new()),
+            kept_key_removed: false,
             port: PORT,
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
-            stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
-            in_use: None,
             templates: None,
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
@@ -1819,14 +1824,13 @@ pub(super) mod tests {
             codes: ConnectCodes::default(),
             sessions,
             project_root: root.to_path_buf(),
-            credential: None,
+            account: Arc::new(crate::account::fixtures::FakeAccount::new()),
+            kept_key_removed: false,
             port: handle.info.port,
             clock: Arc::clone(&state.deps().expect("a project").clock),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
-            stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
-            in_use: None,
             templates: None,
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
@@ -2681,7 +2685,7 @@ pub(super) mod tests {
             json!({
                 "project_root": harness.project.repo.path.display().to_string(),
                 "paused": false,
-                "credential": null,
+                "signed_in": false,
                 "port": handle.info.port,
                 "take_on_error": null,
                 "setup_pending": false,
@@ -3142,7 +3146,10 @@ pub(super) mod tests {
         home: PathBuf,
         path: String,
         calls: std::sync::Mutex<Vec<Value>>,
-        account: std::sync::Mutex<Option<(CredentialKind, Source)>>,
+        /// Claude Code's account as the daemon asks it, signed in with a subscription.
+        pub(in crate::daemon) account: Arc<FakeAccount>,
+        /// Whether a project waited on the account.
+        waiting: std::sync::Mutex<bool>,
     }
 
     impl SetupHost for FakeHost {
@@ -3190,18 +3197,12 @@ pub(super) mod tests {
             Ok(self.home.join(parent).join(name))
         }
 
-        fn connect(
-            &self,
-            kind: CredentialKind,
-            secret: &str,
-        ) -> Result<(Source, bool), SetupError> {
+        fn take_on_waiting(&self) -> Result<bool, SetupError> {
             self.calls
                 .lock()
                 .expect("the calls")
-                .push(json!({ "connect": kind }));
-            credential_of_kind(kind, secret)
-                .map(|_| (Source::File, false))
-                .map_err(SetupError::Refused)
+                .push(json!({ "take_on_waiting": true }));
+            Ok(*self.waiting.lock().expect("the waiting"))
         }
 
         fn home(&self) -> PathBuf {
@@ -3211,10 +3212,6 @@ pub(super) mod tests {
         fn env(&self) -> std::collections::BTreeMap<String, String> {
             std::collections::BTreeMap::from([("PATH".to_string(), self.path.clone())])
         }
-
-        fn account(&self) -> Option<(CredentialKind, Source)> {
-            *self.account.lock().expect("the account")
-        }
     }
 
     /// A daemon in setup mode over `home`, whose programs are looked for on `path`.
@@ -3222,24 +3219,29 @@ pub(super) mod tests {
         home: &std::path::Path,
         path: &str,
     ) -> (Arc<DaemonState>, Arc<FakeHost>) {
+        let account = Arc::new(FakeAccount::new());
+        *account.status.lock().expect("the status") = AccountStatus {
+            signed_in: true,
+            kind: Some(AccountKind::Subscription),
+        };
         let host = Arc::new(FakeHost {
             home: home.to_path_buf(),
             path: path.to_string(),
             calls: std::sync::Mutex::default(),
-            account: std::sync::Mutex::default(),
+            account: Arc::clone(&account),
+            waiting: std::sync::Mutex::default(),
         });
         let web = WebState {
             codes: ConnectCodes::default(),
             sessions: BrowserSessions::open(None).expect("the sessions open"),
             project_root: PathBuf::new(),
-            credential: None,
+            account: account as Arc<dyn crate::account::AccountPort>,
+            kept_key_removed: false,
             port: PORT,
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
-            stores: Vec::new(),
             env: std::collections::BTreeMap::new(),
-            in_use: None,
             templates: None,
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
@@ -3602,20 +3604,16 @@ pub(super) mod tests {
         assert_eq!(
             status["result"],
             json!({
-                "project_root": null, "paused": false, "credential": null,
+                "project_root": null, "paused": false, "signed_in": true,
                 "port": PORT, "take_on_error": null, "setup_pending": false,
                 "leaving": null, "keys_copied": null,
             })
         );
-        let account = setup_query(&state, "account.status", &json!({})).await;
-        assert_eq!(
-            account["result"],
-            json!({ "provider": null, "kind": null, "source": null })
-        );
-
-        // The credential is read afresh, and a failed take-on is told.
-        *host.account.lock().expect("the account") =
-            Some((CredentialKind::SubscriptionToken, Source::Keychain));
+        // Claude Code is asked afresh, and a failed take-on is told.
+        *host.account.status.lock().expect("the status") = AccountStatus {
+            signed_in: false,
+            kind: None,
+        };
         *state
             .web()
             .expect("the browser routes are on")
@@ -3623,53 +3621,100 @@ pub(super) mod tests {
             .lock()
             .expect("the error") = Some("the prices file cannot be read".to_string());
         let status = setup_query(&state, "serve.status", &json!({})).await;
-        assert_eq!(
-            status["result"]["credential"], "subscription_token",
-            "{status}"
-        );
+        assert_eq!(status["result"]["signed_in"], false, "{status}");
         assert_eq!(
             status["result"]["take_on_error"], "the prices file cannot be read",
             "{status}"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn answers_the_account_from_claude_code() {
+        let home = scratch("setup-account");
+        let (state, host) = in_setup(&home, "");
+        *host.account.status.lock().expect("the status") = AccountStatus {
+            signed_in: false,
+            kind: None,
+        };
         let account = setup_query(&state, "account.status", &json!({})).await;
         conforms(&account["result"], "accountStatusResult");
         assert_eq!(
             account["result"],
-            json!({ "provider": "anthropic", "kind": "subscription_token", "source": "keychain" })
+            json!({ "signed_in": false, "kind": null })
+        );
+        let status = setup_query(&state, "serve.status", &json!({})).await;
+        assert_eq!(status["result"]["signed_in"], false, "{status}");
+
+        *host.account.status.lock().expect("the status") = AccountStatus {
+            signed_in: true,
+            kind: Some(AccountKind::Subscription),
+        };
+        let account = setup_query(&state, "account.status", &json!({})).await;
+        conforms(&account["result"], "accountStatusResult");
+        assert_eq!(
+            account["result"],
+            json!({ "signed_in": true, "kind": "subscription" })
+        );
+        let status = setup_query(&state, "serve.status", &json!({})).await;
+        assert_eq!(status["result"]["signed_in"], true, "{status}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn takes_the_waiting_project_on_once_the_account_works() {
+        let home = scratch("setup-take-on");
+        let (state, host) = in_setup(&home, "");
+        *host.waiting.lock().expect("the waiting") = true;
+        let (_, checked) = asked(&state, "account.check", &json!({})).await;
+        conforms(&checked["result"], "accountCheckResult");
+        assert_eq!(
+            checked["result"],
+            json!({ "outcome": "working", "taking_on": true })
+        );
+        // A check that does not pass takes nothing on.
+        *host.account.check.lock().expect("the answer") = CheckOutcome::KeyRefused;
+        let (_, refused) = asked(&state, "account.check", &json!({})).await;
+        assert_eq!(refused["result"], json!({ "outcome": "key_refused" }));
+        // The wizard's project steps wait on a signed-in account.
+        *host.account.status.lock().expect("the status") = AccountStatus {
+            signed_in: false,
+            kind: None,
+        };
+        let (_, opened) = asked(
+            &state,
+            "project.open",
+            &json!({ "path": "code/a", "no_sandbox": true }),
+        )
+        .await;
+        assert_eq!(
+            opened["error"],
+            json!({ "code": -32005, "message": "connect your AI account first" })
         );
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn never_echoes_the_secret() {
+    async fn never_echoes_the_sign_in_code() {
         let home = scratch("setup-secret");
-        let (state, _) = in_setup(&home, "");
-        let secret = "sk-ant-oat01-never-to-be-echoed";
+        let (state, host) = in_setup(&home, "");
+        let code = "secret-code-123";
+        *host.account.finish.lock().expect("the answer") =
+            Err(crate::account::SignInError::NoSignIn);
 
-        let (text, stored) = asked(
-            &state,
-            "account.connect",
-            &json!({ "kind": "subscription_token", "secret": secret }),
-        )
-        .await;
-        conforms(&stored["result"], "accountConnectResult");
-        assert_eq!(
-            stored["result"],
-            json!({ "stored_in": "file", "taking_on": false }),
-            "{text}"
-        );
-        let (text, malformed) =
-            asked(&state, "account.connect", &json!({ "secret": secret })).await;
-        assert_eq!(malformed["error"]["code"], -32602, "{text}");
-        assert!(!text.contains(secret), "{text}");
-        let (text, refused) = asked(
-            &state,
-            "account.connect",
-            &json!({ "kind": "api_key", "secret": secret }),
-        )
-        .await;
+        let (text, refused) = asked(&state, "account.sign_in_code", &json!({ "code": code })).await;
         assert_eq!(refused["error"]["code"], -32005, "{text}");
-        assert!(!text.contains(secret), "{text}");
+        assert!(!text.contains(code), "{text}");
+        assert!(refused["error"].get("data").is_none(), "{text}");
+        // A frame the schema refuses is not quoted either.
+        let (text, malformed) = asked(
+            &state,
+            "account.sign_in_code",
+            &json!({ "code": code, "extra": 1 }),
+        )
+        .await;
+        assert_eq!(malformed["error"]["code"], -32602, "{text}");
+        assert!(malformed["error"].get("data").is_none(), "{text}");
+        assert!(!text.contains(code), "{text}");
     }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn never_echoes_the_mailbox_password() {
         let home = scratch("mailbox-secret");

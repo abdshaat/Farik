@@ -163,14 +163,13 @@ async fn set_up(
         env: io.env.clone(),
         home: home_of(io),
         clock: Arc::clone(&io.clock),
-        stores: (io.credential_stores)(),
         chosen,
         waiting,
         leaving: leaving.clone(),
         secrets: Arc::clone(&io.connector_secrets),
     });
     let bound = port_of(held)?;
-    let (mut web, code) = web(Path::new(""), io, None)?;
+    let (mut web, code) = web(Path::new(""), io)?;
     web.port = bound;
     web.take_on_error = std::sync::Mutex::new(take_on_error);
     web.leaving = std::sync::Mutex::new(leaving.clone());

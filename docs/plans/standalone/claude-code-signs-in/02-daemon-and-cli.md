@@ -149,7 +149,7 @@ Tests (each with `FakeAccount`):
   - With the fake's status kind `environment` and `ANTHROPIC_API_KEY` set, `account.sign_in` is refused with the sentence above.
   - `account.sign_out` answers `{ paused: false, environment_variable: "ANTHROPIC_API_KEY" }`, and the fake recorded no `sign_out`.
 
-- [ ] `feat(runtime): sign in, check and sign out through claude code`
+- [x] `feat(runtime): sign in, check and sign out through claude code`
 
 ### Task 9: The command line asks Claude Code
 
