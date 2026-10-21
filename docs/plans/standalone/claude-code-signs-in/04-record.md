@@ -38,7 +38,7 @@ The test (`setup-project.spec.ts:46-56`) does the following and asserts the resu
 2. It fills "Your sign-in code" with `e2e-code` and presses "Finish signing in".
 3. It sees "It works.", goes on to choose the project, and asserts that no `credential.json` exists in the state folder.
 
-- [ ] `test(web): the first run signs in through claude code`
+- [x] `test(web): the first run signs in through claude code`
 
 ### Task 14: The reset script, the ADRs and the spec
 
