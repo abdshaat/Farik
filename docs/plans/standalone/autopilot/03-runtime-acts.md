@@ -105,7 +105,7 @@ Files: `marketing.rs`, `tools/marketing.rs`, `orchestrator/human.rs` (callers pa
 Tests (`tools/marketing.rs` `mod tests`):
 - `approves_a_plan_that_spends_under_autopilot` — under autopilot, a plan with a total of 200 and a Google Ads budget is followed by `marketing_plan.approved { by: "autopilot", note: AUTOPILOT_PLAN_NOTE }` naming no agent and no session, and the answer says to start now; with autopilot off nothing is approved (`approves_a_plan_that_spends_nothing` keeps its `by` absent).
 
-- [ ] `feat(runtime): marketing plans are approved under autopilot`
+- [x] `feat(runtime): marketing plans are approved under autopilot`
 
 ### Task 15: the Product Manager decides data pipelines under autopilot
 

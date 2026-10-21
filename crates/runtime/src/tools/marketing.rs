@@ -15,6 +15,7 @@ use catervas_core::marketing::{
     parse_amount,
 };
 use catervas_protocol::event::{EventBody, MarketingPlanProposedBody};
+use catervas_protocol::generated::event::MarketingPlanApprovedBodyBy;
 use catervas_store::marketing::{MarketingPlan, marketing_plans};
 use chrono::NaiveDate;
 use schemars::JsonSchema;
@@ -309,15 +310,8 @@ pub(crate) fn propose_plan(
         let _ = std::fs::remove_file(&twin);
         return Err(error);
     }
-    if spends_nothing(&proposal) {
-        // ADR 0061: only money asks the owner. Catervas approves a plan that spends nothing, as no
-        // one's agent: the envelope names no agent and no session, as the owner's does.
-        crate::marketing::decide_plan(deps, &id, true, Some(FREE_PLAN_NOTE.to_string()))
-            .map_err(|error| failed(format!("{error:?}")))?;
-        return Ok(json!({
-            "plan": id,
-            "next": format!("{id} is approved: it spends nothing. Start on it now: schedule its first posts with catervas_schedule_post, then write your kickoff document and commit it."),
-        }));
+    if let Some(answer) = approved_without_the_owner(deps, &id, &proposal)? {
+        return Ok(answer);
     }
     Ok(json!({
         "plan": id,
@@ -325,8 +319,41 @@ pub(crate) fn propose_plan(
     }))
 }
 
+/// Approves the plan just proposed when no one needs to be asked, and answers the agent so:
+/// a plan that spends nothing is approved by Catervas (ADR 0061), and, under autopilot, one that
+/// spends is too, the marketing budget staying its hard stop (ADR 0082 decision 5). The envelope
+/// names no agent and no session, as the owner's does.
+fn approved_without_the_owner(
+    deps: &crate::tools::ToolDeps,
+    id: &str,
+    proposal: &PlanProposal,
+) -> Result<Option<Value>, ToolError> {
+    let start = "Start on it now: schedule its first posts with catervas_schedule_post, then write your kickoff document and commit it.";
+    let (note, by, why) = if spends_nothing(proposal) {
+        (FREE_PLAN_NOTE, None, "it spends nothing")
+    } else if catervas_store::autopilot::autopilot_on(&deps.log).map_err(failed)? {
+        (
+            AUTOPILOT_PLAN_NOTE,
+            Some(MarketingPlanApprovedBodyBy::Autopilot),
+            "autopilot is on",
+        )
+    } else {
+        return Ok(None);
+    };
+    crate::marketing::decide_plan(deps, id, true, Some(note.to_string()), by)
+        .map_err(|error| failed(format!("{error:?}")))?;
+    Ok(Some(json!({
+        "plan": id,
+        "next": format!("{id} is approved: {why}. {start}"),
+    })))
+}
+
 /// What Catervas writes as the note of its approval of a plan that spends nothing.
 const FREE_PLAN_NOTE: &str = "Catervas approved it: it spends nothing (ADR 0061).";
+
+/// What Catervas writes as the note of its approval of a plan that spends, under autopilot.
+const AUTOPILOT_PLAN_NOTE: &str =
+    "Catervas approved it under autopilot; the marketing budget stays its hard stop (ADR 0082).";
 
 /// Whether the plan spends no money: its total, its Google Ads budget and every campaign are zero.
 fn spends_nothing(proposal: &PlanProposal) -> bool {
@@ -769,6 +796,43 @@ mod tests {
         assert_eq!(answer["plan"], "MP-1");
         assert_eq!(proposed_events(&paid), 1);
         assert!(paid.events(&[EventKind::MarketingPlanApproved]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn approves_a_plan_that_spends_under_autopilot() {
+        // A plan with a total of 2000 and a Google Ads budget waits for the owner, unless
+        // autopilot is on (ADR 0082 decision 5).
+        let off = a_marketing_project("tools-plan-autopilot-off");
+        works_on(&off, "CTV-1");
+        propose(&off, "CTV-1", &a_plan()).expect("the plan is proposed");
+        assert!(off.events(&[EventKind::MarketingPlanApproved]).is_empty());
+
+        let project = a_marketing_project("tools-plan-autopilot");
+        works_on(&project, "CTV-1");
+        project.record("", "autopilot.changed", &json!({ "on": true }));
+
+        let answer = propose(&project, "CTV-1", &a_plan()).expect("the plan is proposed");
+
+        assert_eq!(answer["plan"], "MP-1");
+        let next = answer["next"].as_str().expect("a sentence");
+        assert!(
+            next.contains("approved") && next.contains("Start on it now"),
+            "{answer}"
+        );
+        let approved = project.events(&[EventKind::MarketingPlanApproved]);
+        assert_eq!(approved.len(), 1);
+        let EventBody::MarketingPlanApproved(body) = &approved[0].body else {
+            panic!("a marketing plan was approved");
+        };
+        assert_eq!(body.plan.as_str(), "MP-1");
+        assert_eq!(body.note, super::AUTOPILOT_PLAN_NOTE);
+        assert_eq!(
+            body.by.map(|by| by.to_string()),
+            Some("autopilot".to_string())
+        );
+        assert_eq!(approved[0].envelope.ids.agent_id, None);
+        assert_eq!(approved[0].envelope.ids.session_id, None);
     }
 
     #[test]

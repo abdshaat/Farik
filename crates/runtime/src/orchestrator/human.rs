@@ -201,7 +201,7 @@ pub(super) async fn handle(
             } else {
                 None
             };
-            decide_plan(tools, &plan, approve, note)
+            decide_plan(tools, &plan, approve, note, None)
         }
         Command::MarketingPlanEnd { plan, note } => {
             let _writing = orchestrator.deps.daemon.ads_writes().lock().await;
