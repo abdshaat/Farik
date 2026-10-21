@@ -64,9 +64,15 @@ pub struct Reply {
     pub tools: Vec<ToolUse>,
 }
 
-/// One tool call of a reply: its id and name, and of its input only the fields named here. A later
-/// step adds one field for what it needs (03b: whether it touched a spreadsheet file); the input is
-/// never kept whole and no text of it is read.
+/// The tools that read or write one file, named by `input.file_path`.
+pub const FILE_TOOLS: [&str; 4] = ["Read", "Write", "Edit", "MultiEdit"];
+
+/// The extensions that make a file a spreadsheet, compared without case.
+pub const SPREADSHEET_EXTENSIONS: [&str; 3] = ["xlsx", "xls", "csv"];
+
+/// One tool call of a reply: its id and name, and of its input only the fields named here (a
+/// schedule, whether a file tool named a spreadsheet); the input is never kept whole and no text of
+/// it is read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolUse {
     /// The tool use's id.
@@ -75,6 +81,8 @@ pub struct ToolUse {
     pub name: String,
     /// A `CronCreate` call's schedule fields; `None` for every other tool.
     pub cron: Option<CronCall>,
+    /// Whether a file tool named a file with a spreadsheet extension. The path is never kept.
+    pub touches_spreadsheet: bool,
 }
 
 /// The schedule fields of a `CronCreate` call. Its prompt is never read.
@@ -100,6 +108,15 @@ fn count(usage: &Value, key: &str) -> u64 {
     usage.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
+fn is_spreadsheet_path(path: &str) -> bool {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    name.rsplit_once('.').is_some_and(|(_, extension)| {
+        SPREADSHEET_EXTENSIONS
+            .iter()
+            .any(|known| extension.eq_ignore_ascii_case(known))
+    })
+}
+
 fn tool_use_of(block: &Value) -> Option<ToolUse> {
     if text(block, "type")? != "tool_use" {
         return None;
@@ -122,7 +139,17 @@ fn tool_use_of(block: &Value) -> Option<ToolUse> {
     } else {
         None
     };
-    Some(ToolUse { id, name, cron })
+    let touches_spreadsheet = FILE_TOOLS.contains(&name.as_str())
+        && block
+            .get("input")
+            .and_then(|input| text(input, "file_path"))
+            .is_some_and(is_spreadsheet_path);
+    Some(ToolUse {
+        id,
+        name,
+        cron,
+        touches_spreadsheet,
+    })
 }
 
 fn reply_of(line: &Value) -> Option<Reply> {
@@ -164,7 +191,7 @@ fn turn_of(line: &Value, is_assistant: bool) -> Option<Turn> {
 
 /// Reads one transcript line, keeping only the fields the index needs. Nothing a conversation
 /// said can come out of it: `message.content` is read only for its `tool_use` blocks' type, id and
-/// name, and `CronCreate`'s schedule fields; no text field is ever read.
+/// name, `CronCreate`'s schedule fields and a file tool's extension; no text field is ever read.
 #[must_use]
 pub fn read_line(line: &str) -> TranscriptLine {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
@@ -498,7 +525,8 @@ mod tests {
             vec![ToolUse {
                 id: "toolu_01B".to_string(),
                 name: "Bash".to_string(),
-                cron: None
+                cron: None,
+                touches_spreadsheet: false
             }]
         );
         assert_eq!(
@@ -510,7 +538,8 @@ mod tests {
                     cron: "*/10 * * * *".to_string(),
                     is_recurring: true,
                     is_durable: false
-                })
+                }),
+                touches_spreadsheet: false
             }]
         );
         let call = |recurring, durable| CronCreateLine {
@@ -543,6 +572,81 @@ mod tests {
                 assert_eq!(reply.tools, vec![]);
             }
         }
+    }
+
+    fn connector_tools() -> Vec<(String, Vec<ToolUse>)> {
+        use super::fixtures::CONNECTOR_FIXTURES;
+        let versions: Vec<&str> = CONNECTOR_FIXTURES.iter().map(|(v, _)| *v).collect();
+        assert_eq!(versions, CHECKED_VERSIONS);
+        CONNECTOR_FIXTURES[0]
+            .1
+            .lines()
+            .filter_map(|line| match read_line(line) {
+                TranscriptLine::Turn(Turn {
+                    reply: Some(reply), ..
+                }) => Some((reply.key, reply.tools)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tells_a_tool_call_that_touches_a_spreadsheet() {
+        let replies = connector_tools();
+        let flat: Vec<(&str, &str, bool)> = replies
+            .iter()
+            .flat_map(|(_, tools)| tools)
+            .map(|tool| {
+                (
+                    tool.id.as_str(),
+                    tool.name.as_str(),
+                    tool.touches_spreadsheet,
+                )
+            })
+            .collect();
+        let touching: Vec<&str> = flat.iter().filter(|t| t.2).map(|t| t.0).collect();
+        assert_eq!(touching, ["toolu_4", "toolu_9"]);
+        let of = |key: &str| -> Vec<&str> {
+            replies
+                .iter()
+                .filter(|(k, _)| k == key)
+                .flat_map(|(_, tools)| tools.iter().map(|t| t.id.as_str()))
+                .collect()
+        };
+        assert_eq!(of("msg_T3"), ["toolu_3", "toolu_4"]);
+        assert_eq!(of("msg_T8"), ["toolu_8", "toolu_9"]);
+        assert!(of("msg_S2").is_empty(), "T7 is no reply");
+        for id in [
+            "toolu_1", "toolu_2", "toolu_3", "toolu_5", "toolu_6", "toolu_8",
+        ] {
+            assert!(flat.iter().any(|t| t.0 == id && !t.2), "{id}");
+        }
+    }
+
+    /// Guard: checked by mutation (keep the file path), not watched to fail.
+    #[test]
+    fn keeps_no_file_path() {
+        use super::fixtures::CONNECTOR_FIXTURES;
+        for line in CONNECTOR_FIXTURES[0].1.lines().map(read_line) {
+            assert!(!format!("{line:?}").contains("NEVER-KEPT-TEXT"), "{line:?}");
+        }
+    }
+
+    #[test]
+    fn reads_a_file_path_tolerantly() {
+        let touches = |name: &str, input: &str| -> bool {
+            let line = format!(
+                r#"{{"type":"assistant","sessionId":"s","cwd":"/c","timestamp":"2026-10-12T09:00:00Z","message":{{"id":"m1","model":"m","content":[{{"type":"tool_use","id":"t1","name":"{name}","input":{input}}}]}}}}"#
+            );
+            tools_of(&line)[0].touches_spreadsheet
+        };
+        assert!(!touches("Read", r#"{"file_path":7}"#));
+        assert!(!touches("Read", "{}"));
+        assert!(touches("Read", r#"{"file_path":"C:\\b\\x.CSV"}"#));
+        assert!(touches("MultiEdit", r#"{"file_path":"/a/b.XlS"}"#));
+        assert!(!touches("Read", r#"{"file_path":"/a/xlsx"}"#));
+        assert!(!touches("Read", r#"{"file_path":"/a/b.xlsx.bak"}"#));
+        assert!(!touches("Glob", r#"{"pattern":"*.csv"}"#));
     }
 
     /// Guard: checked by mutation (keep a text field), not watched to fail.

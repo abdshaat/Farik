@@ -202,7 +202,7 @@ Files: `claude_history.rs` (`touches_spreadsheet` set where step 03 builds each 
 - `keeps_no_file_path` (guard): no line of the fixture reads into anything whose `Debug` holds `NEVER-KEPT-TEXT`.
 - `reads_a_file_path_tolerantly`: `file_path` a number or absent is false; `C:\b\x.CSV` and `/a/b.XlS` are true; `/a/xlsx` and `/a/b.xlsx.bak` false; a `Glob` with `pattern` `*.csv` false. RED.
 
-- [ ] `feat(core): tell a claude code tool call that touches a spreadsheet`
+- [x] `feat(core): tell a claude code tool call that touches a spreadsheet`
 
 ### Task 2: Server names from settings, never a key
 

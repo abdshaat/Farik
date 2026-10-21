@@ -98,3 +98,11 @@ pub fn a_cron_create_line(line: &CronCreateLine<'_>) -> String {
 pub fn a_title_line(session_id: &str, title: &str) -> String {
     json!({"type": "ai-title", "sessionId": session_id, "aiTitle": title}).to_string()
 }
+
+/// A hand-written transcript of Claude Code 2.1.296 with connector and spreadsheet tool calls: one
+/// session at home, every text and input field `NEVER-KEPT-TEXT`.
+pub const CLAUDE_CODE_2_1_296_CONNECTORS: &str =
+    include_str!("fixtures/claude_code_2_1_296_connectors.jsonl");
+
+/// One connectors fixture per entry of `CHECKED_VERSIONS`.
+pub const CONNECTOR_FIXTURES: [(&str, &str); 1] = [("2.1.296", CLAUDE_CODE_2_1_296_CONNECTORS)];
