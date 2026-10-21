@@ -138,7 +138,7 @@ Files: `transitions.rs`, `orchestrator.rs`, `orchestrator/rules.rs`
 Tests (`rules.rs` `mod tests`):
 - `an_idle_agent_takes_a_ready_task_of_its_role_past_its_limit_under_autopilot` — with `wip_limit_per_agent: 1`, Developer `dev` holding `CTV-1` `in_progress` with no session running and `CTV-2` a `ready` Developer task: a `Planning` tick under autopilot starts the Product Manager's `plan` session for `CTV-2` naming `dev`, and the assignment of `CTV-2` to `dev` passes the governor; with autopilot off the tick starts no session and the assignment is refused for the limit; with `dev` busy (a claim held in `deps.work`) the tick under autopilot starts none either; a `ready` task of another role is never offered to `dev`.
 
-- [ ] `feat(runtime): an idle agent takes ready work of its role under autopilot`
+- [x] `feat(runtime): an idle agent takes ready work of its role under autopilot`
 
 ## Verification
 

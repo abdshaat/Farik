@@ -83,6 +83,9 @@ use crate::preview::PreviewFactory;
 use crate::tools::design::{DesignReview, ReviewState, design_review};
 use crate::tools::sheets::private_path;
 
+/// What says whether an agent has a session running.
+pub type BusyAgents = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// The governor's door: everything a transition is judged on and recorded in.
 pub struct Transitions {
     log: Arc<EventLog>,
@@ -99,6 +102,9 @@ pub struct Transitions {
     previews: OnceLock<Arc<dyn PreviewFactory>>,
     /// The project's sandbox setting, once the driver sets it.
     sandbox: OnceLock<Sandbox>,
+    /// Whether an agent has a session running, once the orchestrator sets it: under autopilot an
+    /// agent that has none may be given work past its limit (ADR 0082 decision 8).
+    busy: OnceLock<BusyAgents>,
 }
 
 /// What the requester brings to a transition, and nothing else: every other fact is read from the
@@ -276,7 +282,35 @@ impl Transitions {
             requests: Mutex::new(()),
             previews: OnceLock::new(),
             sandbox: OnceLock::new(),
+            busy: OnceLock::new(),
         }
+    }
+
+    /// What `assignment` takes from the store: whether an idle agent may be given work past its
+    /// limit under autopilot, the private folder's holder and the lane's builder.
+    fn fill_assignment(
+        &self,
+        assignment: &mut AssignmentInput,
+        (board, row, contract): (&[TaskProjection], &TaskProjection, &TaskContract),
+        team: &Team,
+        autopilot: bool,
+    ) -> Result<(), TransitionError> {
+        assignment.past_limit_allowed = autopilot && self.idle(&assignment.assignee_id);
+        assignment.private_folder_busy =
+            private_folder_busy(&self.files, board, row, assignment.assignee_role)?;
+        assignment.lane_builder = lane_builder(&self.files, team, board, row, contract)?;
+        Ok(())
+    }
+
+    /// Whether `agent_id` has no session running, so under autopilot it may be given work past its
+    /// limit; false until the orchestrator says what runs.
+    fn idle(&self, agent_id: &str) -> bool {
+        self.busy.get().is_some_and(|busy| !busy(agent_id))
+    }
+
+    /// Sets what says whether an agent has a session running; the first set holds.
+    pub fn set_busy(&self, busy: BusyAgents) {
+        let _ = self.busy.set(busy);
     }
 
     /// Sets what says whether a preview can run here, which decides whether the team's Designer
@@ -705,10 +739,9 @@ impl Transitions {
             dependency_states(&contract, &board),
             || self.designer_browser(team),
         );
+        let autopilot = catervas_store::autopilot::autopilot_on(&self.log)?;
         if let Some(assignment) = assignment.as_mut() {
-            assignment.private_folder_busy =
-                private_folder_busy(&self.files, &board, row, assignment.assignee_role)?;
-            assignment.lane_builder = lane_builder(&self.files, team, &board, row, &contract)?;
+            self.fill_assignment(assignment, (&board, row, &contract), team, autopilot)?;
         }
 
         let review = self.review_of(team, &contract, &changed_paths, &history).1;
@@ -736,7 +769,6 @@ impl Transitions {
                 stale_twins,
             },
         );
-        let hours = team.policy.blocked_limit_hours.get();
         Ok(TransitionContext {
             triaged: row.triaged,
             children: children_of(&board, id),
@@ -760,7 +792,9 @@ impl Transitions {
             blocked_at: last_move_into(&history, TaskStatus::Blocked)
                 .map(|event| event.envelope.recorded_at),
             now,
-            blocked_limit: Duration::from_secs(hours.saturating_mul(3600)),
+            blocked_limit: Duration::from_secs(
+                team.policy.blocked_limit_hours.get().saturating_mul(3600),
+            ),
             done,
             rejection: ask.rejection.clone(),
             budget,
@@ -773,7 +807,7 @@ impl Transitions {
             design_plan_returns: crate::tools::design::returns(&history),
             solo: team.is_solo(),
             documents_stay_local: self.has_no_branch(team, &contract)?,
-            autopilot: catervas_store::autopilot::autopilot_on(&self.log)?,
+            autopilot,
             design_reviewer: match (review.state, review.recorded_by) {
                 (ReviewState::Failed, Some((designer, _))) => Some(designer),
                 _ => None,
@@ -1809,6 +1843,35 @@ pub(crate) fn within_limit(team: &Team, board: &[TaskProjection]) -> BTreeSet<Ta
         // A stable sort keeps the board's order of numbers among equal ranks.
         held.sort_by_key(|row| row.counted_seq.unwrap_or(0));
         allowed.extend(held.into_iter().take(limit).map(|row| row.task_id.clone()));
+    }
+    allowed
+}
+
+/// `within_limit`, and under autopilot every task of an agent with no session running too: an
+/// idle agent works the one it is given, past its limit (ADR 0082 decision 8).
+pub(crate) fn within_limit_or_idle(
+    team: &Team,
+    board: &[TaskProjection],
+    autopilot: bool,
+    busy: impl Fn(&str) -> bool,
+) -> BTreeSet<TaskId> {
+    let mut allowed = within_limit(team, board);
+    if autopilot {
+        for agent in team
+            .active_agents()
+            .filter(|agent| !busy(agent.id.as_str()))
+        {
+            allowed.extend(
+                board
+                    .iter()
+                    .filter(|row| {
+                        row.kind != TaskKind::Epic
+                            && row.counts_towards_wip()
+                            && row.assignee_id.as_deref() == Some(agent.id.as_str())
+                    })
+                    .map(|row| row.task_id.clone()),
+            );
+        }
     }
     allowed
 }

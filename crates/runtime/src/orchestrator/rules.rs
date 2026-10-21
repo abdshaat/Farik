@@ -177,7 +177,12 @@ pub(super) async fn tick(
         BTreeSet::new()
     };
     // The tasks each agent may work: those past its limit are "returning", and wait for a hand-over.
-    let within = transitions::within_limit(&team, &board);
+    let within = transitions::within_limit_or_idle(
+        &team,
+        &board,
+        catervas_store::autopilot::autopilot_on(&deps.tools.log)?,
+        |agent| deps.work.is_busy(agent),
+    );
     if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
@@ -2081,7 +2086,8 @@ async fn ready(
     }
     // The tasks of a lane go to one builder, who waits for room rather than give them away.
     let lane_builder = transitions::lane_builder(&deps.tools.files, team, board, row, &contract)?;
-    let with_room = |role: Role| -> Vec<String> {
+    let autopilot = catervas_store::autopilot::autopilot_on(&deps.tools.log)?;
+    let with_room = |role: Role, past_limit: bool| -> Vec<String> {
         team.active_agents()
             .filter(|agent| Role::from(agent.role) == role)
             .filter(|agent| {
@@ -2089,15 +2095,18 @@ async fn ready(
                     .as_deref()
                     .is_none_or(|builder| agent.id.as_str() == builder)
             })
-            .filter(|agent| has_room(team, board, agent, row.parent.as_ref()))
+            .filter(|agent| {
+                has_room(team, board, agent, row.parent.as_ref())
+                    || (past_limit && autopilot && idle_past_limit(deps, team, agent))
+            })
             .map(|agent| agent.id.to_string())
             .collect()
     };
     // The Architect builds a Developer's task only when no Developer has room (ADR 0077).
-    let mut assignees = with_room(contract.assignee_role);
+    let mut assignees = with_room(contract.assignee_role, true);
     let mut architect_builds = false;
     if assignees.is_empty() && may_build(Role::Architect, contract.assignee_role) {
-        assignees = with_room(Role::Architect);
+        assignees = with_room(Role::Architect, false);
         architect_builds = true;
     }
     let Some(first) = assignees.first() else {
@@ -2163,7 +2172,9 @@ fn ready_given(
     contract: &TaskContract,
     agent: &Agent,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if !has_room(team, board, agent, None)
+    if !(has_room(team, board, agent, None)
+        || (catervas_store::autopilot::autopilot_on(&deps.tools.log)?
+            && idle_past_limit(deps, team, agent)))
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -2246,6 +2257,12 @@ pub(super) fn has_room(
         < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
 }
 
+/// Whether `agent` may be given work past the team's limit under autopilot: it has no session
+/// running, and the limit is not zero, which still stops new work (ADR 0082 decision 8).
+fn idle_past_limit(deps: &OrchestratorDeps, team: &Team, agent: &Agent) -> bool {
+    team.policy.wip_limit_per_agent > 0 && !deps.work.is_busy(agent.id.as_str())
+}
+
 /// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
 /// checks before asking, read from the governor's own context for the assignment: that no other task
 /// holds the assignee's private folder, and every dependency accepted. A task that fails them is passed
@@ -2319,6 +2336,9 @@ pub(super) fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::transitions::{TransitionAsk, TransitionOutcome};
+    use catervas_core::governor::transition::TransitionRequest;
+    use catervas_core::governor::transition_table::TransitionActor;
     use std::collections::BTreeSet;
     use std::num::NonZeroU64;
     use std::sync::Arc;
@@ -7421,6 +7441,102 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_idle_agent_takes_a_ready_task_of_its_role_past_its_limit_under_autopilot() {
+        let one_developer = |wire: &mut serde_json::Value| {
+            with_a_scrum_master(wire);
+            wire["policy"]["wip_limit_per_agent"] = json!(1);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .retain(|agent| agent["id"] != "dev-b");
+        };
+        // Per case: autopilot on, the developer busy; the Planning tick's session, if any.
+        for (name, on, busy, planned) in [
+            ("orch-idle-past-limit", true, false, true),
+            ("orch-idle-past-limit-off", false, false, false),
+            ("orch-idle-past-limit-busy", true, true, false),
+        ] {
+            let harness = Harness::new(name, one_developer);
+            harness.in_progress("CTV-1", "dev-a", "pm");
+            harness.file("CTV-2", "ready", |wire| {
+                wire["reviewer_role"] = json!("product_manager");
+            });
+            // A ready task of a role nobody on the team holds is never offered to dev-a.
+            harness.file("CTV-3", "ready", |wire| {
+                wire["assignee_role"] = json!("architect");
+            });
+            autopilot(&harness, on);
+            let adapter = harness.recorded(vec![reads_a_file()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            let claim = busy.then(|| {
+                orchestrator
+                    .deps
+                    .work
+                    .claim(
+                        "dev-a",
+                        Some(&"CTV-1".parse().expect("a task id")),
+                        SessionPurpose::Implement,
+                    )
+                    .expect("the claim is held")
+            });
+            orchestrator
+                .tick_within(&TickScope {
+                    rules: TickRules::Planning,
+                    ..TickScope::default()
+                })
+                .await
+                .expect("the tick runs");
+
+            let started = adapter.started();
+            assert_eq!(started.len(), usize::from(planned), "{name}: {started:?}");
+            if planned {
+                assert_eq!(
+                    (started[0].agent_id.as_str(), started[0].purpose),
+                    ("sm", SessionPurpose::Plan),
+                    "{name}"
+                );
+                assert!(
+                    started[0].initial_prompt.contains("CTV-2")
+                        && started[0]
+                            .initial_prompt
+                            .contains("with room for it: dev-a."),
+                    "{name}: {}",
+                    started[0].initial_prompt
+                );
+            }
+            // The governor agrees: dev-a may be assigned CTV-2 only while autopilot is on and
+            // it has no session running.
+            let request = TransitionRequest {
+                task_id: "CTV-2".parse().expect("a task id"),
+                to: TaskStatus::Assigned,
+                actor: TransitionActor::ScrumMaster,
+                agent_id: Some("sm".to_string()),
+            };
+            let outcome = harness
+                .project
+                .deps
+                .transitions
+                .request(
+                    &request,
+                    &TransitionAsk {
+                        assignee_id: Some("dev-a".to_string()),
+                        reviewer_id: Some("pm".to_string()),
+                        ..TransitionAsk::default()
+                    },
+                    &harness.project.deps.files.read_team().expect("the team"),
+                )
+                .expect("the request is judged");
+            drop(claim);
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                planned,
+                "{name}: {outcome:?}"
+            );
+        }
     }
 
     #[tokio::test]

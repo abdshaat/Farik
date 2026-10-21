@@ -545,6 +545,10 @@ impl Orchestrator {
     /// An orchestrator that has done nothing yet.
     #[must_use]
     pub fn new(deps: OrchestratorDeps) -> Orchestrator {
+        let work = Arc::clone(&deps.work);
+        deps.tools
+            .transitions
+            .set_busy(Arc::new(move |agent| work.is_busy(agent)));
         Orchestrator {
             deps,
             sandboxes: Mutex::new(BTreeMap::new()),
