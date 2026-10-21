@@ -109,7 +109,7 @@ Tests:
 - `plays_a_session_through_the_process` (`claude_process.rs:169`): its assertion on the child's environment changes from "only `ANTHROPIC_API_KEY`" to "no `ANTHROPIC_API_KEY` and no `CLAUDE_CODE_OAUTH_TOKEN`".
 - `gives_a_subscription_session_no_api_key_from_its_base` (`claude_process.rs:552`) is deleted with the behaviour it held.
 
-- [ ] `refactor(runtime): sessions run on claude code's own sign-in`
+- [x] `refactor(runtime): sessions run on claude code's own sign-in`
 
 ### Task 7: The kept key removed, unread
 

@@ -342,8 +342,20 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.catervas
     you gave a connector, which they can also read from a running connector's /proc/<pid>/environ. \
     The governor still checks every path and permission it is asked about.";
 
-/// The variables of the environment a Claude Code session is given besides its credential.
-const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
+/// The variables of the environment a Claude Code session is given, each copied only when set:
+/// Claude Code finds its own sign-in (`CLAUDE_CONFIG_DIR` says where), and a key the user set
+/// passes through unread (ADR 0084).
+const SESSION_ENV: [&str; 9] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "TERM",
+    "TMPDIR",
+    "CLAUDE_CONFIG_DIR",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
 
 /// What a start is told besides the project: how the process differs from `run`'s.
 #[derive(Clone, Copy, Default)]
@@ -737,7 +749,7 @@ fn adapter(
 ) -> Result<Arc<dyn RuntimeAdapter>, String> {
     match (&io.engine, claude) {
         (Engine::Given(factory), _) => Ok(factory(Arc::clone(daemon))),
-        (Engine::Claude, Some((credential, claude_path))) => {
+        (Engine::Claude, Some((_, claude_path))) => {
             let config = ClaudeConfig {
                 claude_path,
                 hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("catervas")),
@@ -764,8 +776,7 @@ fn adapter(
                     })
                     .collect(),
             };
-            let adapter =
-                ClaudeAdapter::new(credential, config).map_err(|error| error.to_string())?;
+            let adapter = ClaudeAdapter::new(config).map_err(|error| error.to_string())?;
             Ok(Arc::new(adapter))
         }
         (Engine::Claude, None) => {

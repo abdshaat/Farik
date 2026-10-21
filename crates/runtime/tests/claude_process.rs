@@ -8,7 +8,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret};
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig};
 use catervas_runtime::daemon::DaemonInfo;
 use catervas_runtime::recorded::fixtures::{a_session_spec, reads_a_file};
 use catervas_runtime::session::SessionSkill;
@@ -16,8 +16,6 @@ use catervas_runtime::{
     EndReason, RuntimeAdapter, RuntimeError, SessionEvent, SessionHandle, SessionSpec, StreamParser,
 };
 use catervas_store::files::fixtures::{TempProject, a_team};
-
-const API_KEY: &str = "sk-the-test-key";
 
 /// A project with a team file, and a fake `claude` in it that runs `body` after reading one line.
 struct Fake {
@@ -86,22 +84,12 @@ impl Fake {
             sessions_dir: catervas.join("local/sessions"),
             skills_dir: self.project.root.join("skills-state"),
             team_file: catervas.join("team.yaml"),
-            env: BTreeMap::from([
-                ("PATH".to_string(), "/usr/bin:/bin".to_string()),
-                (
-                    "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
-                    "the-other-credential".to_string(),
-                ),
-            ]),
+            env: BTreeMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())]),
         }
     }
 
     fn adapter(&self) -> ClaudeAdapter {
-        ClaudeAdapter::new(
-            shared(ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string()))),
-            self.config(),
-        )
-        .expect("the fake is new enough")
+        ClaudeAdapter::new(self.config()).expect("the fake is new enough")
     }
 
     fn spec(&self) -> SessionSpec {
@@ -186,10 +174,7 @@ async fn plays_a_session_through_the_process() {
         .expect("the session ends");
     assert_eq!(events, expected);
     let env = fake.written("env");
-    assert!(
-        env.contains(&format!("ANTHROPIC_API_KEY={API_KEY}")),
-        "{env}"
-    );
+    assert!(!env.contains("ANTHROPIC_API_KEY"), "{env}");
     assert!(!env.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{env}");
     assert!(!env.contains("CARGO_MANIFEST_DIR"), "{env}");
     assert!(
@@ -348,9 +333,8 @@ async fn resumes_a_session_it_started_with_the_resume_flag() {
 #[test]
 fn refuses_a_claude_code_that_is_too_old_or_missing() {
     let fake = Fake::with_version("too-old", "2.1.200", "exit 0");
-    let credential = || ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string()));
     assert!(matches!(
-        ClaudeAdapter::new(shared(credential()), fake.config()),
+        ClaudeAdapter::new(fake.config()),
         Err(RuntimeError::VersionTooOld { .. })
     ));
     let missing = ClaudeConfig {
@@ -358,7 +342,7 @@ fn refuses_a_claude_code_that_is_too_old_or_missing() {
         ..fake.config()
     };
     assert!(matches!(
-        ClaudeAdapter::new(shared(credential()), missing),
+        ClaudeAdapter::new(missing),
         Err(RuntimeError::Spawn { .. })
     ));
 }
@@ -518,10 +502,7 @@ fn asks_the_version_with_only_the_base_environment() {
 fn refuses_a_claude_code_that_does_not_say_its_version_in_time() {
     let fake = Fake::with_version_command("version-hangs", "exec sleep 30", "exit 0");
     let started = std::time::Instant::now();
-    match ClaudeAdapter::new(
-        shared(ClaudeCredential::ApiKey(Secret::new(API_KEY.to_string()))),
-        fake.config(),
-    ) {
+    match ClaudeAdapter::new(fake.config()) {
         Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("--version"), "{detail}"),
         other => panic!("expected a refusal, got {other:?}"),
     }
@@ -546,33 +527,6 @@ async fn refuses_to_resume_a_session_that_is_still_running() {
         other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
     }
     handle.abort().expect("the session is stopped");
-}
-
-#[tokio::test]
-async fn gives_a_subscription_session_no_api_key_from_its_base() {
-    let fake = Fake::new(
-        "oauth",
-        &format!("cat '{}'", transcript_path("reads_a_file").display()),
-    );
-    let mut config = fake.config();
-    config.env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-from-the-base".to_string(),
-    );
-    let adapter = ClaudeAdapter::new(
-        shared(ClaudeCredential::OauthToken(Secret::new(
-            "the-token".to_string(),
-        ))),
-        config,
-    )
-    .expect("the fake is new enough");
-    let mut handle = adapter
-        .start_session(fake.spec())
-        .expect("the session starts");
-    drain(handle.as_mut()).await;
-    let env = fake.written("env");
-    assert!(env.contains("CLAUDE_CODE_OAUTH_TOKEN=the-token"), "{env}");
-    assert!(!env.contains("ANTHROPIC_API_KEY"), "{env}");
 }
 
 const A_RESULT: &str = r#"{"type":"result","subtype":"success","result":"done","usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}"#;
@@ -690,11 +644,6 @@ fn refuses_to_start_a_session_outside_a_tokio_runtime() {
         Err(RuntimeError::Spawn { detail }) => assert!(detail.contains("tokio"), "{detail}"),
         other => panic!("expected a refusal, got {:?}", other.map(|_| ())),
     }
-}
-
-/// A credential as the adapter holds it.
-fn shared(credential: ClaudeCredential) -> catervas_runtime::claude::SharedCredential {
-    std::sync::Arc::new(std::sync::Mutex::new(credential))
 }
 
 /// A spec with one skill, and the plugin folder the adapter will write for it.
