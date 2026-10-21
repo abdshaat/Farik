@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use catervas_core::claude_history::ToolUse;
+use catervas_core::claude_services::{ConfiguredServer, ServiceSource};
 use catervas_core::jobs::{JobKind, SESSION_CRON_DAYS};
 use catervas_core::pricing::Usage;
 use chrono::{DateTime, Duration as Days, SecondsFormat, Utc};
@@ -99,6 +100,18 @@ pub(crate) struct SessionCronBatch {
     pub cwd: String,
     pub cron: String,
     pub at: DateTime<Utc>,
+}
+
+/// A connector a settings file names, and where it was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfiguredRow {
+    /// Whose settings.
+    pub source: ServiceSource,
+    /// `''` for the user level and claude.ai, else a project path, `plugin:<id>`, a Claude Desktop
+    /// folder or `extension:<folder name>`.
+    pub found_in: String,
+    /// What was kept of the server.
+    pub server: ConfiguredServer,
 }
 
 /// A tool call with a server or on a spreadsheet, as the line that carries it reports it.
@@ -548,6 +561,34 @@ impl MachineIndex {
                 "SELECT DISTINCT cwd FROM sessions WHERE cwd IS NOT NULL AND place IN ('owner', 'catervas') ORDER BY cwd",
             )?,
         })
+    }
+
+    /// Replaces every configured server with `rows`, all or none. The first row of a key stays.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn replace_configured_servers(&mut self, rows: &[ConfiguredRow]) -> Result<(), StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute("DELETE FROM configured_servers", [])?;
+        for row in rows {
+            transaction.execute(
+                "INSERT OR IGNORE INTO configured_servers (source, found_in, name, kind, host, program)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                (
+                    row.source.as_wire(),
+                    &row.found_in,
+                    &row.server.name,
+                    row.server.kind.as_wire(),
+                    &row.server.host,
+                    &row.server.program,
+                ),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
     }
 
     /// The origins of every stored job except session crons.

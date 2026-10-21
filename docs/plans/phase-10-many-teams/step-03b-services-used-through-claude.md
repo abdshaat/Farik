@@ -263,7 +263,7 @@ Files: `claude_services.rs` (store), `machine.rs` (replace `configured_servers`)
 - `skips_settings_it_cannot_read`: `.claude.json` holding `not json` and a desktop folder that does not exist: `Ok`, and the plugin's rows are still read. RED.
 - `finds_claude_desktop_under_windows_users`: a users folder where `Abd/AppData/Roaming/Claude/` and `Abd/AppData/Local/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude/` each hold a `claude_desktop_config.json`, and the same under `Public`, `Default`, `Default User` and `All Users`, gives `One` of Abd's two, sorted; adding `Bee/AppData/Roaming/Claude/Claude Extensions/` gives `Several`; `Cy/AppData/Roaming/Claude/` with neither file does not count; a users folder that does not exist gives `None`. RED.
 
-- [ ] `feat(store): read the connectors claude settings name, never a key`
+- [x] `feat(store): read the connectors claude settings name, never a key`
 
 ### Task 7: Services and connector projects from the index
 

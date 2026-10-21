@@ -11,6 +11,8 @@ pub mod baseline;
 pub mod branches;
 /// Reading Claude Code's transcripts into the machine index, and placing each session in its project.
 pub mod claude_history;
+/// Reading the connectors Claude's settings name into the machine index, never a key.
+pub mod claude_services;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// Where the team's documents are read from.
