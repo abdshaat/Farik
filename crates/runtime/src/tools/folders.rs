@@ -392,7 +392,7 @@ pub(crate) fn integration_rows(deps: &ToolDeps, team: &Team) -> Result<Vec<Value
         })
         .collect();
     let docs = folder_docs(&deps.log)?;
-    let waits_for_the_merge = if catervas_store::merging::merging_allowed(&deps.log, team)? {
+    let waits_for_the_merge = if catervas_store::autopilot::merges_on_its_own(&deps.log, team)? {
         "Catervas merges its pull request when GitHub's checks pass"
     } else {
         "Its pull request waits for you to merge it"

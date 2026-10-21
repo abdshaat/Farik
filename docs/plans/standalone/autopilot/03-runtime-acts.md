@@ -130,7 +130,7 @@ Files: `orchestrator/integrate.rs`, `ceremonies.rs`, `crates/store/src/waiting.r
 Tests (`orchestrator/integrate.rs` `mod tests`, with `FakeGh` as ADR 0073's tests use it):
 - `merges_under_autopilot_and_tries_again_after_a_reopen` — under autopilot, with no `merge_when_checks_pass` and no grant, an accepted task's pull request whose checks passed is merged (`pull_request.merged`, `task.integrated { integrated_by: governor }`); another's failed check escalates `integration` and the next tick leaves it; after `team.decided { choice: reopen_integration }` and checks that now pass, the next tick merges it; with autopilot off the first pull request waits (`AwaitingForge`).
 
-- [ ] `feat(runtime): the team merges when checks pass under autopilot`
+- [x] `feat(runtime): the team merges when checks pass under autopilot`
 
 ### Task 18: an idle agent takes ready work of its role under autopilot
 

@@ -51,6 +51,7 @@ pub fn open_escalations(
                 EventKind::TaskTransitioned,
                 EventKind::EscalationRaised,
                 EventKind::TaskIntegrated,
+                EventKind::TeamDecided,
             ],
             ..EventQuery::default()
         })?;
@@ -77,7 +78,13 @@ pub fn open_escalations(
         let landed = history[at..]
             .iter()
             .any(|event| matches!(event.body, EventBody::TaskIntegrated(_)));
-        if row.status == TaskStatus::Accepted && landed {
+        // The team's `reopen_integration` after it closes an integration escalation (ADR 0082).
+        let reopened = row.status == TaskStatus::Accepted
+            && history[at..].iter().any(|event| {
+                matches!(&event.body, EventBody::TeamDecided(body)
+                    if body.choice.to_string() == "reopen_integration")
+            });
+        if row.status == TaskStatus::Accepted && (landed || reopened) {
             continue;
         }
         let EventBody::EscalationRaised(body) = &history[at].body else {

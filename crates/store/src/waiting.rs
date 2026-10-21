@@ -473,7 +473,7 @@ pub fn waiting(
     // Catervas merges only as ADR 0073 allows: every accepted task awaiting integration waits
     // for the human, or for its checks when merging is on, with its pull request when one was
     // opened since it was accepted.
-    let merging = crate::merging::merging_allowed(log, team)?;
+    let merging = crate::autopilot::merges_on_its_own(log, team)?;
     for row in board.iter().filter(|row| row.awaiting_integration) {
         // A plan task has no pull request of its own: its tasks carry the plan, so there is
         // nothing of it for the human to merge.
