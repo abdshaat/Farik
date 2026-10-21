@@ -93,6 +93,26 @@ fn is_env_template(path: &str) -> bool {
         .any(|template| name.eq_ignore_ascii_case(template))
 }
 
+/// Whether `glob` would match an env template that the team does not name exactly among
+/// `protected_globs` (ADR 0078): a deny rule for such a glob would keep the template unreadable,
+/// and so unwritable, in a tool that refuses to write what it may not read. The governor's own
+/// check still refuses every other file the glob matches.
+#[must_use]
+pub fn matches_an_unnamed_env_template(glob: &str, protected_globs: &[String]) -> bool {
+    let Ok(compiled) = GlobBuilder::new(glob)
+        .literal_separator(true)
+        .case_insensitive(true)
+        .build()
+    else {
+        return false;
+    };
+    let matcher = compiled.compile_matcher();
+    ENV_TEMPLATES.iter().any(|template| {
+        (matcher.is_match(template) || matcher.is_match(format!("dir/{template}")))
+            && !named_exactly(template, protected_globs)
+    })
+}
+
 /// Whether one of `globs` is `path` itself, in any letter case.
 fn named_exactly(path: &str, globs: &[String]) -> bool {
     globs

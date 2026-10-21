@@ -518,7 +518,7 @@ struct Held {
 /// Whom a held sandbox is for.
 #[derive(Clone, Copy)]
 enum SandboxFor<'a> {
-    /// An agent's session: it never sees the git store.
+    /// An agent's session: it sees the git store read-only too, so git reads work (ADR 0081).
     Agent,
     /// Catervas's checks, which see this store read-only when there is one.
     Checks(Option<&'a Path>),
@@ -865,8 +865,8 @@ impl Orchestrator {
     }
 
     /// The task's sandbox: the one made for it earlier in this process, or a new one rooted at
-    /// its worktree, with the network on when its assignee holds `network`. It never sees the git
-    /// store: a sandbox made for the checks is dropped for it.
+    /// its worktree, with the network on when its assignee holds `network`. It sees the git store
+    /// read-only, as the checks' does (ADR 0081): a sandbox made for the checks is dropped for it.
     fn sandbox_for(
         &self,
         task_id: &TaskId,
@@ -936,11 +936,29 @@ impl Orchestrator {
                 .map(|root| (root.name, root.path))
                 .collect();
         let project_id = &self.deps.tools.ids.project_id;
-        let made = match whom {
-            SandboxFor::Checks(Some(store)) => self.deps.sandboxes.create_checking(
+        // An agent's container sees the task's repository's git store read-only too, unless its
+        // settings hold a password (ADR 0081, 0069); best effort, as without it only git fails.
+        let agent_store = match whom {
+            SandboxFor::Agent => task_repository_of(&self.deps, team, &contract)
+                .ok()
+                .and_then(|repository| {
+                    if repository.git.config_holds_a_secret().ok()? {
+                        None
+                    } else {
+                        repository.git.common_dir(&folder).ok()
+                    }
+                }),
+            SandboxFor::Checks(_) => None,
+        };
+        let store = match whom {
+            SandboxFor::Checks(store) => store,
+            SandboxFor::Agent => agent_store.as_deref(),
+        };
+        let made = match store {
+            Some(store) => self.deps.sandboxes.create_checking(
                 project_id, task_id, &folder, network, &reads, &packages, store,
             )?,
-            SandboxFor::Checks(None) | SandboxFor::Agent => self
+            None => self
                 .deps
                 .sandboxes
                 .create(project_id, task_id, &folder, network, &reads, &packages)?,
@@ -1835,6 +1853,31 @@ mod tests {
             .expect("the agent's sandbox is reused");
         assert!(Arc::ptr_eq(&agent, &again));
         assert_eq!(sandboxes.created("CTV-1"), 2);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn mounts_the_git_store_for_an_agent() {
+        use std::sync::Arc;
+
+        use crate::orchestrator::fixtures::CountingSandboxFactory;
+
+        let harness = Harness::new("sandbox-agent-store", |_| {});
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let sandboxes = Arc::new(CountingSandboxFactory::default());
+        let orchestrator =
+            harness.orchestrator_with(harness.recorded(Vec::new()), sandboxes.clone());
+        let team = orchestrator.deps.tools.files.read_team().expect("the team");
+        let task: TaskId = "CTV-1".parse().expect("a task id");
+
+        orchestrator
+            .sandbox_for(&task, &team)
+            .expect("the agent's sandbox is made");
+
+        // The agent's container sees the git store read-only, as the checks' does (ADR 0081).
+        let stores = sandboxes.stores("CTV-1");
+        assert_eq!(stores.len(), 1, "{stores:?}");
+        assert!(stores[0].ends_with(".git"), "{stores:?}");
     }
 
     #[test]

@@ -135,6 +135,20 @@ describe("task detail", () => {
 		expect(screen.getAllByText("Gift cards").length).toBeGreaterThan(0);
 	});
 
+	it("heads_the_send_back_with_the_task_id", async () => {
+		await opened({ ...CONTRACT, status: "ready" });
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Change the plan" }),
+		);
+		const dialog = screen.getByRole("dialog");
+		expect(
+			within(dialog).getByRole("heading", {
+				name: "Send CTV-1 back to its plan?",
+			}),
+		).toBeTruthy();
+		expect(within(dialog).getByText("Gift cards")).toBeTruthy();
+	});
+
 	it("sends_a_ready_task_back_to_its_plan", async () => {
 		const page = await opened({ ...CONTRACT, status: "ready" });
 		fireEvent.click(

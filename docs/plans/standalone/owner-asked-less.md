@@ -101,6 +101,29 @@ Files: `runtime/src/preview.rs`
 Files: `docs/SPEC.md` (5.5, 5.9, 5.16, 8.3, 8.6, the rpc and team file formats, revision 0.137)
 - [x] `docs(spec): the owner is asked less and waits less, revision 0.137 (ADR 0081)`
 
+### Task 10: git reads work in an agent's sandbox
+
+Files: `runtime/src/sandbox/docker.rs`, `runtime/src/sandbox.rs` (if `create` needs the store), `runtime/src/orchestrator.rs` (`held_sandbox` passes the store for agents as for checks)
+- `mounts_the_git_store_for_an_agent` (docker.rs, unit on `run_args`) — an agent sandbox's `docker run` arguments mount the git store read-only at its own path, as the checks' do.
+- `an_agent_reads_git_in_its_sandbox` (orchestrator.rs or tests/docker_sandbox.rs, ignored: docker) — in an agent sandbox on a linked worktree, `git log -1 --format=%s` prints the branch's last subject.
+- [x] `fix(runtime): git reads work in an agent's sandbox`
+
+### Task 11: idle names what waits on the owner; the send-back heading is short
+
+Files: `runtime/src/orchestrator/rules.rs` (`idle`), `runtime/src/orchestrator/verify.rs` (record the wait), `runtime/src/daemon/gates.rs` (waiting.list acceptance row for a task held by a human criterion, if not already listed), `apps/web/src/dialogs/ChangePlan.tsx` (+test), `apps/web/src/strings/en.ts`
+- `says_which_task_waits_for_the_owners_acceptance` (rules.rs, ignored) — a verifying task with a passed review and an unanswered `human` criterion, and a ready task depending on it: the idle report names "CTV-2 waits for you to accept it" and "CTV-3 waits for CTV-2", not "nothing on the board needs doing".
+- `lists_a_task_waiting_for_the_owners_verdict` (daemon/gates.rs) — that verifying task appears in `waiting.list` as an `acceptance` row.
+- `heads_the_send_back_with_the_task_id` (ChangePlan test) — the heading reads "Send CTV-23 back to its plan?".
+- [x] `fix(runtime): idle says what waits on the owner, and the send-back heading is short`
+
+### Task 12: an env template is writable in a Claude session too
+
+Found live (CTV-24, 20:10 UTC): ADR 0078 made `.env.example`, `.env.sample` and `.env.template` writable in the governor's check (`check_protected_paths`), but `claude.rs` still writes `Read(<glob>)` deny rules for every protected glob into the session's settings, so `Read(.env.*)` blocks reading `.env.example`, and Claude Code refuses a write to a file it may not read. Decision: the deny list leaves out a protected glob that would match one of the env templates when the team does not name that template exactly (the governor's hook still refuses every other match, e.g. `.env.local`); the same in `read_root_rules`.
+
+Files: `runtime/src/claude.rs`, using `catervas_core::governor::paths` (make `is_env_template` / the template list `pub` if needed)
+- `leaves_an_env_template_readable_in_the_settings` (claude.rs) — with the shipped protected paths, the settings' `permissions.deny` holds `Read(.env)` and no rule matching `.env.example`; with a team naming `.env.example` exactly, `Read(.env.example)` is there.
+- [x] `fix(runtime): an env template is writable in a Claude session too`
+
 ## Verification
 
 ```

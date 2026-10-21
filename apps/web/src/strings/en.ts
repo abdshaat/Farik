@@ -1091,7 +1091,7 @@ export const en = {
 	taskAdded: "Added on {day}.",
 	taskStop: "Stop work on this task",
 	taskChangePlan: "Change the plan",
-	taskChangePlanTitle: "Send {title} back to its plan?",
+	taskChangePlanTitle: "Send {id} back to its plan?",
 	taskChangePlanWhy: "What should change?",
 	taskCancel: "Cancel this task",
 	taskCancelTitle: "Cancel {title}?",

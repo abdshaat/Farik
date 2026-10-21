@@ -68,6 +68,10 @@ pub(super) struct Waiting {
     /// The earliest time a sleeping agent whose session was not started wakes, and that agent
     /// (`unavailable`).
     pub(super) slept: Option<(DateTime<Utc>, String)>,
+    /// The tasks held only by the owner's answer to a `human` criterion (ADR 0081).
+    pub(super) owner_accepts: Vec<String>,
+    /// Each ready task passed over for a dependency not yet accepted, with those dependencies.
+    pub(super) held_by: Vec<(String, Vec<String>)>,
 }
 
 /// The ends that dates bring to marketing plans (ADR 0042): each approved plan a newer one has
@@ -451,12 +455,28 @@ fn idle(waiting: &Waiting) -> TickReport {
             "waiting for {agent}, asleep until {} (its model's usage limit)",
             until.format("%Y-%m-%d %H:%M:%S UTC")
         ),
-        None => NOTHING_TO_DO.to_string(),
+        None => owner_waits(waiting).unwrap_or_else(|| NOTHING_TO_DO.to_string()),
     };
     TickReport::Idle {
         why,
         until: waiting.slept.as_ref().map(|(until, _)| *until),
     }
+}
+
+/// What waits on the owner when nothing runs (ADR 0081): each task held by their answer to a
+/// `human` criterion, then each ready task held only by a dependency not yet accepted. None when
+/// nothing does.
+fn owner_waits(waiting: &Waiting) -> Option<String> {
+    let accepts = waiting
+        .owner_accepts
+        .iter()
+        .map(|task| format!("{task} waits for you to accept it"));
+    let held = waiting
+        .held_by
+        .iter()
+        .map(|(task, deps)| format!("{task} waits for {}", deps.join(", ")));
+    let lines: Vec<String> = accepts.chain(held).collect();
+    (!lines.is_empty()).then(|| lines.join("; "))
 }
 
 /// Whether `scope` takes in a row: every row, or the one task it names; never a task whose
@@ -2065,7 +2085,7 @@ async fn ready(
     let contract = deps.tools.files.read_contract(&row.task_id)?;
     match requests::given_agent(deps, team, &contract)? {
         requests::Given::Active(agent) => {
-            return ready_given(deps, team, board, row, &contract, agent);
+            return ready_given(deps, team, board, row, &contract, agent, waiting);
         }
         requests::Given::Waits => return Ok(None),
         requests::Given::No => {}
@@ -2112,7 +2132,7 @@ async fn ready(
     let Some(first) = assignees.first() else {
         return Ok(None);
     };
-    if !assignable(deps, team, &contract, assigner, first)? {
+    if !assignable(deps, team, &contract, assigner, first, waiting)? {
         return Ok(None);
     }
     let reviewers: Vec<String> = team
@@ -2171,6 +2191,7 @@ fn ready_given(
     row: &TaskProjection,
     contract: &TaskContract,
     agent: &Agent,
+    waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
     if !(has_room(team, board, agent, None)
         || (catervas_store::autopilot::autopilot_on(&deps.tools.log)?
@@ -2203,7 +2224,7 @@ fn ready_given(
         };
         Some(reviewer)
     };
-    if !assignable(deps, team, contract, assigner, agent.id.as_str())? {
+    if !assignable(deps, team, contract, assigner, agent.id.as_str(), waiting)? {
         return Ok(None);
     }
     let outcome = deps.tools.transitions.request(
@@ -2273,6 +2294,7 @@ fn assignable(
     contract: &TaskContract,
     assigner: &Agent,
     candidate: &str,
+    waiting: &mut Waiting,
 ) -> Result<bool, OrchestratorError> {
     let request = TransitionRequest {
         task_id: contract.id.clone(),
@@ -2297,6 +2319,22 @@ fn assignable(
         return Ok(false);
     };
     let states = &assignment.dependencies;
+    // Idle says which dependency a ready task waits for (ADR 0081).
+    let unaccepted: Vec<String> = states
+        .iter()
+        .filter(|state| state.status != TaskStatus::Accepted)
+        .map(|state| state.task_id.clone())
+        .collect();
+    if !unaccepted.is_empty()
+        && !waiting
+            .held_by
+            .iter()
+            .any(|(task, _)| task == contract.id.as_str())
+    {
+        waiting
+            .held_by
+            .push((contract.id.as_str().to_string(), unaccepted));
+    }
     Ok(!assignment.private_folder_busy
         && states.len() == contract.dependencies.len()
         && states
@@ -5374,16 +5412,49 @@ mod tests {
                 passed: true
             }]
         );
+        // The owner's verdict is what it waits for (ADR 0081); this once said "nothing to do".
         assert_eq!(
             report,
             TickReport::Idle {
-                why: NOTHING_TO_DO.to_string(),
+                why: "CTV-1 waits for you to accept it".to_string(),
                 until: None,
             }
         );
         assert_eq!(
             sessions(&adapter),
             vec![("dev-b".to_string(), SessionPurpose::Verify)]
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn says_which_task_waits_for_the_owners_acceptance() {
+        let harness = Harness::new("orch-idle-owner-waits", |_| {});
+        harness.verifying_with("CTV-1", true, true, |wire| {
+            push_criterion(
+                wire,
+                json!({
+                    "id": "C2",
+                    "text": "The founder has opened done.txt.",
+                    "verification": { "method": "human", "question": "Did you open done.txt?" }
+                }),
+            );
+        });
+        harness.file("CTV-2", "ready", |wire| {
+            wire["dependencies"] = json!(["CTV-1"]);
+        });
+        let adapter = harness.recorded(vec![review_writes_note(), review_writes_note()]);
+        let orchestrator = harness.orchestrator(adapter);
+
+        orchestrator.tick().await.expect("the review runs");
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        assert_eq!(
+            report,
+            TickReport::Idle {
+                why: "CTV-1 waits for you to accept it; CTV-2 waits for CTV-1".to_string(),
+                until: None,
+            }
         );
     }
 
@@ -10447,6 +10518,7 @@ mod tests {
             let waiting = super::Waiting {
                 day_spent,
                 slept: asleep.then(|| (woken, "dev-a".to_string())),
+                ..super::Waiting::default()
             };
             match super::idle(&waiting) {
                 TickReport::Idle { why, .. } => why,
