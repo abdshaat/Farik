@@ -369,6 +369,28 @@ export const en = {
 	mergingTurnOn: "Turn on",
 	mergingMainBranch: "your main branch",
 	mergingCancel: "Cancel",
+	autopilotSwitch: "Autopilot: let the team run the product",
+	autopilotSwitchNote:
+		"Off by default. While it is on, nothing waits on you: the team decides, spends within your daily limit, and merges when checks pass.\nIt needs a daily spending limit, which is its stop.",
+	autopilotNeedsLimit:
+		"Set a daily spending limit first: autopilot stops at it.",
+	autopilotNeedsLimitLink: "Spending",
+	autopilotWarnTitle: "Let the team run the product?",
+	autopilotWarn:
+		"No question comes to you: agents ask the team, and the Product Manager or the Architect answers.\nThe Product Manager decides what would wait on you: it approves plans, accepts finished work, and gives more tries, more room, a new plan, or cancels.\nPaid tools, marketing plans and paid data sources run without asking, up to your daily limit of ${limit} a day; each agent makes at most {perHour} paid tool calls an hour, and one that keeps repeating a call is stopped and flagged.\nMessages to sellers go out when written, up to 50 a day; posts go out as planned ones do.\nCatervas merges a pull request when its checks pass, never over a failed one.\nAn agent with nothing to do takes the next ready task of its role.\nWhat only you can give, a sign-in, a key, a purchase, is flagged on Today, and the team works on.\nThe team spends what its work costs, up to your daily limit, every day; with nothing ready it stops.",
+	autopilotWarnNote:
+		"You can turn it off at any time. What the team decided stays decided; anything still waiting then waits on you.",
+	autopilotTurnOn: "Turn on",
+	autopilotCancel: "Cancel",
+	refuseAutopilotUnconfirmed: "Turning autopilot on needs its confirmation.",
+	refuseDailyLimitRequired: "Autopilot needs a daily spending limit.",
+	flaggedTitle: "Flagged by the team ({count})",
+	flaggedBy: "{name} needs you: {needs}",
+	flaggedGoal: "Your goal: {needs}",
+	doneTitle: "Done on its own",
+	doneNone: "Nothing in the last seven days.",
+	doneWhy: "Why: {reason}",
+	doneShowAll: "Show all {count}",
 	finishSafe:
 		"Rules for the whole team and the checks every piece of work must pass are already set to safe choices.",
 	startTeam: "Start the team",
@@ -1592,6 +1614,7 @@ export const en = {
 	limitsBlocked: "Hours a task may stay blocked before asking you",
 	limitsEscalation: "Hours a question may wait before it is flagged",
 	limitsWip: "Tasks one agent may hold at once (0 pauses an agent)",
+	limitsPaidCalls: "Paid tool calls per agent per hour",
 	rulesSessionTitle: "How long one session may run",
 	sessionLead:
 		"A session ends when it reaches any of these. A blank field keeps each role’s usual limit.",
