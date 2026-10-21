@@ -1,14 +1,13 @@
 //! `catervas run` and `catervas plan` (`docs/SPEC.md` 8.2): a process that drives the project until
 //! nothing needs doing, a stop, or Ctrl-C, and then says what waits on the human.
 
-use catervas_runtime::claude::CredentialKind;
-use catervas_runtime::credential::Source;
+use catervas_core::claude_account::AccountKind;
 use catervas_runtime::orchestrator::{Progress, TickReport, TickRules, TickScope};
 use catervas_store::files::Sandbox;
 use serde_json::{Value, json};
 
 use crate::project::Project;
-use crate::start::{Driver, StartOptions, runtime, start};
+use crate::start::{AccountSeen, Driver, StartOptions, runtime, start};
 use crate::waiting::{Waiting, waiting};
 use crate::{CliIo, say};
 
@@ -112,7 +111,10 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         printer.line(
             "",
             &json!({
-                "credential": driver.credential.map(credential_name),
+                "account": driver.account.map(|seen| json!({
+                    "signed_in": true,
+                    "kind": seen.kind,
+                })),
                 "sandbox": match driver.sandbox {
                     Sandbox::Docker => "docker",
                     Sandbox::None => "none",
@@ -126,8 +128,8 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
         );
         return;
     }
-    if let Some((kind, source)) = driver.credential {
-        printer.line(&credential_line(kind, source), &Value::Null);
+    if let Some(seen) = driver.account {
+        printer.line(&account_line(seen), &Value::Null);
     }
     if recovered.sessions_interrupted + recovered.worktrees_removed + recovered.tasks_resumed > 0 {
         printer.line(
@@ -142,32 +144,19 @@ pub(crate) fn started(printer: &mut Printer<'_, '_>, driver: &Driver) {
     }
 }
 
-/// The line that says which credential the start chose and where it is kept. The private file is
-/// said plainly: it is where the key goes when this computer's keychain cannot be used (ADR 0022).
-fn credential_line(kind: CredentialKind, source: Source) -> String {
-    let what = match kind {
-        CredentialKind::ApiKey => "an API key",
-        CredentialKind::SubscriptionToken => "a subscription token",
+/// The line that says which AI account the start found: Claude Code's sign-in, or the variable of
+/// the user's own environment it comes from. It never names a key (ADR 0084).
+fn account_line(seen: AccountSeen) -> String {
+    let what = match (seen.kind, seen.variable) {
+        (AccountKind::Environment, Some(variable)) => format!("{variable} from your environment"),
+        (AccountKind::Environment, None) => "a key from your environment".to_string(),
+        (AccountKind::Subscription, _) => "Claude Code, signed in with a subscription".to_string(),
+        (AccountKind::Console, _) => {
+            "Claude Code, signed in with an Anthropic Console account".to_string()
+        }
+        (AccountKind::Other, _) => "Claude Code, signed in with another sign-in".to_string(),
     };
-    let name = credential_name((kind, source));
-    match source {
-        Source::Environment => format!("credential: {name} ({what})"),
-        Source::Keychain => format!("credential: {what}, kept in your computer's keychain"),
-        Source::File => format!(
-            "credential: {what}, kept in a private file only you can read, credential.json in \
-             catervas's settings folder: catervas could not use this computer's keychain"
-        ),
-    }
-}
-
-/// Where the credential came from, as `--json` names it: the variable, or the store.
-fn credential_name((kind, source): (CredentialKind, Source)) -> &'static str {
-    match (source, kind) {
-        (Source::Environment, CredentialKind::ApiKey) => "ANTHROPIC_API_KEY",
-        (Source::Environment, CredentialKind::SubscriptionToken) => "CLAUDE_CODE_OAUTH_TOKEN",
-        (Source::Keychain, _) => "keychain",
-        (Source::File, _) => "file",
-    }
+    format!("account: {what}")
 }
 
 /// Ticks within `scope` until a tick is idle with no agent to wait for, the run is stopped, or a
@@ -474,24 +463,29 @@ pub(crate) fn refuse(io: &mut CliIo<'_>, as_json: bool, error: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use catervas_runtime::claude::CredentialKind;
-    use catervas_runtime::credential::Source;
+    use catervas_core::claude_account::AccountKind;
 
-    use super::credential_line;
+    use super::account_line;
+    use crate::start::AccountSeen;
 
     #[test]
-    fn says_where_the_credential_is_kept() {
-        let file = credential_line(CredentialKind::SubscriptionToken, Source::File);
-        assert!(file.contains("a private file only you can read"), "{file}");
-        assert!(
-            file.contains("could not use this computer's keychain"),
-            "{file}"
+    fn says_which_account_claude_code_has() {
+        let line = |kind, variable| account_line(AccountSeen { kind, variable });
+        assert_eq!(
+            line(AccountKind::Subscription, None),
+            "account: Claude Code, signed in with a subscription"
         );
-        assert!(!file.contains("catervas's credential.json"), "{file}");
-        let keychain = credential_line(CredentialKind::ApiKey, Source::Keychain);
-        assert!(
-            keychain.contains("kept in your computer's keychain"),
-            "{keychain}"
+        assert_eq!(
+            line(AccountKind::Console, None),
+            "account: Claude Code, signed in with an Anthropic Console account"
+        );
+        assert_eq!(
+            line(AccountKind::Environment, Some("ANTHROPIC_API_KEY")),
+            "account: ANTHROPIC_API_KEY from your environment"
+        );
+        assert_eq!(
+            line(AccountKind::Other, None),
+            "account: Claude Code, signed in with another sign-in"
         );
     }
 }

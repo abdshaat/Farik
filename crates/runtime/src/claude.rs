@@ -109,36 +109,6 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// How a session pays: the user's API key, or the token of their subscription.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClaudeCredential {
-    /// Passed to the program as `ANTHROPIC_API_KEY`.
-    ApiKey(Secret),
-    /// Passed to the program as `CLAUDE_CODE_OAUTH_TOKEN`.
-    OauthToken(Secret),
-}
-
-/// Which kind of credential the sessions run on, without the secret: what the browser is told.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CredentialKind {
-    /// An `ANTHROPIC_API_KEY`.
-    ApiKey,
-    /// A subscription's `CLAUDE_CODE_OAUTH_TOKEN`.
-    SubscriptionToken,
-}
-
-impl ClaudeCredential {
-    /// Which kind of credential this is.
-    #[must_use]
-    pub fn kind(&self) -> CredentialKind {
-        match self {
-            Self::ApiKey(_) => CredentialKind::ApiKey,
-            Self::OauthToken(_) => CredentialKind::SubscriptionToken,
-        }
-    }
-}
-
 /// The variable of `env` a credential comes from, when one does: what cannot be removed from
 /// Catervas, since the environment is the user's.
 #[must_use]
@@ -146,20 +116,6 @@ pub fn credential_variable(env: &BTreeMap<String, String>) -> Option<&'static st
     [API_KEY, OAUTH_TOKEN]
         .into_iter()
         .find(|name| env.get(*name).is_some_and(|value| !value.trim().is_empty()))
-}
-
-/// The credential an environment holds: `ANTHROPIC_API_KEY` first, else
-/// `CLAUDE_CODE_OAUTH_TOKEN`; a blank value is none.
-#[must_use]
-pub fn credential_from_env(env: &BTreeMap<String, String>) -> Option<ClaudeCredential> {
-    let named = |name: &str| {
-        env.get(name)
-            .filter(|value| !value.trim().is_empty())
-            .map(|value| Secret::new(value.clone()))
-    };
-    named(API_KEY)
-        .map(ClaudeCredential::ApiKey)
-        .or_else(|| named(OAUTH_TOKEN).map(ClaudeCredential::OauthToken))
 }
 
 /// Where the program is, what its hooks run, and what its sessions are given. Its `Debug` names
@@ -201,10 +157,6 @@ impl fmt::Debug for ClaudeConfig {
             .finish()
     }
 }
-
-/// The credential the daemon's account methods held, shared; sessions no longer take it (ADR
-/// 0084). Removed with those methods.
-pub type SharedCredential = Arc<Mutex<ClaudeCredential>>;
 
 /// Starts Claude Code sessions as child processes, and resumes the ones it started.
 pub struct ClaudeAdapter {
@@ -1050,8 +1002,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ClaudeConfig, ClaudeCredential, CredentialKind, Secret, allowed_builtins, check_version,
-        child_env, claude_args, credential_from_env, write_session_files,
+        ClaudeConfig, Secret, allowed_builtins, check_version, child_env, claude_args,
+        credential_variable, write_session_files,
     };
     use crate::daemon::DaemonInfo;
     use crate::recorded::fixtures::a_session_spec;
@@ -1811,47 +1763,37 @@ mod tests {
     }
 
     #[test]
-    fn prefers_the_api_key_and_ignores_blank_values() {
+    fn names_the_variable_an_account_comes_from() {
         let env = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
             pairs
                 .iter()
                 .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
                 .collect()
         };
-        assert!(matches!(
-            credential_from_env(&env(&[
+        assert_eq!(
+            credential_variable(&env(&[
                 ("ANTHROPIC_API_KEY", "sk-key"),
                 ("CLAUDE_CODE_OAUTH_TOKEN", "oauth")
             ])),
-            Some(ClaudeCredential::ApiKey(secret)) if secret.expose() == "sk-key"
-        ));
-        assert!(matches!(
-            credential_from_env(&env(&[
+            Some("ANTHROPIC_API_KEY")
+        );
+        assert_eq!(
+            credential_variable(&env(&[
                 ("ANTHROPIC_API_KEY", "  "),
                 ("CLAUDE_CODE_OAUTH_TOKEN", "oauth")
             ])),
-            Some(ClaudeCredential::OauthToken(secret)) if secret.expose() == "oauth"
-        ));
-        assert!(credential_from_env(&env(&[("CLAUDE_CODE_OAUTH_TOKEN", "")])).is_none());
-        assert!(credential_from_env(&env(&[])).is_none());
-        // What the browser is told of each, never the secret itself.
-        let key = ClaudeCredential::ApiKey(Secret::new("sk-key".to_string()));
-        let token = ClaudeCredential::OauthToken(Secret::new("oauth".to_string()));
-        assert_eq!(key.kind(), CredentialKind::ApiKey);
-        assert_eq!(token.kind(), CredentialKind::SubscriptionToken);
-        assert_eq!(
-            serde_json::to_value(key.kind()).ok(),
-            Some("api_key".into())
+            Some("CLAUDE_CODE_OAUTH_TOKEN")
         );
         assert_eq!(
-            serde_json::to_value(token.kind()).ok(),
-            Some("subscription_token".into())
+            credential_variable(&env(&[("CLAUDE_CODE_OAUTH_TOKEN", "")])),
+            None
         );
+        assert_eq!(credential_variable(&env(&[])), None);
     }
 
     #[test]
     fn hides_a_secret_when_printed() {
-        let credential = ClaudeCredential::ApiKey(Secret::new("sk-very-secret".to_string()));
+        let credential = Secret::new("sk-very-secret".to_string());
         let printed = format!("{credential:?}");
         assert!(printed.contains("[redacted]"), "{printed}");
         assert!(!printed.contains("sk-very-secret"), "{printed}");

@@ -6,13 +6,13 @@ use std::collections::BTreeMap;
 use std::fs::{File, TryLockError};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
+use catervas_core::claude_account::AccountKind;
 use catervas_protocol::command::{Command, command_to_value, reply_from_value};
 use catervas_runtime::account::{AccountPort, ClaudeAccount};
-use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
-use catervas_runtime::credential::{Source, load_credential};
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, credential_variable};
 use catervas_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
 use catervas_runtime::daemon::{
     DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve, serve_held,
@@ -370,6 +370,18 @@ pub(crate) struct StartOptions<'l> {
     pub(crate) web: bool,
 }
 
+/// The AI account a start found Claude Code signed in with.
+#[derive(Clone, Copy)]
+pub(crate) struct AccountSeen {
+    /// The kind of sign-in.
+    pub(crate) kind: AccountKind,
+    /// The variable it comes from, when it comes from the user's environment.
+    pub(crate) variable: Option<&'static str>,
+}
+
+/// What a start is refused with while Claude Code is not signed in.
+pub(crate) const NOT_SIGNED_IN: &str = "Claude Code is not signed in: sign in on the AI account page of the web app, or run claude auth login, or set ANTHROPIC_API_KEY where you start Catervas";
+
 /// A process driving the project: its lock, its served daemon, its orchestrator, and where it
 /// hears Ctrl-C.
 pub(crate) struct Driver {
@@ -379,8 +391,8 @@ pub(crate) struct Driver {
     pub(crate) daemon: Arc<DaemonState>,
     /// One `()` per interrupt.
     pub(crate) interrupts: UnboundedReceiver<()>,
-    /// The credential it chose and where it came from, when the engine is Claude Code.
-    pub(crate) credential: Option<(CredentialKind, Source)>,
+    /// The Claude Code account it found signed in, when the engine is Claude Code.
+    pub(crate) account: Option<AccountSeen>,
     /// Whether it runs in no-sandbox mode.
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
@@ -507,23 +519,22 @@ async fn start_listening(
     if settings.sandbox == Sandbox::None {
         let _ = writeln!(io.stderr, "{NO_SANDBOX_WARNING}");
     }
-    let claude = match &io.engine {
+    let (claude, account) = match &io.engine {
         Engine::Claude => {
-            let found = load_credential(&io.env, &(io.credential_stores)()).ok_or(
-                "no credential for Claude Code: connect your AI account in the browser catervas \
-                 serve opens, or set ANTHROPIC_API_KEY to an API key, or \
-                 CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
-            )?;
             let path = on_path("claude", io)
                 .ok_or("Claude Code is not installed: there is no claude on PATH")?;
-            Some((found, path))
+            let status = crate::start::account(io).status().await;
+            if !status.signed_in {
+                return Err(NOT_SIGNED_IN.to_string());
+            }
+            let seen = status.kind.map(|kind| AccountSeen {
+                kind,
+                variable: credential_variable(&session_env(io)),
+            });
+            (Some(path), seen)
         }
-        Engine::Given(_) => None,
+        Engine::Given(_) => (None, None),
     };
-    let credential = claude
-        .as_ref()
-        .map(|((credential, source), _)| (credential.kind(), *source));
-    let claude = claude.map(|((credential, _), path)| (Arc::new(Mutex::new(credential)), path));
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
         let _ = writeln!(
@@ -593,7 +604,7 @@ async fn start_listening(
         orchestrator,
         daemon,
         interrupts: tokio::sync::mpsc::unbounded_channel().1,
-        credential,
+        account,
         sandbox: settings.sandbox,
         recovered,
         connect_code,
@@ -758,13 +769,13 @@ fn session_env(io: &CliIo<'_>) -> BTreeMap<String, String> {
 fn adapter(
     project: &Project,
     io: &CliIo<'_>,
-    claude: Option<(SharedCredential, PathBuf)>,
+    claude: Option<PathBuf>,
     daemon: &Arc<DaemonState>,
     handle: &DaemonHandle,
 ) -> Result<Arc<dyn RuntimeAdapter>, String> {
     match (&io.engine, claude) {
         (Engine::Given(factory), _) => Ok(factory(Arc::clone(daemon))),
-        (Engine::Claude, Some((_, claude_path))) => {
+        (Engine::Claude, Some(claude_path)) => {
             let config = ClaudeConfig {
                 claude_path,
                 hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("catervas")),

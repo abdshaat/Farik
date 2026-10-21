@@ -162,7 +162,7 @@ Tests:
 - `signing_in_takes_the_waiting_project_on` (replaces `connecting_the_account_takes_the_waiting_project_on`, `serving.rs:1724`): asserts that serve on a project in setup mode, with the fake not signed in, shows the wizard. After the fake is set signed in, `account.check` answering `working` takes the project on, as connecting did.
 - `says_where_the_credential_is_kept` (`run.rs:483`) becomes `says_which_account_claude_code_has`, asserting the four printed forms of the Decisions.
 
-- [ ] `feat(cli): start only when claude code is signed in`
+- [x] `feat(cli): start only when claude code is signed in`
 
 ## Verification
 

@@ -378,7 +378,6 @@ impl AccountPort for ClaudeAccount {
 
 /// A fake account for the daemon's tests.
 #[cfg(test)]
-#[allow(dead_code, reason = "the daemon's tests use it from the next task on")]
 pub(crate) mod fixtures {
     use std::sync::Mutex;
 

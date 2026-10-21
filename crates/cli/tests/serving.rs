@@ -434,7 +434,7 @@ fn connected(port: u16, code: &str) -> String {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn serve_status_has_no_credential_under_a_given_engine() {
+fn serve_status_is_not_signed_in_without_a_claude_code() {
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
@@ -491,7 +491,7 @@ fn serve_status_has_no_credential_under_a_given_engine() {
         json!({
             "project_root": root.display().to_string(),
             "paused": false,
-            "credential": null,
+            "signed_in": false,
             "port": port,
             "take_on_error": null,
             "setup_pending": false,
@@ -1121,18 +1121,22 @@ struct Serving {
     cookie: String,
 }
 
-/// `catervas serve` in `cwd`, with `PATH`, `HOME` at `home`, the state folder at `state`, an API key
-/// in the environment, and interrupts the test sends.
+/// `catervas serve` in `cwd`, with `HOME` at `home`, the state folder at `state`, a signed-in fake
+/// Claude Code on `PATH`, and interrupts the test sends.
 fn serving_setup(cwd: &Path, home: &Path, state: &Path) -> Serving {
     let mut env = setup_env(home, state);
-    env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-ant-api03-test".to_string(),
-    );
+    signed_in(&mut env, &format!("serving-setup-{}", name_of(home)));
     serving_in(cwd, env, true)
 }
 
-/// `PATH`, `HOME` at `home`, and the state folder at `state`: no credential.
+/// Puts a fake `claude` that is signed in first on `env`'s `PATH`: Claude Code's sign-in is what
+/// serve asks (ADR 0084).
+fn signed_in(env: &mut std::collections::BTreeMap<String, String>, name: &str) {
+    let (_directory, path) = project::a_claude_saying(name, "2.1.300 (Claude Code)");
+    env.insert("PATH".to_string(), path);
+}
+
+/// `PATH`, `HOME` at `home`, and the state folder at `state`: whatever `claude` the `PATH` finds.
 fn setup_env(home: &Path, state: &Path) -> std::collections::BTreeMap<String, String> {
     let mut env = project::a_bare_env();
     env.insert("HOME".to_string(), home.display().to_string());
@@ -1651,8 +1655,10 @@ fn refuses_paths_outside_home_and_bad_names() {
     catervas_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
     // Home a git project itself, as some keep their dotfiles: Catervas's settings would be in it.
     catervas_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
-    // No credential kept, and none in the environment.
-    let serving = serving_in(&cwd, setup_env(&home, &state), true);
+    let (claude, path) = project::a_claude_saying("setup-guards-claude", "2.1.300 (Claude Code)");
+    let mut env = setup_env(&home, &state);
+    env.insert("PATH".to_string(), path);
+    let serving = serving_in(&cwd, env, true);
     let description = "A shop for bread, with an order page and a daily menu.";
     let create = |parent: &str, name: &str| json!({ "parent": parent, "name": name, "description": description, "no_sandbox": false });
     let open = |path: &str| json!({ "path": path, "no_sandbox": false });
@@ -1682,21 +1688,22 @@ fn refuses_paths_outside_home_and_bad_names() {
             create("", "shop"),
             "a folder with that name is already there",
         ),
-        (
-            "project.open",
-            open("shop"),
-            "connect your AI account first",
-        ),
-        (
-            "project.create",
-            create("", "bakery"),
-            "connect your AI account first",
-        ),
     ];
     let answers: Vec<Value> = asked
         .iter()
         .map(|(method, params, _)| call(serving.port, &serving.cookie, method, params.clone()))
         .collect();
+    // Claude Code signed out: the project steps wait on the account.
+    std::fs::write(claude.join("signed-out"), "").expect("a marker");
+    let signed_out = [
+        call(serving.port, &serving.cookie, "project.open", open("shop")),
+        call(
+            serving.port,
+            &serving.cookie,
+            "project.create",
+            create("", "bakery"),
+        ),
+    ];
     let (ran, out, err) = serving.interrupted();
     for ((method, params, sentence), answer) in asked.iter().zip(&answers) {
         assert_eq!(
@@ -1704,6 +1711,13 @@ fn refuses_paths_outside_home_and_bad_names() {
             "{method} {params}: {answer}"
         );
         assert_eq!(answer["error"]["message"], *sentence, "{method} {params}");
+    }
+    for answer in &signed_out {
+        assert_eq!(answer["error"]["code"], -32005, "{answer}");
+        assert_eq!(
+            answer["error"]["message"], "connect your AI account first",
+            "{answer}"
+        );
     }
     assert!(!home.join("bakery").exists());
     assert!(
@@ -1721,27 +1735,26 @@ fn refuses_paths_outside_home_and_bad_names() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn connecting_the_account_takes_the_waiting_project_on() {
-    let repository = a_team("setup-connect-takes-on");
-    let (_home, state) = setup_folders("setup-connect-takes-on");
-    let (_claude, path) = project::a_claude_saying("setup-connect-claude", "2.1.300 (Claude Code)");
+fn signing_in_takes_the_waiting_project_on() {
+    let repository = a_team("setup-sign-in-takes-on");
+    let (_home, state) = setup_folders("setup-sign-in-takes-on");
+    let (claude, path) = project::a_claude_saying("setup-sign-in-claude", "2.1.300 (Claude Code)");
+    // Not signed in: serve shows the wizard, with the project it found waiting on the account.
+    std::fs::write(claude.join("signed-out"), "").expect("a marker");
     let mut env = setup_env(&repository.path, &state);
     env.insert("PATH".to_string(), path);
-    // Run in a project with no credential, on Claude Code's engine: setup waits on the account.
     let serving = serving_in(&repository.path, env, false);
     let before = serve_status(serving.port, &serving.cookie);
     assert_eq!(before["project_root"], Value::Null, "{before}");
+    assert_eq!(before["signed_in"], false, "{before}");
 
-    let connected = call(
-        serving.port,
-        &serving.cookie,
-        "account.connect",
-        json!({ "kind": "api_key", "secret": "sk-ant-api03-test" }),
-    );
+    // Claude Code is signed in (as its login would leave it), and the check takes the project on.
+    std::fs::remove_file(claude.join("signed-out")).expect("the marker goes");
+    let checked = call(serving.port, &serving.cookie, "account.check", json!({}));
     assert_eq!(
-        connected["result"],
-        json!({ "stored_in": "keychain", "taking_on": true }),
-        "{connected}"
+        checked["result"],
+        json!({ "outcome": "working", "taking_on": true }),
+        "{checked}"
     );
     until("the team is driven", || daemon_file(&repository).exists());
     let status = serve_status(serving.port, &serving.cookie);
@@ -1769,19 +1782,15 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
     let repository = a_team("setup-waits-again");
     std::fs::write(repository.path.join(".catervas/prices.json"), "not JSON").expect("written");
     let (_home, state) = setup_folders("setup-waits-again");
-    let (_claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
+    let (claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
+    std::fs::write(claude.join("signed-out"), "").expect("a marker");
     let mut env = setup_env(&repository.path, &state);
     env.insert("PATH".to_string(), path);
     let serving = serving_in(&repository.path, env, false);
-    let connect = json!({ "kind": "api_key", "secret": "sk-ant-api03-test" });
+    std::fs::remove_file(claude.join("signed-out")).expect("the marker goes");
     let prober = Prober::on(serving.port);
 
-    let first = call(
-        serving.port,
-        &serving.cookie,
-        "account.connect",
-        connect.clone(),
-    );
+    let first = call(serving.port, &serving.cookie, "account.check", json!({}));
     assert_eq!(first["result"]["taking_on"], true, "{first}");
     let mut status = Value::Null;
     until("serve is back in setup mode with the reason", || {
@@ -1789,8 +1798,8 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
         status["take_on_error"].is_string()
     });
     let took = prober.stopped();
-    // The project is still the one setup waits on: connecting again takes it on again.
-    let again = call(serving.port, &serving.cookie, "account.connect", connect);
+    // The project is still the one setup waits on: checking again takes it on again.
+    let again = call(serving.port, &serving.cookie, "account.check", json!({}));
     let (ran, out, err) = serving.interrupted();
     assert_eq!(again["result"]["taking_on"], true, "{again}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
@@ -1917,10 +1926,7 @@ fn serving_a_team(name: &str) -> (TempRepo, Serving) {
     let repository = a_team(name);
     let (home, state) = setup_folders(name);
     let mut env = setup_env(&home, &state);
-    env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-ant-api03-test".to_string(),
-    );
+    signed_in(&mut env, &format!("serving-a-team-{name}"));
     let serving = serving_in(&repository.path, env, true);
     (repository, serving)
 }
@@ -2019,10 +2025,7 @@ fn serving_a_team_under_home(name: &str) -> (TempRepo, Serving, std::path::PathB
     let repository = a_team(name);
     let state = scratch(&format!("{name}-state"));
     let mut env = setup_env(&std::env::temp_dir(), &state);
-    env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-ant-api03-test".to_string(),
-    );
+    signed_in(&mut env, &format!("serving-under-home-{name}"));
     let serving = serving_in(&repository.path, env, true);
     (repository, serving, state)
 }

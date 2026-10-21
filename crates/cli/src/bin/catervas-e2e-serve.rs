@@ -4,7 +4,7 @@
 //! `--delivery-closed` starts the project with a delivery already closed and holding no task, so
 //! that a journey that accepts a task and files another does not meet the changelog task the
 //! governor files at a close (ADR 0062), which would take an id the journey's transcripts name.
-//! `--no-keychain` keeps the credential in the state folder's file alone. `--sandbox-image` runs
+//! `--no-keychain` leaves the OS keychain alone when the key an earlier version kept is removed. `--sandbox-image` runs
 //! Docker's sandbox and the preview in `<image>`. `--preview` serves as a project's preview, which
 //! a code-free browser at `http://localhost:<p>` is let into (step 12, D1): it implies
 //! `--no-keychain`, a state folder of its own, and a new project of its own with step 08's team
@@ -171,7 +171,6 @@ fn main() -> std::process::ExitCode {
         adapter
     }));
     io.interrupts = Interrupts::CtrlC;
-    io.credential_stores = catervas::system_credential_stores(&io.env, keychain);
     io.forget_keychain = keychain;
     let arguments = ["catervas", "serve", "--no-open", "--port", &port].map(String::from);
     let code = run_cli(&arguments, &mut io);
