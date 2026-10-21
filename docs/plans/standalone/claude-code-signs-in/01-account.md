@@ -118,7 +118,7 @@ Tests:
   - `https://evil.example/claude.com` gives `None`, as do `https://claude.com.evil.example/` and `http://claude.com/`.
   - A line with no address gives `None`.
 
-- [ ] `feat(core): read claude code's sign-in status and address`
+- [x] `feat(core): read claude code's sign-in status and address`
 
 ### Task 2: The check's outcome, read from strings
 

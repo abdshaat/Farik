@@ -7,6 +7,8 @@ pub mod autopilot;
 pub mod branch;
 /// Budgets and limits: session limits, the session ledger, and the budget check.
 pub mod budget;
+/// What Catervas reads of Claude Code's account, from strings (ADR 0084).
+pub mod claude_account;
 /// The task contract and its validator.
 pub mod contract;
 /// The criterion library and its validator.
