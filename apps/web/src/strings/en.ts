@@ -146,7 +146,7 @@ export const en = {
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
 	accountLead:
-		"Your agents think with Claude, and your account pays for it. Catervas keeps the key safely on this computer and never shows it to an agent.",
+		"Your agents think with Claude, and your account pays for it. You sign in through Claude Code, which keeps your sign-in on this computer. Catervas never sees your key.",
 	accountKind: "Your Claude account",
 	subscription: "I have a Claude subscription (Pro or Max)",
 	subscriptionNote:
@@ -165,6 +165,39 @@ export const en = {
 	storedFile:
 		"Your key is saved in a private file on this computer, because it has no keychain Catervas can use.",
 	accountFound: "Catervas already has your key. You can go on.",
+	signInClaude: "Sign in with Claude (Pro or Max)",
+	signInClaudeNote: "Recommended if you already pay for Claude.",
+	signInConsole: "Sign in with an Anthropic Console account",
+	signInConsoleNote: "Pay for what your agents use.",
+	signInOnThePage:
+		"Sign in on the page that opened. It shows a code at the end: paste it here.",
+	signInCode: "Your sign-in code",
+	signInFinish: "Finish signing in",
+	signInOpenAgain: "Open the page again",
+	signInOpenPage: "Open Claude’s sign-in page",
+	signInTerminal:
+		"Prefer the Terminal? Run claude auth login, then press Check again.",
+	signInCheckAgain: "Check again",
+	signInChecking: "Checking the connection…",
+	signedInSubscription:
+		"Claude Code is signed in with your Claude subscription.",
+	signedInConsole:
+		"Claude Code is signed in with your Anthropic Console account.",
+	signedInEnvironment:
+		"Claude Code is signed in with {variable} from where you started Catervas.",
+	signedInOther: "Claude Code is signed in with another sign-in.",
+	connectionWorks: "It works.",
+	connectionKeyRefused: "Your key was refused.",
+	connectionLimitReached: "Your plan’s limit is reached for now.",
+	connectionNotSignedIn: "Claude Code is not signed in.",
+	connectionFailed: "It didn’t work: {detail}",
+	signInNoneWaiting:
+		"No sign-in is waiting for a code. Press a sign-in button again.",
+	signInNoAddress:
+		"Claude Code did not give a sign-in page. Run claude auth login in the Terminal, then press Check again.",
+	signInFailed:
+		"Claude Code did not sign you in. Check the code, then press a sign-in button again.",
+	signOutFailed: "Claude Code did not sign out. Try again.",
 	projectTitle: "Is this for a project you already have?",
 	projectLead:
 		"Catervas works inside a folder on this computer. Your team keeps its plans and notes there, next to your work.",
@@ -887,7 +920,7 @@ export const en = {
 	setupNoKeep:
 		"This computer has no keychain and no folder to keep the key in.",
 	setupKeyFromEnvironment:
-		"Your AI account’s key is set where Catervas runs. Change it there, then start Catervas again.",
+		"Your AI account comes from a key set where Catervas runs. Remove it there to sign in here.",
 	setupNoDocker: "Docker is not installed on this computer.",
 	setupBuildFailed:
 		"Catervas could not prepare the sandbox. Check that Docker is running, then try again.",

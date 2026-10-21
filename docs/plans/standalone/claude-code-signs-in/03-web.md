@@ -75,7 +75,7 @@ Tests (`setup.test.tsx`, replacing `connects_a_subscription_key`, :149, and `say
   - On `key_refused` it shows "Your key was refused." and the two sign-in choices.
 - `says_each_sign_in_refusal_in_plain_words`: asserts that each of plan 2's sentences shows its plain words.
 
-- [ ] `feat(web): sign in through claude code on the first run`
+- [x] `feat(web): sign in through claude code on the first run`
 
 ### Task 11: Settings' AI account
 

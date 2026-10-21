@@ -8,7 +8,7 @@ import { landing } from "./landing.ts";
 const status = (fields: object) => ({
 	projectRoot: "/home/me/corner-bakery",
 	paused: false,
-	credential: "api_key",
+	signedIn: true,
 	port: 7420,
 	takeOnError: null,
 	...fields,

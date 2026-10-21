@@ -9,7 +9,8 @@ export type ServeStatus = {
 	/** Null while Catervas is being set up, before a project is chosen. */
 	projectRoot: string | null;
 	paused: boolean;
-	credential: string | null;
+	/** Whether Claude Code is signed in. */
+	signedIn: boolean;
 	port: number;
 	/** Why taking the chosen project on failed, or null. */
 	takeOnError: string | null;
