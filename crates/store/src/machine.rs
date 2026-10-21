@@ -847,7 +847,7 @@ mod tests {
         );
         assert_eq!(
             crate::migrations::known_versions(),
-            (1..=15).collect::<Vec<i64>>()
+            (1..=16).collect::<Vec<i64>>()
         );
     }
 
