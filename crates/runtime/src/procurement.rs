@@ -6,7 +6,7 @@
 mod mail;
 mod replies;
 #[cfg(test)]
-mod story;
+pub(crate) mod story;
 
 pub(crate) use mail::{
     Mailer, SendAsk, discard_message, draft_text, order_is_sending, prepare, record_failed,

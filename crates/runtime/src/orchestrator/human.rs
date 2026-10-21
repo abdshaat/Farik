@@ -1180,9 +1180,15 @@ async fn send_to_seller(
 ) -> Result<CommandReport, CommandError> {
     let secrets = orchestrator.deps.daemon.connector_secrets();
     let mailer = mailer_of(orchestrator, &secrets)?;
-    let (seq, seller) = send_message(&orchestrator.deps.tools, &mailer, message, subject, body)
-        .await
-        .map_err(mail_refusal)?;
+    let (seq, seller) = send_message(
+        &orchestrator.deps.tools,
+        &mailer,
+        message,
+        (subject, body),
+        None,
+    )
+    .await
+    .map_err(mail_refusal)?;
     Ok(CommandReport {
         said: format!("Sent to {seller}."),
         events: vec![seq],

@@ -122,7 +122,7 @@ Files: `procurement/mail.rs`, `orchestrator/human.rs`, `orchestrator/autopilot.r
 Tests (`orchestrator/autopilot.rs`, with the fake mail server the seller-mail tests use):
 - `sends_drafted_seller_messages_under_autopilot_fifty_a_day` — under autopilot a tick sends a `quote_request` drafted after the switch and records `seller_message.sent { sent_by: "autopilot" }`; it does not send a `purchase_order` message, a draft from before the switch, a message whose try failed, or anything while the team is paused; with 50 sent by autopilot today the 51st waits, and it goes on the next UTC day.
 
-- [ ] `feat(runtime): seller messages go out under autopilot, 50 a day`
+- [x] `feat(runtime): seller messages go out under autopilot, 50 a day`
 
 ### Task 17: the team merges when checks pass under autopilot
 

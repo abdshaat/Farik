@@ -5,20 +5,24 @@
 //! a loop of sessions that decide nothing ends.
 
 use catervas_core::autopilot::{
-    BLOCK_WAIT_MINUTES, DECIDE_SESSIONS_PER_WAIT, answerer, choices_for,
+    BLOCK_WAIT_MINUTES, DECIDE_SESSIONS_PER_WAIT, SELLER_MESSAGES_PER_DAY, answerer, choices_for,
 };
 use catervas_core::contract::{Role, TaskStatus};
 use catervas_core::team::Team;
 use catervas_protocol::event::{
-    EventBody, EventIds, EventKind, SessionStartedBodyPurpose, new_event,
+    EventBody, EventIds, EventKind, SellerMessagePurpose, SessionStartedBodyPurpose, new_event,
 };
+use catervas_protocol::generated::event::SellerMessageSentBodySentBy;
 use catervas_store::autopilot::{
     TeamQuestion, flags, folder_change_spent, open_team_questions, team_decides, team_spent,
 };
 use catervas_store::folder_docs::{FolderChange, folder_docs};
 use catervas_store::pipelines::{PipelineState, data_pipelines};
+use catervas_store::seller_mail::{MessageState, seller_mail};
 use catervas_store::waiting::awaits_acceptance;
 use catervas_store::{EventQuery, TaskProjection};
+use std::collections::BTreeSet;
+
 use chrono::{DateTime, Duration, Utc};
 
 use super::messages::{
@@ -30,6 +34,7 @@ use super::{OrchestratorDeps, OrchestratorError, TickReport, TickRules, TickScop
 use crate::ceremonies::open_escalations;
 use crate::choices::waits_of;
 use crate::goals::planner;
+use crate::procurement::{Mailer, draft_text, send_message};
 use crate::session::SessionPurpose;
 use crate::transitions::{last_move_into, result_accepted};
 
@@ -46,6 +51,116 @@ pub(super) const DECIDE_QUESTION_TOOLS: &[&str] = &[
     "catervas_write_memory",
     "catervas_answer_question",
 ];
+
+/// Sends the seller messages the Product Manager's team drafted since autopilot was turned on,
+/// with no model (ADR 0082 decision 6): each message waiting, not an order's (its email waits with
+/// its order), with no failed try (retrying on every tick would loop), oldest first, while fewer
+/// than `SELLER_MESSAGES_PER_DAY` went out by autopilot today. A message beyond the day's waits on
+/// Today with Send, as it does without autopilot, and goes the next day. Answers the numbers of
+/// the sends recorded.
+///
+/// # Errors
+///
+/// What the log refused.
+pub(super) async fn send_seller_messages(
+    deps: &OrchestratorDeps,
+) -> Result<Vec<u64>, OrchestratorError> {
+    let tools = &deps.tools;
+    let log = &tools.log;
+    let switched = log.read(&EventQuery {
+        kinds: vec![EventKind::AutopilotChanged],
+        newest_first: true,
+        limit: Some(1),
+        ..EventQuery::default()
+    })?;
+    let Some(switched_on) = switched
+        .first()
+        .filter(|event| matches!(&event.body, EventBody::AutopilotChanged(body) if body.on))
+        .map(|event| event.envelope.seq)
+    else {
+        return Ok(Vec::new());
+    };
+    let drafted_since: BTreeSet<u64> = log
+        .read(&EventQuery {
+            kinds: vec![EventKind::SellerMessageDrafted],
+            after_seq: Some(switched_on),
+            ..EventQuery::default()
+        })?
+        .iter()
+        .filter_map(|event| match &event.body {
+            EventBody::SellerMessageDrafted(body) => Some(body.message.get()),
+            _ => None,
+        })
+        .collect();
+    let mail = seller_mail(log)?;
+    let today = tools.clock.now().date_naive();
+    let mut sent_today =
+        mail.messages
+            .iter()
+            .filter(|record| {
+                record.sent.as_ref().is_some_and(|sent| {
+                    sent.sent_by == Some(SellerMessageSentBodySentBy::Autopilot)
+                }) && record.sent_at.is_some_and(|at| at.date_naive() == today)
+            })
+            .count();
+    let mut waiting: Vec<(u64, String)> = mail
+        .messages
+        .iter()
+        .filter(|record| {
+            record.state == MessageState::Waiting
+                && record.drafted.purpose != SellerMessagePurpose::PurchaseOrder
+                && record.failed_at.is_none()
+                && drafted_since.contains(&record.message)
+        })
+        .map(|record| (record.message, record.drafted.subject.to_string()))
+        .collect();
+    waiting.sort_by_key(|(message, _)| *message);
+    if waiting.is_empty() {
+        return Ok(Vec::new());
+    }
+    let refused = |detail: String| OrchestratorError::Refused {
+        reason: format!("seller_messages_unsent: {detail}"),
+    };
+    let secrets = deps.daemon.connector_secrets();
+    let mailer = Mailer {
+        secrets: &*secrets,
+        at: deps
+            .daemon
+            .mailbox_at(tools.files.root())
+            .map_err(|error| refused(error.to_string()))?,
+        trust: deps.daemon.mail_trust(),
+    };
+    let mut sent = Vec::new();
+    for (message, subject) in waiting {
+        if sent_today >= SELLER_MESSAGES_PER_DAY {
+            break;
+        }
+        let body = draft_text(tools, message);
+        match send_message(
+            tools,
+            &mailer,
+            message,
+            (&subject, body.trim()),
+            Some(SellerMessageSentBodySentBy::Autopilot),
+        )
+        .await
+        {
+            Ok((seq, _)) => {
+                sent.push(seq);
+                sent_today += 1;
+            }
+            // The day's limit, or no mailbox: nothing more goes now. Any other refusal leaves this
+            // message waiting for the owner, and the next may still go.
+            Err(refusal)
+                if matches!(refusal.code, "seller_send_limit" | "mailbox_not_connected") =>
+            {
+                break;
+            }
+            Err(_) => {}
+        }
+    }
+    Ok(sent)
+}
 
 /// The Catervas tools the session that decides a wait is offered: the same reading and writing
 /// tools, and `catervas_decide` in place of the answer.
@@ -1496,5 +1611,153 @@ mod tests {
             "a decision on the data source Firecrawl"
         );
         assert_eq!(body.flagged_by, "catervas");
+    }
+
+    const SUBJECT: &str = "Quote for 500 printed pie boxes";
+    const BODY: &str = "Hello,\n\nCould you quote 500 printed pie boxes, 9 inch?\n\nThank you.";
+
+    /// `count` messages of the Procurement Specialist's recorded as sent by autopilot on `when`'s
+    /// day, from number `first`, without files or a server.
+    fn sent_by_autopilot(
+        harness: &Harness,
+        when: chrono::DateTime<chrono::Utc>,
+        first: u64,
+        count: u64,
+    ) {
+        for message in first..first + count {
+            harness.project.record_in(
+                Some("proc"),
+                Some("session-1"),
+                "CTV-1",
+                "seller_message.drafted",
+                &json!({
+                    "message": message, "seller": "Pie Box Pros",
+                    "to": crate::procurement::story::DANA.address,
+                    "subject": SUBJECT, "purpose": "quote_request",
+                    "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c"
+                }),
+            );
+            harness.project.record_at(
+                when,
+                "",
+                "seller_message.sent",
+                &json!({
+                    "message": message,
+                    "message_id": format!("m{message}@bakery.test"),
+                    "sha256": "9f2b0c1d5e7a4b3c8d6e1f0a2b4c6d8e0f1a3b5c7d9e1f2a4b6c8d0e2f4a6b8c",
+                    "edited": false,
+                    "sent_by": "autopilot"
+                }),
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs Docker, the GreenMail image and the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    async fn sends_drafted_seller_messages_under_autopilot_fifty_a_day() {
+        use crate::procurement::story::Story;
+
+        let story = Story::new("autopilot-send").await;
+        let harness = &story.harness;
+        let before = story.draft(SUBJECT, BODY);
+        autopilot(harness, true);
+        // Drafted after the switch: one to send, an order's email, and one whose try failed.
+        let quote = story.draft(SUBJECT, BODY);
+        harness.project.record_in(
+            Some("proc"),
+            Some("session-1"),
+            "CTV-1",
+            "purchase_order.drafted",
+            &json!({
+                "order": 12, "seller": "Pie Box Pros",
+                "seller_contact": crate::procurement::story::DANA.address,
+                "lines": [{ "item": "Pie box", "quantity": 500, "unit": "piece",
+                    "unit_price": "0.40", "line_total": "200.00" }],
+                "currency": "USD", "period": "once", "total": "200.00", "delivery": "",
+                "terms": "", "url": "", "evaluation": "evaluations/boxes.md",
+                "why": "It is the cheapest seller that ships to us."
+            }),
+        );
+        let orders = harness.procurement_folder().join("orders");
+        std::fs::create_dir_all(&orders).expect("the orders folder");
+        std::fs::write(orders.join("PO-12.xlsx"), b"PK the workbook's bytes").expect("workbook");
+        let order = story.draft_as(json!({
+            "seller": "Pie Box Pros", "to": crate::procurement::story::DANA.address,
+            "subject": "Order PO-12", "body": "Please find our order attached.",
+            "purpose": "purchase_order", "purchase_order": 12
+        }));
+        let failing = story.draft(SUBJECT, BODY);
+        harness.project.record(
+            "CTV-1",
+            "seller_message.failed",
+            &json!({ "message": failing, "why": "the server refused it" }),
+        );
+
+        // A paused team sends nothing.
+        harness
+            .project
+            .record("", "team.paused", &json!({ "by": "human" }));
+        // The Procurement Specialist's task goes on between the sends: its sessions say nothing.
+        let quiet = || harness.recorded((0..4).map(|_| ends_without_a_decision()).collect());
+        let orchestrator = harness.orchestrator(quiet());
+        orchestrator.tick().await.expect("the tick runs");
+        assert!(story.events(&[EventKind::SellerMessageSent]).is_empty());
+        harness
+            .project
+            .record("", "team.resumed", &json!({ "by": "human" }));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let sent = story.events(&[EventKind::SellerMessageSent]);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let EventBody::SellerMessageSent(body) = &sent[0].body else {
+            panic!("a send");
+        };
+        assert_eq!(body.message.get(), quote);
+        assert_eq!(
+            body.sent_by.map(|by| by.to_string()),
+            Some("autopilot".to_string())
+        );
+        assert_eq!(story.dana_has().len(), 1);
+        for left in [before, order, failing] {
+            let mail =
+                catervas_store::seller_mail::seller_mail(&harness.project.deps.log).expect("folds");
+            let record = mail
+                .messages
+                .iter()
+                .find(|m| m.message == left)
+                .expect("kept");
+            assert_eq!(
+                record.state,
+                catervas_store::seller_mail::MessageState::Waiting,
+                "{left}"
+            );
+        }
+
+        // Fifty a day: with forty-eight more sent today the next goes, and the one after waits.
+        let today = crate::tools::fixtures::at();
+        sent_by_autopilot(harness, today, 200, 48);
+        let fiftieth = story.draft(SUBJECT, BODY);
+        let next = story.draft(SUBJECT, BODY);
+        orchestrator.tick().await.expect("the tick runs");
+        let sent_ids: Vec<u64> = story
+            .events(&[EventKind::SellerMessageSent])
+            .iter()
+            .filter_map(|event| match &event.body {
+                EventBody::SellerMessageSent(body) => Some(body.message.get()),
+                _ => None,
+            })
+            .collect();
+        assert!(sent_ids.contains(&fiftieth), "{sent_ids:?}");
+        assert!(!sent_ids.contains(&next), "{sent_ids:?}");
+
+        // On the next UTC day it goes.
+        let tomorrow = harness.orchestrator_at(quiet(), today + chrono::Duration::days(1));
+        tomorrow.tick().await.expect("the tick runs");
+        assert!(story
+            .events(&[EventKind::SellerMessageSent])
+            .iter()
+            .any(|event| matches!(&event.body, EventBody::SellerMessageSent(body) if body.message.get() == next)));
     }
 }

@@ -600,6 +600,11 @@ impl Orchestrator {
                 until: None,
             });
         }
+        // Seller messages go out under autopilot with no model, as the owner's Send would send
+        // them, once the team is not paused (ADR 0082 decision 6).
+        if scope.task_id.is_none() {
+            autopilot::send_seller_messages(&self.deps).await?;
+        }
         rules::tick(self, scope).await
     }
 
