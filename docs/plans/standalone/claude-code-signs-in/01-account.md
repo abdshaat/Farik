@@ -145,7 +145,7 @@ Tests:
   - Text that is not JSON is `None`.
   - `CHECK_ARGS` equals, element by element, the 15 arguments listed above.
 
-- [ ] `feat(core): read the outcome of a connection check`
+- [x] `feat(core): read the outcome of a connection check`
 
 ### Task 3: Status, check and sign-out, run as processes
 

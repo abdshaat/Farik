@@ -59,6 +59,51 @@ pub const CHECK_ARGS: [&str; 15] = [
     "json",
 ];
 
+impl CheckOutcome {
+    /// The outcome's name on the wire.
+    #[must_use]
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::KeyRefused => "key_refused",
+            Self::LimitReached => "limit_reached",
+            Self::NotSignedIn => "not_signed_in",
+            Self::Failed(_) => "failed",
+        }
+    }
+}
+
+/// Reads the check's JSON answer; `None` when it is not a JSON object. `NotSignedIn` is never
+/// its answer: the runner decides that from the status first.
+#[must_use]
+pub fn check_outcome(stdout: &str) -> Option<CheckOutcome> {
+    let value: serde_json::Value = serde_json::from_str(stdout.trim()).ok()?;
+    let object = value.as_object()?;
+    if object.get("is_error").and_then(serde_json::Value::as_bool) == Some(false) {
+        return Some(CheckOutcome::Working);
+    }
+    let result = object.get("result").and_then(serde_json::Value::as_str);
+    let lowered = result.unwrap_or_default().to_ascii_lowercase();
+    Some(
+        match object
+            .get("api_error_status")
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(401 | 403) => CheckOutcome::KeyRefused,
+            Some(429) => CheckOutcome::LimitReached,
+            _ if lowered.contains("usage limit") || lowered.contains("rate limit") => {
+                CheckOutcome::LimitReached
+            }
+            _ => CheckOutcome::Failed(
+                result
+                    .filter(|text| !text.is_empty())
+                    .unwrap_or("Claude Code gave no answer")
+                    .to_string(),
+            ),
+        },
+    )
+}
+
 /// Reads `claude auth status --json`; `None` when it is not a JSON object with `loggedIn`.
 #[must_use]
 pub fn parse_status(stdout: &str) -> Option<AccountStatus> {
@@ -152,5 +197,52 @@ mod tests {
         assert_eq!(sign_in_address("https://claude.com.evil.example/"), None);
         assert_eq!(sign_in_address("http://claude.com/"), None);
         assert_eq!(sign_in_address("Paste code here if prompted >"), None);
+    }
+
+    #[test]
+    fn reads_the_outcome_of_a_check() {
+        let good = r#"{"type":"result","subtype":"success","is_error":false,"result":"OK","total_cost_usd":0.00039}"#;
+        assert_eq!(check_outcome(good), Some(CheckOutcome::Working));
+        let refused = |status: u32| {
+            format!(
+                r#"{{"type":"result","is_error":true,"api_error_status":{status},"result":"Invalid API key · Fix external API key"}}"#
+            )
+        };
+        assert_eq!(check_outcome(&refused(401)), Some(CheckOutcome::KeyRefused));
+        assert_eq!(check_outcome(&refused(403)), Some(CheckOutcome::KeyRefused));
+        assert_eq!(
+            check_outcome(&refused(429)),
+            Some(CheckOutcome::LimitReached)
+        );
+        let usage = r#"{"is_error":true,"result":"Claude AI usage limit reached|1760000000"}"#;
+        assert_eq!(check_outcome(usage), Some(CheckOutcome::LimitReached));
+        let overloaded = r#"{"is_error":true,"api_error_status":500,"result":"Overloaded"}"#;
+        assert_eq!(
+            check_outcome(overloaded),
+            Some(CheckOutcome::Failed("Overloaded".to_string()))
+        );
+        assert_eq!(check_outcome("not json"), None);
+        assert_eq!(CheckOutcome::KeyRefused.code(), "key_refused");
+        let expected = [
+            "-p",
+            "Reply with the single word OK.",
+            "--model",
+            "haiku",
+            "--max-turns",
+            "1",
+            "--tools",
+            "",
+            "--system-prompt",
+            "Reply briefly.",
+            "--strict-mcp-config",
+            "--setting-sources",
+            "",
+            "--output-format",
+            "json",
+        ];
+        assert_eq!(CHECK_ARGS.len(), expected.len());
+        for (index, argument) in expected.iter().enumerate() {
+            assert_eq!(CHECK_ARGS.get(index), Some(argument));
+        }
     }
 }
