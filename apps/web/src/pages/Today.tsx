@@ -1,5 +1,4 @@
 import mark from "@catervas/brand/assets/logo-mark-1254.png";
-import type { QueryName } from "@catervas/protocol-client";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Link, useNavigate } from "react-router";
@@ -224,7 +223,7 @@ export function Today() {
 		on: boolean;
 		flagged: FlaggedRow[];
 		done: DoneRow[];
-	}>("autopilot.today" as QueryName, {});
+	}>("autopilot.today", {});
 	// The team's goal, outside what waits on the owner.
 	const { data: goal, again: askGoalAgain } = useQuery<GoalState>(
 		"goal.get",
