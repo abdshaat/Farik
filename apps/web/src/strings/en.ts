@@ -602,10 +602,9 @@ export const en = {
 		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",
 	toolApprovalRefuse: "Don’t allow",
 	toolApprovalAllow: "Allow once",
-	waitingKeyRefused: "Your AI account’s key did not work",
-	waitingKeyRefusedLine:
-		"The team is paused until you connect your AI account again.",
-	waitingKeyConnect: "Connect again",
+	waitingKeyRefused: "Your AI account’s key was refused",
+	waitingKeyRefusedLine: "The team is paused until you sign in again.",
+	waitingKeyConnect: "Sign in again in Settings",
 	checksPassed: "All {count} of Catervas’s checks passed.",
 	movedTitle: "What moved since yesterday",
 	movedYou: "You",
@@ -1172,8 +1171,9 @@ export const en = {
 	chatsDaySpentLink: "See today’s costs",
 	chatsAsleep:
 		"{name} is resting until {time}, when the AI account’s usage limit resets, and will answer then.",
-	chatsKeyRefused: "{name} cannot answer: your AI provider refused the key.",
-	chatsKeyLink: "Check the key in Settings",
+	chatsKeyRefused:
+		"{name} cannot answer: your AI account’s key was refused. Sign in again in Settings.",
+	chatsKeyLink: "Open Settings",
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
 	chatsInterviewIntro:

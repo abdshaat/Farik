@@ -35,6 +35,12 @@ describe("landing", () => {
 		).toBe("/setup/project");
 		expect(landing(status({ setupPending: true }))).toBe("/setup/scan");
 		expect(landing(status({ setupPending: false }))).toBe("/");
+		// Signed out, the first run still starts at the computer and an open project at Today,
+		// which says so and links to Settings, where the sign-in is.
+		expect(landing(status({ projectRoot: null, signedIn: false }))).toBe(
+			"/setup/computer",
+		);
+		expect(landing(status({ signedIn: false }))).toBe("/");
 
 		// Before serve.status answers, "/" says it is opening and asks nothing of the project.
 		const { container, socket } = await renderApp("/");

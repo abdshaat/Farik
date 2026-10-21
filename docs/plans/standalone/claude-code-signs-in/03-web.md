@@ -93,7 +93,7 @@ Tests (`team.test.tsx`, replacing those at :767, :1533, :1613, :1677, :1739, :17
 
 Tests: `says_the_key_did_not_work_and_links_to_settings` (`Today.test.tsx:1031`) asserts the new words and the link. `landing.test.ts:11` asserts that `signedIn: false` lands on `/setup/account`.
 
-- [ ] `feat(web): send a refused key to sign in again`
+- [x] `feat(web): send a refused key to sign in again`
 
 ## Verification
 
