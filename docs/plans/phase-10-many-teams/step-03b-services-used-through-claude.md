@@ -285,7 +285,7 @@ Files: `state.rs` (`claude_json`, `claude_desktop_dirs`, unit tests beside `clau
 - `discovers_services_used_through_claude` (ignored): the Verification's home: stdout exactly the Verification's lines; with `--json`, `projects[0]` has `root: null`, `name: "Bookkeeping (Zoho Books)"`, `work: "bookkeeping"`, `services[0]` `{ id: "zoho_books", name: "Zoho Books", kind: "bookkeeping", calls: 3, last_used_at: "2026-10-12T09:10:20Z" }`; top `services` is `zoho_books` (sources `claude_ai`, `transcripts`, host null), `stripe` (`claude_code`, `mcp.stripe.com`), `slack@` (`transcripts`); the formed project's `jobs` is `[]`; `not_a_project` 0 sessions; `desktop` null. RED: no services printed.
 - `prints_no_key` (guard, ignored): with the three fixtures as `.claude.json`, a desktop config and a plugin's `.mcp.json` in the home, neither stdout, the `--json` output nor `machine.db` holds `KEY-MARKER`.
 
-- [ ] `feat(cli): print the services used through claude`
+- [x] `feat(cli): print the services used through claude`
 
 ### Task 9: Spec
 

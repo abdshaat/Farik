@@ -9,7 +9,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas::{CliIo, run_cli};
-use catervas_core::claude_history::fixtures::{CLAUDE_CODE_2_1_296, a_turn_line};
+use catervas_core::claude_history::fixtures::{
+    CLAUDE_CODE_2_1_296, CLAUDE_CODE_2_1_296_CONNECTORS, a_turn_line,
+};
+use catervas_core::claude_services::fixtures::{
+    a_claude_json_full_of_keys, a_desktop_config_full_of_keys, a_plugin_mcp_json_full_of_keys,
+};
 use catervas_protocol::clock::FixedClock;
 use catervas_store::files::fixtures::TempProject;
 use catervas_store::git::fixtures::git_in;
@@ -169,6 +174,8 @@ fn discovers_a_project_from_the_history() {
             },
             "catervas": { "sessions": 0, "tokens": {} },
             "jobs": [],
+            "work": null,
+            "services": [],
         })
     );
 }
@@ -470,4 +477,123 @@ fn prints_jobs_as_text() {
     assert_eq!(ran.code, 0, "{}", ran.err);
     assert!(!ran.out.contains('\u{1b}'), "{:?}", ran.out);
     assert!(ran.out.contains("a\\u001b[2Jb  crontab"), "{}", ran.out);
+}
+
+const CONNECTORS_SESSION: &str = "33333333-3333-4333-8333-333333333333";
+
+impl World {
+    /// The connectors fixture, worked at home, in a transcript folder of its own.
+    fn write_connectors(&self) {
+        let folder = self.home().join(".claude/projects/-home");
+        std::fs::create_dir_all(&folder).expect("a projects folder");
+        let text =
+            CLAUDE_CODE_2_1_296_CONNECTORS.replace("/home/me", &self.home().to_string_lossy());
+        std::fs::write(folder.join(format!("{CONNECTORS_SESSION}.jsonl")), text)
+            .expect("a transcript");
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn discovers_services_used_through_claude() {
+    let world = World::new("discovers-services");
+    world.make_shop();
+    world.write_fixture();
+    world.write_connectors();
+    std::fs::write(
+        world.home().join(".claude.json"),
+        r#"{"mcpServers":{"stripe":{"type":"http","url":"https://mcp.stripe.com","headers":{"Authorization":"Bearer KEY-MARKER"}}}}"#,
+    )
+    .expect("a settings file");
+
+    let ran = world.discover(&[]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        "reading your Claude Code history on this computer; nothing leaves it\n\
+         read 2 transcript files: 2 sessions, 2 new\n\
+         skipped 2 lines it couldn't read\n\
+         projects: 2\n  \
+         Bookkeeping (Zoho Books)  last worked 2026-10-12  1 session  6 in  6 out\n    \
+         services: Zoho Books 3 calls, last 2026-10-12; slack 1 call, last 2026-10-12\n  \
+         shop  ~/shop  last worked 2026-10-12  1 session  1.2k in  47 out\n\
+         services you use with Claude: Zoho Books, Stripe, slack\n"
+    );
+
+    let as_json = world.discover(&["--json"]);
+    let value: Value = serde_json::from_str(&as_json.out).expect("one JSON object");
+    let formed = &value["projects"][0];
+    assert_eq!(formed["root"], Value::Null);
+    assert_eq!(formed["name"], "Bookkeeping (Zoho Books)");
+    assert_eq!(formed["work"], "bookkeeping");
+    assert_eq!(formed["jobs"], json!([]));
+    assert_eq!(
+        formed["services"][0],
+        json!({
+            "id": "zoho_books", "name": "Zoho Books", "kind": "bookkeeping",
+            "calls": 3, "last_used_at": "2026-10-12T09:10:20Z",
+        })
+    );
+    assert_eq!(value["projects"][1]["work"], Value::Null);
+    assert_eq!(
+        value["services"],
+        json!([
+            {"id": "zoho_books", "name": "Zoho Books", "kind": "bookkeeping", "host": null,
+             "sources": ["claude_ai", "transcripts"]},
+            {"id": "stripe", "name": "Stripe", "kind": "payments", "host": "mcp.stripe.com",
+             "sources": ["claude_code"]},
+            {"id": "slack@", "name": "slack", "kind": "other", "host": null,
+             "sources": ["transcripts"]},
+        ])
+    );
+    assert_eq!(value["not_a_project"]["sessions"], 0);
+    assert_eq!(value["desktop"], Value::Null);
+    let bytes = std::fs::read(world.config().join("catervas").join(MACHINE_DB)).expect("the index");
+    assert!(!bytes.windows(10).any(|window| window == b"KEY-MARKER"));
+}
+
+/// Guard: checked by mutation (print a header, keep a key), not watched to fail.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn prints_no_key() {
+    let world = World::new("prints-no-key");
+    world.make_shop();
+    world.write_fixture();
+    world.write_connectors();
+    let home = world.home();
+    std::fs::write(home.join(".claude.json"), a_claude_json_full_of_keys()).expect("settings");
+    let desktop = world.config().join("Claude");
+    std::fs::create_dir_all(&desktop).expect("a desktop folder");
+    std::fs::write(
+        desktop.join("claude_desktop_config.json"),
+        a_desktop_config_full_of_keys(),
+    )
+    .expect("a desktop config");
+    let plugin = home.join(".claude/plugins/cache/kw/pm/1.0");
+    std::fs::create_dir_all(&plugin).expect("a plugin folder");
+    std::fs::write(plugin.join(".mcp.json"), a_plugin_mcp_json_full_of_keys()).expect("a plugin");
+    std::fs::write(
+        home.join(".claude/settings.json"),
+        json!({"enabledPlugins": {"pm@kw": true}}).to_string(),
+    )
+    .expect("settings");
+    std::fs::write(
+        home.join(".claude/plugins/installed_plugins.json"),
+        json!({"plugins": {"pm@kw": [{"scope": "user", "installPath": plugin}]}}).to_string(),
+    )
+    .expect("installed plugins");
+
+    let text = world.discover(&[]);
+    let as_json = world.discover(&["--json"]);
+
+    assert_eq!(text.code, 0, "{}", text.err);
+    for out in [&text.out, &as_json.out] {
+        assert!(!out.contains("KEY-MARKER"), "{out}");
+        for name in ["Stripe", "slack"] {
+            assert!(out.contains(name), "{name} in {out}");
+        }
+    }
+    let bytes = std::fs::read(world.config().join("catervas").join(MACHINE_DB)).expect("the index");
+    assert!(!bytes.windows(10).any(|window| window == b"KEY-MARKER"));
 }

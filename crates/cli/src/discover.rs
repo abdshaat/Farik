@@ -2,20 +2,24 @@
 
 use std::path::{Path, PathBuf};
 
+use catervas_core::claude_services::{ServiceUse, Work};
 use catervas_core::jobs::JobKind;
 use catervas_core::pricing::Usage;
 use catervas_runtime::computer::program_output;
 use catervas_store::claude_history::{ReadSummary, place_sessions, read_transcripts};
+use catervas_store::claude_services::{
+    SettingsPaths, WindowsClaude, read_service_settings, windows_claude_dirs,
+};
 use catervas_store::jobs::{JobPlaces, find_jobs};
 use catervas_store::machine::{
-    Activity, Found, FoundProject, GoneFolder, JobRow, MACHINE_DB, Ownership, forget_machine_index,
-    open_machine_index,
+    Activity, FormedFound, Found, FoundProject, FoundServices, GoneFolder, JobRow, MACHINE_DB,
+    Ownership, forget_machine_index, open_machine_index,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 
 use crate::printable::printable;
-use crate::state::{claude_dir, make_state_dir, state_dir};
+use crate::state::{claude_desktop_dirs, claude_dir, claude_json, make_state_dir, state_dir};
 use crate::{CliIo, Report};
 
 /// Running it is the owner's consent (the screen's consent is a later step's), so it says what it is
@@ -48,7 +52,12 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
         };
         return Ok(Report {
             lines: vec![first, "no Claude Code history on this computer".to_string()],
-            json: found_json(ReadSummary::default(), &none, &JobsFound::default()),
+            json: found_json(
+                ReadSummary::default(),
+                &none,
+                &JobsFound::default(),
+                &ServicesView::default(),
+            ),
             json_lines: None,
         });
     }
@@ -74,19 +83,52 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
     };
     let run_program = |program: &str, args: &[&str]| program_output(&io.env, program, args);
     let searched = find_jobs(&mut index, &places, &run_program, now).map_err(|e| e.to_string())?;
+    let (paths, several_windows_users) = settings_paths(io, &claude);
+    read_service_settings(&mut index, &paths).map_err(|e| e.to_string())?;
     let found = index.found().map_err(|e| e.to_string())?;
+    let services = ServicesView {
+        found: index.found_services().map_err(|e| e.to_string())?,
+        several_windows_users,
+    };
     let jobs = JobsFound {
         rows: index.found_jobs(now).map_err(|e| e.to_string())?,
         unreadable: searched.unreadable,
         now,
     };
     let mut lines = vec![first];
-    lines.extend(report_lines(summary, &found, &jobs, &homes));
+    lines.extend(report_lines(summary, &found, &jobs, &services, &homes));
     Ok(Report {
         lines,
-        json: found_json(summary, &found, &jobs),
+        json: found_json(summary, &found, &jobs, &services),
         json_lines: None,
     })
+}
+
+/// Where Claude's settings are: the settings file, Claude Code's folder, Claude Desktop's folders, and
+/// whether a WSL machine has several Windows users with Claude Desktop (none of theirs is read).
+fn settings_paths(io: &CliIo<'_>, claude: &Path) -> (SettingsPaths, bool) {
+    let mut desktop_dirs = claude_desktop_dirs(&io.env, std::env::consts::OS);
+    let mut several = false;
+    let on_wsl = std::env::consts::OS == "linux"
+        && io
+            .env
+            .get("WSL_DISTRO_NAME")
+            .is_some_and(|name| !name.is_empty());
+    if on_wsl {
+        match windows_claude_dirs(Path::new("/mnt/c/Users")) {
+            WindowsClaude::One(folders) => desktop_dirs.extend(folders),
+            WindowsClaude::Several => several = true,
+            WindowsClaude::None => {}
+        }
+    }
+    (
+        SettingsPaths {
+            claude_json: claude_json(&io.env),
+            claude_dir: claude.to_path_buf(),
+            desktop_dirs,
+        },
+        several,
+    )
 }
 
 fn forget_index(path: &Path, homes: &[String]) -> Result<Report, String> {
@@ -231,6 +273,110 @@ impl JobsFound {
     }
 }
 
+/// The services found, and whether Windows' Claude Desktop folders were left unread.
+struct ServicesView {
+    found: FoundServices,
+    several_windows_users: bool,
+}
+
+impl Default for ServicesView {
+    fn default() -> Self {
+        Self {
+            found: FoundServices {
+                services: Vec::new(),
+                by_root: std::collections::BTreeMap::new(),
+                formed: Vec::new(),
+                bookkeeping_roots: std::collections::BTreeSet::new(),
+                not_a_project: Activity::default(),
+            },
+            several_windows_users: false,
+        }
+    }
+}
+
+impl ServicesView {
+    fn of(&self, root: &str) -> &[ServiceUse] {
+        self.found.by_root.get(root).map_or(&[], Vec::as_slice)
+    }
+}
+
+/// A line of the services a project's sessions called, or none.
+fn services_line(uses: &[ServiceUse]) -> Option<String> {
+    if uses.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = uses
+        .iter()
+        .map(|used| {
+            format!(
+                "{} {}, last {}",
+                printable(&used.name),
+                plural(used.calls, "call"),
+                day(used.last_used_at)
+            )
+        })
+        .collect();
+    Some(format!("    services: {}", parts.join("; ")))
+}
+
+fn uses_json(uses: &[ServiceUse], view: &ServicesView) -> Vec<Value> {
+    uses.iter()
+        .map(|used| {
+            let kind = view
+                .found
+                .services
+                .iter()
+                .find(|service| service.key == used.key)
+                .map_or("other", |service| service.kind.as_wire());
+            json!({
+                "id": used.key,
+                "name": used.name,
+                "kind": kind,
+                "calls": used.calls,
+                "last_used_at": moment(used.last_used_at),
+            })
+        })
+        .collect()
+}
+
+/// A row among the projects: a folder, or a project formed from connector work.
+enum Row<'a> {
+    Project(&'a FoundProject),
+    Formed(&'a FormedFound),
+}
+
+impl Row<'_> {
+    fn last_at(&self) -> DateTime<Utc> {
+        match self {
+            Self::Project(project) => project.last_at,
+            Self::Formed(formed) => formed.last_at,
+        }
+    }
+
+    fn key(&self) -> &str {
+        match self {
+            Self::Project(project) => &project.root,
+            Self::Formed(formed) => &formed.name,
+        }
+    }
+}
+
+/// The projects and formed projects, newest first.
+fn rows<'a>(found: &'a Found, services: &'a ServicesView) -> Vec<Row<'a>> {
+    let mut rows: Vec<Row<'a>> = found
+        .projects
+        .iter()
+        .map(Row::Project)
+        .chain(services.found.formed.iter().map(Row::Formed))
+        .collect();
+    rows.sort_by(|a, b| {
+        b.last_at()
+            .cmp(&a.last_at())
+            .then_with(|| a.key().cmp(b.key()))
+    });
+    rows
+}
+
 fn is_repository_job(kind: JobKind) -> bool {
     kind <= JobKind::Terraform
 }
@@ -262,9 +408,19 @@ fn job_line(job: &JobRow, now: DateTime<Utc>, indent: &str) -> String {
     format!("{indent}{}", parts.join("  "))
 }
 
-fn project_lines(project: &FoundProject, jobs: &JobsFound, homes: &[String]) -> Vec<String> {
+fn project_lines(
+    project: &FoundProject,
+    jobs: &JobsFound,
+    services: &ServicesView,
+    homes: &[String],
+) -> Vec<String> {
+    let bookkeeping = if services.found.bookkeeping_roots.contains(&project.root) {
+        "  bookkeeping"
+    } else {
+        ""
+    };
     let mut lines = vec![format!(
-        "  {}  {}  last worked {}  {}",
+        "  {}  {}{bookkeeping}  last worked {}  {}",
         printable(&name_of(&project.root)),
         shown(&project.root, homes),
         day(project.last_at),
@@ -281,6 +437,18 @@ fn project_lines(project: &FoundProject, jobs: &JobsFound, homes: &[String]) -> 
         lines.push(format!("    jobs: {}", own.len()));
         lines.extend(own.iter().map(|job| job_line(job, jobs.now, "      ")));
     }
+    lines.extend(services_line(services.of(&project.root)));
+    lines
+}
+
+fn formed_lines(formed: &FormedFound) -> Vec<String> {
+    let mut lines = vec![format!(
+        "  {}  last worked {}  {}",
+        printable(&formed.name),
+        day(formed.last_at),
+        activity_text(&formed.activity)
+    )];
+    lines.extend(services_line(&formed.services));
     lines
 }
 
@@ -297,6 +465,7 @@ fn report_lines(
     summary: ReadSummary,
     found: &Found,
     jobs: &JobsFound,
+    services: &ServicesView,
     homes: &[String],
 ) -> Vec<String> {
     let mut lines = vec![format!(
@@ -332,31 +501,39 @@ fn report_lines(
             plural(jobs.unreadable, "place")
         ));
     }
+    let all = rows(found, services);
     for (heading, ownership) in [
         ("projects", Ownership::Yours),
         ("explored", Ownership::Explored),
     ] {
-        let section: Vec<&FoundProject> = found
-            .projects
+        let section: Vec<&Row<'_>> = all
             .iter()
-            .filter(|project| project.ownership == ownership)
+            .filter(|row| match row {
+                Row::Project(project) => project.ownership == ownership,
+                Row::Formed(_) => ownership == Ownership::Yours,
+            })
             .collect();
         if section.is_empty() {
             continue;
         }
         lines.push(format!("{heading}: {}", section.len()));
-        for project in section {
-            lines.extend(project_lines(project, jobs, homes));
+        for row in section {
+            match row {
+                Row::Project(project) => {
+                    lines.extend(project_lines(project, jobs, services, homes));
+                }
+                Row::Formed(formed) => lines.extend(formed_lines(formed)),
+            }
         }
     }
     if !found.gone.is_empty() {
         lines.push(format!("no longer on this computer: {}", found.gone.len()));
         lines.extend(found.gone.iter().map(|gone| gone_line(gone, homes)));
     }
-    if found.not_a_project.sessions > 0 {
+    if services.found.not_a_project.sessions > 0 {
         lines.push(format!(
             "not in a project: {}",
-            plural(found.not_a_project.sessions, "session")
+            plural(services.found.not_a_project.sessions, "session")
         ));
     }
     let printed: Vec<&FoundProject> = found.projects.iter().collect();
@@ -367,6 +544,18 @@ fn report_lines(
             plural(elsewhere.len() as u64, "job")
         ));
         lines.extend(elsewhere.iter().map(|job| job_line(job, jobs.now, "  ")));
+    }
+    if !services.found.services.is_empty() {
+        let names: Vec<String> = services
+            .found
+            .services
+            .iter()
+            .map(|service| printable(&service.name).into_owned())
+            .collect();
+        lines.push(format!(
+            "services you use with Claude: {}",
+            names.join(", ")
+        ));
     }
     lines
 }
@@ -406,12 +595,16 @@ fn moment(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
-fn found_json(summary: ReadSummary, found: &Found, jobs: &JobsFound) -> Value {
-    let projects: Vec<Value> = found
-        .projects
+fn found_json(
+    summary: ReadSummary,
+    found: &Found,
+    jobs: &JobsFound,
+    services: &ServicesView,
+) -> Value {
+    let projects: Vec<Value> = rows(found, services)
         .iter()
-        .map(|project| {
-            json!({
+        .map(|row| match row {
+            Row::Project(project) => json!({
                 "root": project.root,
                 "name": name_of(&project.root),
                 "is_git": project.is_git,
@@ -419,10 +612,44 @@ fn found_json(summary: ReadSummary, found: &Found, jobs: &JobsFound) -> Value {
                     Ownership::Yours => "yours",
                     Ownership::Explored => "explored",
                 },
+                "work": services
+                    .found
+                    .bookkeeping_roots
+                    .contains(&project.root)
+                    .then_some(Work::Bookkeeping.as_wire()),
                 "last_worked_at": moment(project.last_at),
                 "own": activity_json(&project.own),
                 "catervas": activity_json(&project.catervas),
                 "jobs": jobs.of(&project.root).into_iter().map(job_json).collect::<Vec<_>>(),
+                "services": uses_json(services.of(&project.root), services),
+            }),
+            Row::Formed(formed) => json!({
+                "root": Value::Null,
+                "name": formed.name,
+                "is_git": false,
+                "ownership": "yours",
+                "work": formed.work.as_wire(),
+                "last_worked_at": moment(formed.last_at),
+                "own": activity_json(&formed.activity),
+                "catervas": activity_json(&Activity::default()),
+                "jobs": Vec::<Value>::new(),
+                "services": uses_json(&formed.services, services),
+            }),
+        })
+        .collect();
+    let service_list: Vec<Value> = services
+        .found
+        .services
+        .iter()
+        .map(|service| {
+            let mut sources: Vec<&str> = service.sources.iter().map(|s| s.as_wire()).collect();
+            sources.sort_unstable();
+            json!({
+                "id": service.key,
+                "name": service.name,
+                "kind": service.kind.as_wire(),
+                "host": service.host,
+                "sources": sources,
             })
         })
         .collect();
@@ -445,7 +672,9 @@ fn found_json(summary: ReadSummary, found: &Found, jobs: &JobsFound) -> Value {
         "unreadable_lines": found.unreadable_lines,
         "projects": projects,
         "gone": gone,
-        "not_a_project": activity_json(&found.not_a_project),
+        "not_a_project": activity_json(&services.found.not_a_project),
+        "services": service_list,
+        "desktop": services.several_windows_users.then_some("several_windows_users"),
         "jobs_found": jobs.rows.len(),
         "unreadable_job_sources": jobs.unreadable,
         "this_computer": jobs

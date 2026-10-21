@@ -26,6 +26,34 @@ pub(crate) fn claude_dir(env: &BTreeMap<String, String>) -> Option<PathBuf> {
         .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".claude")))
 }
 
+/// Where Claude Code keeps its settings file: `.claude.json` under `CLAUDE_CONFIG_DIR` when that is
+/// set and not empty, else `$HOME/.claude.json`; `None` when neither is set.
+pub(crate) fn claude_json(env: &BTreeMap<String, String>) -> Option<PathBuf> {
+    let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
+    set("CLAUDE_CONFIG_DIR")
+        .map(|dir| PathBuf::from(dir).join(".claude.json"))
+        .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".claude.json")))
+}
+
+/// Where Claude Desktop keeps its settings on `os` (`std::env::consts::OS`): Linux
+/// `$XDG_CONFIG_HOME/Claude`, else `$HOME/.config/Claude`; macOS
+/// `$HOME/Library/Application Support/Claude`; Windows `%APPDATA%\Claude`. None when the variable
+/// is not set.
+pub(crate) fn claude_desktop_dirs(env: &BTreeMap<String, String>, os: &str) -> Vec<PathBuf> {
+    let set = |name: &str| env.get(name).filter(|value| !value.is_empty());
+    let dir = match os {
+        "linux" => set("XDG_CONFIG_HOME")
+            .map(|base| PathBuf::from(base).join("Claude"))
+            .or_else(|| set("HOME").map(|home| PathBuf::from(home).join(".config/Claude"))),
+        "macos" => {
+            set("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/Claude"))
+        }
+        "windows" => set("APPDATA").map(|base| PathBuf::from(format!("{base}\\Claude"))),
+        _ => None,
+    };
+    dir.into_iter().collect()
+}
+
 /// Home: `HOME` when it is set and not empty, else where the command was run. A project folder's
 /// member repositories, and the folders the first-run wizard browses, are relative to it.
 pub(crate) fn home_of(io: &CliIo<'_>) -> PathBuf {
@@ -79,7 +107,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use super::{claude_dir, state_dir};
+    use super::{claude_desktop_dirs, claude_dir, claude_json, state_dir};
 
     fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -109,5 +137,42 @@ mod tests {
         let empty = env(&[("CLAUDE_CONFIG_DIR", ""), ("HOME", "/h")]);
         assert_eq!(claude_dir(&empty), Some(PathBuf::from("/h/.claude")));
         assert_eq!(claude_dir(&env(&[])), None);
+    }
+
+    #[test]
+    fn claude_json_follows_claude_config_dir() {
+        let both = env(&[("CLAUDE_CONFIG_DIR", "/c"), ("HOME", "/h")]);
+        assert_eq!(claude_json(&both), Some(PathBuf::from("/c/.claude.json")));
+        let empty = env(&[("CLAUDE_CONFIG_DIR", ""), ("HOME", "/h")]);
+        assert_eq!(claude_json(&empty), Some(PathBuf::from("/h/.claude.json")));
+        assert_eq!(claude_json(&env(&[])), None);
+    }
+
+    #[test]
+    fn finds_claude_desktop_per_system() {
+        let one = |dir: &str| vec![PathBuf::from(dir)];
+        let xdg = env(&[("XDG_CONFIG_HOME", "/x"), ("HOME", "/h")]);
+        assert_eq!(claude_desktop_dirs(&xdg, "linux"), one("/x/Claude"));
+        let home = env(&[("HOME", "/h")]);
+        assert_eq!(
+            claude_desktop_dirs(&home, "linux"),
+            one("/h/.config/Claude")
+        );
+        assert_eq!(
+            claude_desktop_dirs(&home, "macos"),
+            one("/h/Library/Application Support/Claude")
+        );
+        let appdata = env(&[("APPDATA", "C:\\A")]);
+        assert_eq!(
+            claude_desktop_dirs(&appdata, "windows"),
+            one("C:\\A\\Claude")
+        );
+        for os in ["linux", "macos", "windows"] {
+            assert_eq!(
+                claude_desktop_dirs(&env(&[]), os),
+                Vec::<PathBuf>::new(),
+                "{os}"
+            );
+        }
     }
 }
