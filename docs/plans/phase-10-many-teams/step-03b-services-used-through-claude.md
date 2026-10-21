@@ -240,7 +240,7 @@ Files: `claude_services.rs` (`find_services`, `call_kind`, `is_bookkeeping_folde
 - `counts_microsoft_365_as_spreadsheets_only_for_excel_tools`: `call_kind(microsoft_365, …)` is spreadsheets for `mcp__microsoft365__excel_read_range`, `…__get_Workbook`, `…__list_worksheets` and `…__update_sheet`, and other for `mcp__microsoft365__send_mail` and `…__list_teams`; `call_kind(xero, "mcp__xero__x")` is bookkeeping. A home session of three `mcp__microsoft365__excel_read_range` calls forms `Bookkeeping (Microsoft 365 and Excel)`; one of three `mcp__microsoft365__send_mail` forms nothing, and its service is still `microsoft_365`, kind spreadsheets. RED.
 - `tells_a_bookkeeping_folder`: `is_bookkeeping_folder(false, 3)` true, `(false, 2)` false, `(true, 10)` false. RED.
 
-- [ ] `feat(core): form projects from work done through claude connectors`
+- [x] `feat(core): form projects from work done through claude connectors`
 
 ### Task 5: Tool calls in the index
 
