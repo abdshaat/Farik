@@ -55,7 +55,7 @@ The test (`setup-project.spec.ts:46-56`) does the following and asserts the resu
 
   F9's methods list `account.sign_in`, `account.sign_in_code`, `account.check` and `account.sign_out`, in place of `account.connect` and `account.disconnect`.
 
-- [ ] `docs(spec): claude code keeps the ai account, revision 0.141`
+- [x] `docs(spec): claude code keeps the ai account, revision 0.141`
 
 ## Verification
 

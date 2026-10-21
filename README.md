@@ -135,7 +135,7 @@ scripts/catervas-stop.sh    # stops it and everything it started
 
 The stop script ends Catervas, every process it started (the agents' sessions and connector servers), and the containers it started. It leaves your other containers alone. Its log is in `~/.local/state/catervas/serve.log`.
 
-To start again from nothing, as on a new computer, run `scripts/catervas-reset.sh`. It stops Catervas and deletes everything it stored: its settings and your AI account's key, every project's `.catervas/` folder and the branches Catervas made there, and its Docker containers and images. It lists all of it and asks before deleting. `--dry-run` only lists; `--keep-key` keeps your AI account's key; `--keep-images` keeps the sandbox images. It never touches GitHub or files committed in your projects.
+To start again from nothing, as on a new computer, run `scripts/catervas-reset.sh`. It stops Catervas and deletes everything it stored: its settings, every project's `.catervas/` folder and the branches Catervas made there, and its Docker containers and images. It lists all of it and asks before deleting. `--dry-run` only lists; `--keep-key` does nothing now, since Catervas keeps no key; `--keep-images` keeps the sandbox images. It never touches GitHub or files committed in your projects.
 
 ### Command-line reference
 
