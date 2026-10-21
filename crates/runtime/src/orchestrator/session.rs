@@ -1037,7 +1037,11 @@ const ASK_HUMAN_TOOL: &str = "catervas_ask_human";
 const ASK_TEAM_TOOL: &str = "catervas_ask_team";
 
 /// The tools of the team's decisions, which a decide session alone is offered (ADR 0082).
-const DECIDE_TOOLS_OFFERED: [&str; 2] = ["catervas_answer_question", "catervas_decide"];
+const DECIDE_TOOLS_OFFERED: [&str; 3] = [
+    "catervas_answer_question",
+    "catervas_decide",
+    "catervas_decide_data_pipeline",
+];
 
 /// The tool that proposes a marketing plan, offered in the Marketing Specialist's implement
 /// session about a task alone (ADR 0042).

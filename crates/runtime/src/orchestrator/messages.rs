@@ -627,6 +627,34 @@ pub(super) fn folder_change_message(
     )
 }
 
+/// The first message of the session in which the Product Manager decides a data source the
+/// Procurement Specialist asked for (ADR 0082 decision 5): everything the request says is the
+/// agent's, so it is untrusted, and so is the reason Catervas passed it on, which is its own.
+pub(super) fn pipeline_message(
+    decider: &Agent,
+    record: &catervas_store::pipelines::PipelineRecord,
+) -> String {
+    let asked = &record.requested;
+    let block = |name: &str, text: &str| untrusted_block(name, text, NOTE_CAP_BYTES);
+    let answer = |yes: bool| if yes { "yes" } else { "no" };
+    format!(
+        "{decider}, the Procurement Specialist asks for a data source, and it waits on a decision the owner would make.\n\nPipeline {number}: {name}\nWhat it gives:\n{what}\nIts page:\n{url}\nWhy it asks:\n{why}\nWhat it says it costs: {cost}. Needs an account: {account}. Sends the project's data out: {sends}.\n\nWhy it waits: {waits}\n\nApprove or decline it with `catervas_decide_data_pipeline` (pipeline {number}), weighing what it costs against what it would change; the daily limit still stops all spending.",
+        decider = decider.display_name.as_str(),
+        number = record.pipeline,
+        name = block("name", asked.name.as_str()),
+        what = block("what", asked.what.as_str()),
+        url = block("source_url", asked.source_url.as_str()),
+        why = block("why", asked.why.as_str()),
+        cost = asked.cost,
+        account = answer(asked.needs_account),
+        sends = answer(asked.sends_project_data),
+        waits = record
+            .escalated_reason
+            .as_deref()
+            .unwrap_or("it was passed on to the owner"),
+    )
+}
+
 /// The owner's answers to this task's blocks and escalations that came before `since`, the start of
 /// the last session, and still belong to the task's try (from its last start out of `assigned` or
 /// `ready`): the newest three, oldest first. Those after `since` the caller tells already.

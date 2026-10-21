@@ -14,13 +14,11 @@ use catervas_core::marketing::parse_amount;
 use catervas_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use catervas_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use catervas_protocol::event::{
-    AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineApprovedBody, DataPipelineDecidedBy,
-    DataPipelineDeclinedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody,
-    EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
-    QuestionAnsweredBody, TaskRoomGrantedBody, new_event,
+    AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineDecidedBy, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
+    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, TaskRoomGrantedBody, new_event,
 };
 use catervas_store::folder_docs::{ProposalState, folder_docs};
-use catervas_store::pipelines::{PipelineState, data_pipelines};
 use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use catervas_store::requests::{
@@ -42,8 +40,7 @@ use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
 use crate::procurement::{
     MailboxRefusal, Mailer, ORDERS, PIPELINES, check_follow_up, discard_message, dismiss_reply,
-    file_pipeline_request, order_is_sending, prepare, record_failed, record_sent, send_message,
-    transmit,
+    order_is_sending, prepare, record_failed, record_sent, send_message, transmit,
 };
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
@@ -51,6 +48,7 @@ use crate::skills::{
 };
 use crate::tools::ToolDeps;
 use crate::tools::folders::{LandRefusal, land};
+use crate::tools::pipeline::{PipelineDecideError, decide_pipeline};
 use crate::transitions::{
     TransitionAsk, TransitionOutcome, contract_accepted, last_move_into,
     mechanical_criteria_passed, refusal_details, result_accepted, result_awaits_human,
@@ -1303,65 +1301,20 @@ fn pipeline_decide(
         ));
     }
     let _deciding = crate::locked(&PIPELINES);
-    let records = data_pipelines(&tools.log).map_err(failed)?;
-    let Some(record) = records.iter().find(|record| record.pipeline == pipeline) else {
-        return Err(order_refusal(
-            "unknown_pipeline",
-            format!("{pipeline} is no data source the Procurement Specialist asked for"),
-        ));
-    };
-    let source = crate::tools::sites::shown(record.requested.name.as_str());
-    match record.state {
-        PipelineState::Escalated => {}
-        PipelineState::Open => {
-            return Err(order_refusal(
-                "pipeline_not_escalated",
-                format!("the Product Manager has not passed {source} to you yet"),
-            ));
-        }
-        PipelineState::Approved | PipelineState::Declined => {
-            return Err(order_refusal(
-                "pipeline_decided",
-                format!("{source} was decided already"),
-            ));
-        }
-    }
-    let number = NonZeroU64::new(pipeline).ok_or_else(|| failed("a request is numbered from 1"))?;
-    let by = DataPipelineDecidedBy::Human;
-    if !approve {
-        let seq = append(
-            tools,
-            None,
-            EventBody::DataPipelineDeclined(DataPipelineDeclinedBody {
-                pipeline: number.into(),
-                by,
-                reason: said.try_into().map_err(failed)?,
-            }),
-        )?;
-        return Ok(CommandReport {
-            said: format!("Declined {source}."),
-            events: vec![seq],
-        });
-    }
-    let team = tools.files.read_team().map_err(failed)?;
-    let filed = file_pipeline_request(tools, &team, record, HUMAN, &tools.ids)
-        .map_err(|why| order_refusal("pipeline_not_filed", why))?;
-    let seq = append(
+    let decided = decide_pipeline(
         tools,
-        None,
-        EventBody::DataPipelineApproved(DataPipelineApprovedBody {
-            pipeline: number.into(),
-            by,
-            reason: said.try_into().map_err(failed)?,
-            request: filed.as_str().to_string().try_into().map_err(failed)?,
-        }),
-    )?;
+        pipeline,
+        (approve, &said),
+        DataPipelineDecidedBy::Human,
+        &tools.ids,
+    )
+    .map_err(|error| match error {
+        PipelineDecideError::Refused { code, detail } => order_refusal(code, detail),
+        PipelineDecideError::Failed { detail } => failed(detail),
+    })?;
     Ok(CommandReport {
-        said: format!(
-            "Approved {source}. The team has your request, {}, to set it up.",
-            filed.as_str()
-        ),
-        events: vec![seq],
+        said: decided.said,
+        events: vec![decided.seq],
     })
 }
 

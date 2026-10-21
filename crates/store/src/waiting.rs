@@ -375,7 +375,10 @@ pub fn waiting(
     waiting.extend(plans_waiting(&board, log, team, &item)?);
     waiting.extend(posts_waiting(&board, log, team, &item)?);
     waiting.extend(orders_waiting(&board, log, team, &item)?);
-    waiting.extend(pipelines_waiting(&board, log, team, &item)?);
+    // While the team decides, the Product Manager takes a data source (ADR 0082 decision 5).
+    if !team_decides {
+        waiting.extend(pipelines_waiting(&board, log, team, &item)?);
+    }
     let product_manager = team
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)

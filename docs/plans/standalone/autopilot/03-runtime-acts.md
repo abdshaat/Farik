@@ -114,7 +114,7 @@ Message of the session: the source's name, what it gives, its page, why, its cos
 Tests:
 - `orchestrator/autopilot.rs`: `the_product_manager_decides_a_paid_data_pipeline` — under autopilot an escalated paid request gets one `decide` session of the Product Manager offered exactly `DECIDE_PIPELINE_TOOLS`; its approval appends `data_pipeline.approved { by: "product_manager" }` naming the Product Manager and the session, files the request; `waiting.list` holds no pipeline row; the owner's `pipeline_decide` of it is then refused `pipeline_decided`; with autopilot off no session runs and the row is listed.
 
-- [ ] `feat(runtime): the product manager decides data pipelines under autopilot`
+- [x] `feat(runtime): the product manager decides data pipelines under autopilot`
 
 ### Task 16: seller messages go out under autopilot, 50 a day
 

@@ -16,12 +16,13 @@ use catervas_store::autopilot::{
     TeamQuestion, flags, folder_change_spent, open_team_questions, team_decides, team_spent,
 };
 use catervas_store::folder_docs::{FolderChange, folder_docs};
+use catervas_store::pipelines::{PipelineState, data_pipelines};
 use catervas_store::waiting::awaits_acceptance;
 use catervas_store::{EventQuery, TaskProjection};
 use chrono::{DateTime, Duration, Utc};
 
 use super::messages::{
-    acceptance_message, decide_message, folder_change_message, question_message,
+    acceptance_message, decide_message, folder_change_message, pipeline_message, question_message,
 };
 use super::rules::{Waiting, acted, day_is_spent, unavailable};
 use super::session::{SessionAsk, run_session};
@@ -60,6 +61,19 @@ pub(super) const DECIDE_TOOLS: &[&str] = &[
     "catervas_decide",
 ];
 
+/// The Catervas tools the session that decides a data pipeline request is offered: the reading
+/// tools, a post, the notebook, and the decision.
+pub(super) const DECIDE_PIPELINE_TOOLS: &[&str] = &[
+    "catervas_read_task",
+    "catervas_read_board",
+    "catervas_read_rules",
+    "catervas_read_criteria",
+    "catervas_read_decisions",
+    "catervas_post_message",
+    "catervas_write_memory",
+    "catervas_decide_data_pipeline",
+];
+
 /// How many characters of a question the flag's words keep.
 const NEEDS_QUESTION_CHARS: usize = 200;
 
@@ -84,7 +98,78 @@ pub(super) async fn autopilot_rule(
     if let Some(report) = decide_a_wait(deps, team, board, waiting).await? {
         return Ok(Some(report));
     }
-    decide_a_folder_change(deps, team, waiting).await
+    if let Some(report) = decide_a_folder_change(deps, team, waiting).await? {
+        return Ok(Some(report));
+    }
+    decide_a_pipeline(deps, team, board, waiting).await
+}
+
+/// The oldest data pipeline request that waits on the owner gets a `decide` session of the Product
+/// Manager about the task its request names (ADR 0082 decision 5). After
+/// `DECIDE_SESSIONS_PER_WAIT` such sessions with no decision Catervas flags that task.
+async fn decide_a_pipeline(
+    deps: &OrchestratorDeps,
+    team: &Team,
+    board: &[TaskProjection],
+    waiting: &mut Waiting,
+) -> Result<Option<TickReport>, OrchestratorError> {
+    let Some(decider) = planner(team) else {
+        return Ok(None);
+    };
+    let log = &deps.tools.log;
+    let flagged = flags(log)?;
+    for record in data_pipelines(log)?
+        .into_iter()
+        .filter(|record| record.state == PipelineState::Escalated)
+    {
+        let Some(row) = board.iter().find(|row| row.task_id == record.task_id) else {
+            continue;
+        };
+        if flagged
+            .iter()
+            .any(|flag| flag.task_id.as_ref() == Some(&row.task_id))
+        {
+            continue;
+        }
+        if decide_sessions_since(deps, row, record.pipeline)? >= DECIDE_SESSIONS_PER_WAIT {
+            flag_by_catervas(
+                deps,
+                row,
+                &format!(
+                    "a decision on the data source {}",
+                    record.requested.name.as_str()
+                ),
+            )?;
+            return Ok(Some(flagged_report(row)));
+        }
+        if day_is_spent(deps, team, Role::from(decider.role), &mut waiting.day_spent)?
+            | unavailable(deps, decider, &mut waiting.slept)?
+        {
+            continue;
+        }
+        let contract = deps.tools.files.read_contract(&row.task_id)?;
+        let initial_prompt = pipeline_message(decider, &record);
+        let end = run_session(
+            deps,
+            team,
+            SessionAsk {
+                agent: decider,
+                contract: Some(&contract),
+                purpose: SessionPurpose::Decide,
+                cwd: deps.tools.files.root().to_path_buf(),
+                executor: None,
+                read_only: true,
+                only_tool: None,
+                tools: Some(DECIDE_PIPELINE_TOOLS),
+                in_reply_to: None,
+                thread: None,
+                initial_prompt,
+            },
+        )
+        .await?;
+        return Ok(Some(acted(row, decider, "decision", &end)));
+    }
+    Ok(None)
 }
 
 /// One thing that waits on the owner and that the Product Manager decides instead (decision 3): an
@@ -223,7 +308,7 @@ async fn decide_a_wait(
         }
         if decide_sessions_since(deps, row, wait.began.1)? >= DECIDE_SESSIONS_PER_WAIT {
             flag_by_catervas(deps, row, "a decision the team could not make")?;
-            continue;
+            return Ok(Some(flagged_report(row)));
         }
         if day_is_spent(deps, team, Role::from(decider.role), &mut waiting.day_spent)?
             | unavailable(deps, decider, &mut waiting.slept)?
@@ -333,7 +418,7 @@ async fn answer_a_question(
         };
         if decide_sessions_since(deps, row, question.seq)? >= DECIDE_SESSIONS_PER_WAIT {
             flag_by_catervas(deps, row, &needs_of(&question))?;
-            continue;
+            return Ok(Some(flagged_report(row)));
         }
         if day_is_spent(deps, team, role, &mut waiting.day_spent)?
             | unavailable(deps, agent, &mut waiting.slept)?
@@ -429,7 +514,10 @@ async fn decide_a_folder_change(
             .count();
         if u32::try_from(sessions).unwrap_or(u32::MAX) >= DECIDE_SESSIONS_PER_WAIT {
             flag_folder_change_by_catervas(deps, change.change)?;
-            continue;
+            return Ok(Some(TickReport::FolderChange {
+                change: change.change,
+                what: "flagged it for the owner: the team could not decide it".to_string(),
+            }));
         }
         if day_is_spent(deps, team, Role::from(decider.role), &mut waiting.day_spent)?
             | unavailable(deps, decider, &mut waiting.slept)?
@@ -557,6 +645,15 @@ fn decide_sessions_since(
         })
         .count();
     Ok(u32::try_from(count).unwrap_or(u32::MAX))
+}
+
+/// What a tick says of a flag Catervas raised. It ends the tick, so that no rule works the task
+/// the flag now holds.
+fn flagged_report(row: &TaskProjection) -> TickReport {
+    TickReport::Acted {
+        task_id: row.task_id.clone(),
+        what: "flagged it for the owner: the team could not decide it".to_string(),
+    }
 }
 
 /// Flags `row`'s task for the owner in Catervas's own name (ADR 0082 decision 4): its wait cost the
@@ -1237,5 +1334,167 @@ mod tests {
             (true, Some(change))
         );
         let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    /// The Procurement Specialist's request for Firecrawl on CTV-1, which costs money, and Catervas
+    /// passing it to the owner: the request's number.
+    fn a_paid_pipeline_request(harness: &Harness) -> u64 {
+        let seq = harness
+            .project
+            .record_by(
+                Some("proc"),
+                at(),
+                "CTV-1",
+                "data_pipeline.requested",
+                &json!({
+                    "name": "Firecrawl",
+                    "what": "Prices as clean text from the seller pages the task has to compare.",
+                    "source_url": "https://www.firecrawl.dev/pricing",
+                    "why": "Three sellers hide their prices behind scripts the plain fetch cannot read.",
+                    "cost": "paid",
+                    "needs_account": true,
+                    "sends_project_data": false
+                }),
+            )
+            .envelope
+            .seq;
+        harness.project.record(
+            "",
+            "data_pipeline.escalated",
+            &json!({ "pipeline": seq, "reason": "It costs money, so you decide (ADR 0061)." }),
+        );
+        seq
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    async fn the_product_manager_decides_a_paid_data_pipeline() {
+        use catervas_protocol::command::Command;
+
+        let waiting_pipelines = |harness: &Harness| {
+            let team = harness.project.deps.files.read_team().expect("a team");
+            catervas_store::waiting::waiting(
+                &harness.project.deps.projections,
+                &harness.project.deps.log,
+                &harness.project.deps.files,
+                &team,
+            )
+            .expect("the list reads")
+            .into_iter()
+            .filter(|row| row.pipeline.is_some())
+            .count()
+        };
+        // Off, no session runs and the owner is asked.
+        let off = Harness::with_procurement("autopilot-pipeline-off");
+        off.procurement_task("CTV-1", Some("in_progress"));
+        a_paid_pipeline_request(&off);
+        let adapter = off.recorded(vec![ends_without_a_decision()]);
+        off.orchestrator(adapter.clone())
+            .tick()
+            .await
+            .expect("the tick runs");
+        assert!(
+            adapter
+                .started()
+                .iter()
+                .all(|spec| spec.purpose != SessionPurpose::Decide)
+        );
+        assert_eq!(waiting_pipelines(&off), 1);
+
+        let harness = Harness::with_procurement("autopilot-pipeline");
+        harness.procurement_task("CTV-1", Some("in_progress"));
+        autopilot(&harness, true);
+        let pipeline = a_paid_pipeline_request(&harness);
+        assert_eq!(
+            waiting_pipelines(&harness),
+            0,
+            "the team decides, not the owner"
+        );
+        let adapter = harness.recorded(vec![tool_calls(&[(
+            "catervas_decide_data_pipeline",
+            json!({ "pipeline": pipeline, "approve": true,
+                    "reason": "It saves three sessions of reading, for a few cents." }),
+        )])]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(
+            (started[0].agent_id.as_str(), started[0].purpose),
+            ("pm", SessionPurpose::Decide)
+        );
+        let offered: BTreeSet<&str> = started[0]
+            .catervas_tools
+            .iter()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            offered,
+            BTreeSet::from_iter(super::DECIDE_PIPELINE_TOOLS.iter().copied())
+        );
+        assert!(started[0].initial_prompt.contains("Firecrawl"));
+        assert!(
+            started[0]
+                .initial_prompt
+                .contains("catervas_decide_data_pipeline")
+        );
+        let approved = harness.events(&[EventKind::DataPipelineApproved]);
+        assert_eq!(approved.len(), 1);
+        let EventBody::DataPipelineApproved(body) = &approved[0].body else {
+            panic!("an approval");
+        };
+        assert_eq!(body.by.to_string(), "product_manager");
+        assert_eq!(approved[0].envelope.ids.agent_id.as_deref(), Some("pm"));
+        assert_eq!(
+            approved[0].envelope.ids.session_id.as_deref(),
+            Some("session-1")
+        );
+        assert_eq!(
+            harness.events(&[EventKind::TaskCreated]).len(),
+            2,
+            "the request is filed"
+        );
+        assert_eq!(waiting_pipelines(&harness), 0);
+        // The owner's decision comes too late.
+        let refusal = orchestrator
+            .handle(Command::DataPipelineDecide {
+                pipeline,
+                approve: false,
+                note: None,
+            })
+            .await
+            .expect_err("decided already");
+        assert!(
+            format!("{refusal:?}").contains("pipeline_decided"),
+            "{refusal:?}"
+        );
+
+        // Three sessions that decide nothing end with a flag on the requesting task.
+        let stuck = Harness::with_procurement("autopilot-pipeline-stuck");
+        stuck.procurement_task("CTV-1", Some("in_progress"));
+        autopilot(&stuck, true);
+        a_paid_pipeline_request(&stuck);
+        let adapter = stuck.recorded(vec![
+            ends_without_a_decision(),
+            ends_without_a_decision(),
+            ends_without_a_decision(),
+        ]);
+        let orchestrator = stuck.orchestrator(adapter.clone());
+        for _ in 0..4 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+        assert_eq!(adapter.started().len(), 3);
+        let flagged = stuck.events(&[EventKind::TaskFlagged]);
+        let EventBody::TaskFlagged(body) = &flagged[0].body else {
+            panic!("a flag");
+        };
+        assert_eq!(
+            body.needs.as_str(),
+            "a decision on the data source Firecrawl"
+        );
+        assert_eq!(body.flagged_by, "catervas");
     }
 }

@@ -10,7 +10,7 @@ use catervas_core::contract::TaskId;
 use catervas_core::pipeline::{PipelineCost, pipeline_needs_owner};
 use catervas_protocol::event::{
     CatervasEvent, DataPipelineCost, DataPipelineDecidedBy, DataPipelineRequestedBody, EventBody,
-    EventKind,
+    EventKind, SessionStartedBodyPurpose,
 };
 use chrono::{DateTime, Utc};
 
@@ -103,6 +103,9 @@ pub struct PipelineRecord {
     pub request: Option<TaskId>,
     /// The sessions that were asked to decide it, oldest first.
     pub tries: Vec<String>,
+    /// The `decide` sessions about its task since it was asked for, where the Product Manager
+    /// decides it while autopilot is on (ADR 0082 decision 5), oldest first.
+    pub decide_sessions: Vec<String>,
 }
 
 /// A request's cost as the governor's rule takes it.
@@ -171,7 +174,21 @@ pub fn data_pipelines(log: &EventLog) -> Result<Vec<PipelineRecord>, StoreError>
                         reason: None,
                         request: None,
                         tries: Vec::new(),
+                        decide_sessions: Vec::new(),
                     });
+                }
+            }
+            EventBody::SessionStarted(body) if body.pipeline.is_none() => {
+                // A `decide` session about the task a request names may decide it (ADR 0082).
+                if body.purpose == SessionStartedBodyPurpose::Decide
+                    && let (Some(task), Some(session)) = (
+                        event.envelope.ids.task_id.as_ref(),
+                        event.envelope.ids.session_id.as_ref(),
+                    )
+                {
+                    for record in records.iter_mut().filter(|record| &record.task_id == task) {
+                        record.decide_sessions.push(session.clone());
+                    }
                 }
             }
             EventBody::SessionStarted(body) => {
@@ -253,6 +270,14 @@ fn decide(
                     record.requested.sends_project_data,
                 )
         }
+        // While autopilot is on the Product Manager also decides an escalated request, paid or
+        // not, from a `decide` session about its task (ADR 0082 decision 5).
+        DecidedBy::ProductManager if record.state == PipelineState::Escalated => event
+            .envelope
+            .ids
+            .session_id
+            .as_ref()
+            .is_some_and(|session| record.decide_sessions.contains(session)),
         DecidedBy::ProductManager => {
             is_its_deciding_session(record, event)
                 && record.state == PipelineState::Open

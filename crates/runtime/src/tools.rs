@@ -47,7 +47,7 @@ mod goals;
 mod marketing;
 pub(crate) mod media;
 mod memory;
-mod pipeline;
+pub(crate) mod pipeline;
 mod posts;
 mod purchase_order;
 mod reading;
@@ -280,6 +280,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             "catervas_answer_question",
             Read,
             "Autopilot: answer a question an agent put to the team, as the owner would. Decide, and say why in the answer.",
+        ),
+        tool::<decide::DecidePipelineInput>(
+            "catervas_decide_data_pipeline",
+            Read,
+            "Autopilot: approve or decline a data source the Procurement Specialist asked for and the owner would decide, with your reason. An approval files the request that sets it up.",
         ),
         tool::<decide::DecideInput>(
             "catervas_decide",
@@ -543,6 +548,7 @@ pub async fn call_tool(
         "catervas_record_goal_progress" => goals::record_goal_progress(&call, &parse(input)?),
         "catervas_answer_question" => decide::answer_question(&call, &parse(input)?),
         "catervas_decide" => decide::decide(&call, &parse(input)?),
+        "catervas_decide_data_pipeline" => decide::decide_data_pipeline(&call, &parse(input)?),
         "catervas_file_bug" => bugs::file_bug(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
@@ -921,6 +927,7 @@ mod tests {
             "catervas_file_goal_work",
             "catervas_record_goal_progress",
             "catervas_answer_question",
+            "catervas_decide_data_pipeline",
             "catervas_decide",
             "catervas_file_bug",
             "catervas_write_folder_doc",
@@ -971,7 +978,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..40] {
+        for tool in &tools[..41] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

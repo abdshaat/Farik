@@ -6839,6 +6839,7 @@ mod tests {
                     "catervas_ask_team",
                     "catervas_answer_question",
                     "catervas_decide",
+                    "catervas_decide_data_pipeline",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",

@@ -10,7 +10,7 @@ use catervas_core::autopilot::{
 };
 use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::governor::transition_table::TransitionActor;
-use catervas_protocol::event::{EventBody, EventKind};
+use catervas_protocol::event::{DataPipelineDecidedBy, EventBody, EventKind};
 use catervas_protocol::generated::event::{
     EscalationResolvedBody, HumanAcceptedBody, HumanAcceptedBodySubject, TaskRoomGrantedBody,
     TeamQuestionAskedBodyAbout,
@@ -23,6 +23,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use super::pipeline::{PipelineDecideError, decide_pipeline};
 use super::refusal::Refusal;
 use super::work::ask_governor;
 use super::{Call, ToolError, failed};
@@ -62,6 +63,18 @@ pub(crate) struct DecideInput {
     /// For `flag`: what only the owner can give, in 1 to 300 characters.
     #[serde(default)]
     needs: Option<String>,
+}
+
+/// `catervas_decide_data_pipeline`'s input.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DecidePipelineInput {
+    /// The request's number, the `pipeline` the first message names.
+    pipeline: u64,
+    /// Whether to approve the source: false declines it.
+    approve: bool,
+    /// Why, in one or two sentences (1 to 600 characters).
+    reason: String,
 }
 
 fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
@@ -381,6 +394,52 @@ fn decide_folder_change(
     })?;
     call.append(None, EventBody::TeamDecided(decided))?;
     Ok(json!({ "decided": choice.wire(), "folder_change": change }))
+}
+
+/// Decides a data pipeline request that waits on the owner, in the owner's place (ADR 0082
+/// decision 5): an approval files the ordinary request that sets the source up, a decline files
+/// nothing. The decision names the Product Manager and its session, as an older log's did; the
+/// daily limit still stops all spending.
+pub(super) fn decide_data_pipeline(
+    call: &Call<'_>,
+    input: &DecidePipelineInput,
+) -> Result<Value, ToolError> {
+    if !team_decides(&call.deps().log, &call.team).map_err(failed)? {
+        return Err(refused(
+            "autopilot_off",
+            "autopilot is off, so the owner decides what waits",
+        ));
+    }
+    if planner(&call.team).map(|agent| agent.id.as_str()) != Some(call.agent_id()) {
+        return Err(refused(
+            "not_yours",
+            "the Product Manager decides for the team, or the one agent when it works alone",
+        ));
+    }
+    let reason = input.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 600 {
+        return Err(refused(
+            "reason_required",
+            "say why in 1 to 600 characters: the log is where somebody reads it back",
+        ));
+    }
+    let _deciding = crate::locked(&crate::procurement::PIPELINES);
+    let decided = decide_pipeline(
+        call.deps(),
+        input.pipeline,
+        (input.approve, reason),
+        DataPipelineDecidedBy::ProductManager,
+        &call.ids(None),
+    )
+    .map_err(|error| match error {
+        PipelineDecideError::Refused { code, detail } => Refusal::Pipeline { code, detail }.into(),
+        PipelineDecideError::Failed { detail } => failed(detail),
+    })?;
+    Ok(json!({
+        "pipeline": input.pipeline,
+        "decided": if input.approve { "approved" } else { "declined" },
+        "next": decided.said,
+    }))
 }
 
 /// A role's name for a refusal an agent reads.
