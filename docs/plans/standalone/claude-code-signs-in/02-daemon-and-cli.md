@@ -1,7 +1,7 @@
 # Claude Code keeps the AI account, plan 2: the wire, the daemon and the command line
 
 Status: ready
-Branch: `feat/claude-code-signs-in`
+Branch: `docs/claude-code-signs-in`
 Spec: `docs/SPEC.md` 4.1, 5.5, 8.2, 8.6; ADR 0084
 Depends on: plan 1 (Tasks 1 to 4 committed on this branch)
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-21 (ADR 0065)

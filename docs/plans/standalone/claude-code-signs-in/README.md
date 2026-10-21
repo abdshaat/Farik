@@ -1,11 +1,11 @@
 # Standalone: Claude Code keeps the AI account
 
-Status: draft. The web part waits on the founder's approval of its mockups (ADR 0032); parts 01 and 02 are ready.
-Branch: `feat/claude-code-signs-in`, its own pull request to `main`. It must merge before phase 10 step 05 (ADR 0059's "no key read" ruling, project plan revision 46).
+Status: ready. The founder waived the screens' mockup on 2026-10-21 ("Dont draw mockups just start with the plan and execute").
+Branch: `docs/claude-code-signs-in`, its own pull request to `main` (#92), which carries the plan and its code. It must merge before phase 10 step 05 (ADR 0059's "no key read" ruling, project plan revision 46).
 Decision: ADR 0084 (supersedes ADR 0022, amends ADR 0021)
 Spec: `docs/SPEC.md` 4.1, 5.5, 8.2, 8.6, and the AI account section of Settings
 Depends on: `main` at `d6599bd` (pull request #88 merged)
-Readiness confirmed by: the planner (Opus 5.5), 2026-10-21, against the three readiness rules (ADR 0065), for parts 01, 02 and 04; part 03 after its mockups are approved
+Readiness confirmed by: the planner (Opus 5.5), 2026-10-21, against the three readiness rules (ADR 0065)
 
 ## Goal
 
@@ -23,7 +23,7 @@ Out of scope:
 |---|---|---|
 | `01-account.md` | 1 to 4 | this branch |
 | `02-daemon-and-cli.md` | 5 to 9 | this branch, after 01 |
-| `03-web.md` | 10 to 12 | this branch, after 02, once the founder has approved `docs/design/mockups/AccountSignIn.dc.html` |
+| `03-web.md` | 10 to 12 | this branch, after 02 |
 | `04-record.md` | 13 to 14 | this branch, after 03 |
 
 ## Decisions shared by the plans

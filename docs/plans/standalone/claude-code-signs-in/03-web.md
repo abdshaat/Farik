@@ -1,7 +1,7 @@
 # Claude Code keeps the AI account, plan 3: the screens
 
-Status: draft. It waits on the founder's approval of `docs/design/mockups/AccountSignIn.dc.html` (ADR 0032), which the planner draws from the screens below. The plan is folded to match the approved mockup before it runs.
-Branch: `feat/claude-code-signs-in`
+Status: ready. The founder waived the mockup on 2026-10-21 ("Dont draw mockups just start with the plan and execute"), so the screens below are built as written, and ADR 0032's mockup rule does not apply to this plan.
+Branch: `docs/claude-code-signs-in`
 Spec: `docs/SPEC.md` 4.1, and the AI account section of Settings
 Depends on: plan 2 (Tasks 5 to 9 committed on this branch)
 
@@ -9,7 +9,7 @@ Depends on: plan 2 (Tasks 5 to 9 committed on this branch)
 
 The first run's "Connect your AI account" step and Settings' "Your AI account" section sign in through Claude Code. Neither asks for a key. Today's and the chats' "the key did not work" lines link to the same section, which offers "Sign in again".
 
-## The screens (what the mockup draws)
+## The screens
 
 **First run, `/setup/account`** (`SetupAccount.tsx`). Title: "Connect your AI account". Lead: "Your agents think with Claude, and your account pays for it. You sign in through Claude Code, which keeps your sign-in on this computer. Catervas never sees your key." It has four states:
 
@@ -48,7 +48,6 @@ The first run's "Connect your AI account" step and Settings' "Your AI account" s
 ## File map
 
 ```
-docs/design/mockups/AccountSignIn.dc.html        creates (planner, before Task 10): the four states and Settings, on the canvas page "AI account"
 apps/web/src/pages/ClaudeSignIn.tsx              creates: the shared sign-in (choices, code, outcome)
 apps/web/src/pages/setup/SetupAccount.tsx        rewrites: the four states
 apps/web/src/pages/setup/SetupProject.tsx        modifies: no "stored in" line

@@ -1,7 +1,7 @@
 # Claude Code keeps the AI account, plan 4: the end-to-end run, the reset script and the spec
 
 Status: ready (after plan 3)
-Branch: `feat/claude-code-signs-in`
+Branch: `docs/claude-code-signs-in`
 Spec: `docs/SPEC.md` 4.1, 5.5, 8.2, 8.6, Settings' AI account; ADR 0084
 Depends on: plans 1 to 3 committed on this branch
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-21 (ADR 0065)

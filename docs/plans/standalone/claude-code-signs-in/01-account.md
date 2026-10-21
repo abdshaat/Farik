@@ -1,7 +1,7 @@
 # Claude Code keeps the AI account, plan 1: reading Claude Code's answers, and running them
 
 Status: ready
-Branch: `feat/claude-code-signs-in`
+Branch: `docs/claude-code-signs-in`
 Spec: `docs/SPEC.md` 8.6; ADR 0084 decisions 3 to 6
 Depends on: `main` at `d6599bd`
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-21 (ADR 0065)
