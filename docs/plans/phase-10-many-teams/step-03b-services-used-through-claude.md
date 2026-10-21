@@ -215,7 +215,7 @@ Files: `claude_services.rs` (parsing, `called_server`), `claude_services/fixture
 - `reads_an_extensions_name`: `{name: "zoho-books", display_name, user_config: {key: KEY-MARKER-4}}` gives `zoho-books`; no `name`, `None`. RED.
 - `names_the_server_a_tool_called`: `server_segment` of `mcp__claude_ai_Zoho_Books__list` is `claude_ai_Zoho_Books`, of `mcp__github__get_me` `github`, of `Read`, `mcp__x` and `mcp____t` `None`; `called_server` of `claude_ai_Zoho_Books` is (`Zoho Books`, ClaudeAi); `plugin_product-management_slack` (`slack`, Plugin); `github` (`github`, Settings); `plugin_x` (`plugin_x`, Settings); `claude_ai_` and `""` are `None`. RED.
 
-- [ ] `feat(core): read connector names from claude settings without keys`
+- [x] `feat(core): read connector names from claude settings without keys`
 
 ### Task 3: The service catalog
 
