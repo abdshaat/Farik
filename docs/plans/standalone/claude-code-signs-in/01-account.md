@@ -201,7 +201,7 @@ Tests:
   - A start while another is waiting kills the first, whose process group is gone within a second.
   - A fake that prints no address answers `NoAddress` within 25 seconds.
 
-- [ ] `feat(runtime): sign in through claude code's own login`
+- [x] `feat(runtime): sign in through claude code's own login`
 
 ## Verification
 

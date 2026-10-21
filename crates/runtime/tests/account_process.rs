@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use catervas_core::claude_account::{AccountKind, CHECK_ARGS, CheckOutcome};
-use catervas_runtime::account::ClaudeAccount;
+use catervas_runtime::account::{ClaudeAccount, SignInError};
 
 const SIGNED_IN: &str =
     r#"{"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"}"#;
@@ -160,4 +160,66 @@ async fn asks_claude_code_and_checks_with_one_tiny_request() {
     // Signing out is Claude Code's logout.
     assert_eq!(account.sign_out().await, Ok(()));
     assert!(fake.read("logged_out").is_some());
+}
+
+/// Whether the process `pid` is still there.
+fn is_alive(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+#[tokio::test]
+#[ignore = "needs a shell: cargo xtask check --integration"]
+async fn signs_in_through_claude_code_and_checks_the_account() {
+    let fake = Fake::new("sign-in");
+    let account = fake.account();
+    let address = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=y";
+    assert_eq!(account.start_sign_in(false).await, Ok(address.to_string()));
+    assert_eq!(fake.read("login_args.txt").as_deref(), Some("--claudeai\n"));
+    assert_eq!(
+        account.finish_sign_in("good-code").await,
+        Ok(CheckOutcome::Working)
+    );
+    assert_eq!(fake.read("code.txt").as_deref(), Some("good-code\n"));
+    // The login is spent.
+    assert_eq!(
+        account.finish_sign_in("good-code").await,
+        Err(SignInError::NoSignIn)
+    );
+
+    // A refused code is Claude Code's own words.
+    assert_eq!(account.start_sign_in(true).await, Ok(address.to_string()));
+    assert_eq!(
+        fake.read("login_args.txt").as_deref(),
+        Some("--claudeai\n--console\n")
+    );
+    assert_eq!(
+        account.finish_sign_in("bad").await,
+        Err(SignInError::Failed("Invalid code".to_string()))
+    );
+
+    // A second start ends the first, whose group is gone within a second.
+    assert_eq!(account.start_sign_in(false).await, Ok(address.to_string()));
+    assert_eq!(account.start_sign_in(false).await, Ok(address.to_string()));
+    let pids = fake.read("login_pids.txt").expect("the pids");
+    let waiting: Vec<&str> = pids.lines().collect();
+    let first_waiting = waiting.get(2).expect("the third login").to_string();
+    let started = Instant::now();
+    while is_alive(&first_waiting) && started.elapsed() < Duration::from_secs(1) {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(!is_alive(&first_waiting), "the earlier login was ended");
+
+    // No address: it says so within its limit.
+    let silent = Fake::new("no-address");
+    silent.set("no_address", "");
+    let started = Instant::now();
+    assert_eq!(
+        silent.account().start_sign_in(false).await,
+        Err(SignInError::NoAddress("Opening browser...".to_string()))
+    );
+    assert!(started.elapsed() < Duration::from_secs(25));
 }

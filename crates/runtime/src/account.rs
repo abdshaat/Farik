@@ -8,10 +8,18 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
+use std::future::Future;
+use std::pin::Pin;
+use std::time::Instant;
+
 use catervas_core::claude_account::{
     AccountKind, AccountStatus, CHECK_ARGS, CheckOutcome, check_outcome, parse_status,
+    sign_in_address,
 };
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::process::{Child, ChildStdin};
+use tokio::sync::Mutex;
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 
 use crate::claude::credential_variable;
 use crate::exec::kill_group;
@@ -29,6 +37,14 @@ pub enum SignInError {
 
 const STATUS_LIMIT: Duration = Duration::from_secs(15);
 const LOGOUT_LIMIT: Duration = Duration::from_secs(15);
+/// How long a login may wait for its first address.
+const ADDRESS_LIMIT: Duration = Duration::from_secs(20);
+/// How long a login without a code is kept.
+const LOGIN_LIFE: Duration = Duration::from_secs(600);
+/// How long a login is given to take its code and exit.
+const CODE_LIMIT: Duration = Duration::from_secs(60);
+/// How long the rest of a finished login's output is waited for.
+const DRAIN_LIMIT: Duration = Duration::from_secs(1);
 const CHECK_LIMIT: Duration = Duration::from_secs(60);
 /// The most of a program's output that is read.
 const OUTPUT_LIMIT: u64 = 1 << 20;
@@ -47,6 +63,32 @@ pub struct ClaudeAccount {
     program: PathBuf,
     env: BTreeMap<String, String>,
     check_dir: PathBuf,
+    login: Mutex<Option<Login>>,
+}
+
+/// A sign-in that waits for its code. The code is never stored in it.
+struct Login {
+    child: Child,
+    pid: u32,
+    stdin: Option<ChildStdin>,
+    /// The login's lines, standard output and error together.
+    lines: UnboundedReceiver<String>,
+    last_line: String,
+    started: Instant,
+}
+
+impl Login {
+    /// Ends the login's whole group and reaps it.
+    async fn end(mut self) {
+        kill_group(self.pid);
+        let _ = tokio::time::timeout(DRAIN_LIMIT, self.child.wait()).await;
+    }
+
+    fn note(&mut self, line: &str) {
+        if !line.trim().is_empty() {
+            self.last_line = line.trim().to_string();
+        }
+    }
 }
 
 impl ClaudeAccount {
@@ -61,6 +103,7 @@ impl ClaudeAccount {
             program,
             env,
             check_dir,
+            login: Mutex::new(None),
         }
     }
 
@@ -142,6 +185,118 @@ impl ClaudeAccount {
         })
     }
 
+    /// Starts `claude auth login` (with `--console` for an Anthropic Console account, else
+    /// `--claudeai`) and answers the sign-in address it prints. Any earlier sign-in is ended.
+    ///
+    /// # Errors
+    ///
+    /// `NoAddress` when Claude Code gave no sign-in address in time, with the last line it
+    /// printed.
+    pub async fn start_sign_in(&self, console: bool) -> Result<String, SignInError> {
+        let mut slot = self.login.lock().await;
+        if let Some(earlier) = slot.take() {
+            earlier.end().await;
+        }
+        let no_address = |text: String| SignInError::NoAddress(text);
+        std::fs::create_dir_all(&self.check_dir).map_err(|error| no_address(error.to_string()))?;
+        let mode = if console { "--console" } else { "--claudeai" };
+        let mut child = self
+            .command(&self.check_dir)
+            .args(["auth", "login", mode])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| no_address(error.to_string()))?;
+        let (Some(pid), Some(stdin), Some(stdout), Some(stderr)) = (
+            child.id(),
+            child.stdin.take(),
+            child.stdout.take(),
+            child.stderr.take(),
+        ) else {
+            return Err(no_address("Claude Code could not be started".to_string()));
+        };
+        let (sender, lines) = unbounded_channel();
+        let (out_sender, err_sender) = (sender.clone(), sender);
+        tokio::spawn(forward_lines(stdout, out_sender));
+        tokio::spawn(forward_lines(stderr, err_sender));
+        let mut login = Login {
+            child,
+            pid,
+            stdin: Some(stdin),
+            lines,
+            last_line: String::new(),
+            started: Instant::now(),
+        };
+        let found = tokio::time::timeout(ADDRESS_LIMIT, async {
+            while let Some(line) = login.lines.recv().await {
+                if let Some(address) = sign_in_address(&line) {
+                    return Some(address);
+                }
+                login.note(&line);
+            }
+            None
+        })
+        .await;
+        if let Ok(Some(address)) = found {
+            *slot = Some(login);
+            Ok(address)
+        } else {
+            let last = login.last_line.clone();
+            login.end().await;
+            Err(no_address(last))
+        }
+    }
+
+    /// Hands the code to the waiting login and, when Claude Code accepts it, checks the
+    /// connection. The code is written once and kept nowhere.
+    ///
+    /// # Errors
+    ///
+    /// `NoSignIn` when none waits (or it waited past ten minutes); `Failed` with the login's
+    /// last line when it did not accept the code in time.
+    pub async fn finish_sign_in(&self, code: &str) -> Result<CheckOutcome, SignInError> {
+        let mut login = self
+            .login
+            .lock()
+            .await
+            .take()
+            .ok_or(SignInError::NoSignIn)?;
+        if login.started.elapsed() > LOGIN_LIFE {
+            login.end().await;
+            return Err(SignInError::NoSignIn);
+        }
+        let Some(mut stdin) = login.stdin.take() else {
+            login.end().await;
+            return Err(SignInError::NoSignIn);
+        };
+        // A login that has already exited refuses the write; its exit status says the rest.
+        let _ = async {
+            stdin.write_all(code.as_bytes()).await?;
+            stdin.write_all(b"\n").await?;
+            stdin.flush().await
+        }
+        .await;
+        drop(stdin);
+        let exited = tokio::time::timeout(CODE_LIMIT, login.child.wait()).await;
+        // Whatever the login printed on its way out.
+        let _ = tokio::time::timeout(DRAIN_LIMIT, async {
+            while let Some(line) = login.lines.recv().await {
+                login.note(&line);
+            }
+        })
+        .await;
+        match exited {
+            Ok(Ok(status)) if status.success() => Ok(self.check().await),
+            Ok(_) => Err(SignInError::Failed(login.last_line)),
+            Err(_) => {
+                let last = login.last_line.clone();
+                login.end().await;
+                Err(SignInError::Failed(last))
+            }
+        }
+    }
+
     /// Runs `claude auth logout`.
     ///
     /// # Errors
@@ -166,5 +321,131 @@ fn first_characters(text: &str, fallback: &str) -> String {
         fallback.to_string()
     } else {
         text.chars().take(DETAIL_LIMIT).collect()
+    }
+}
+
+/// Sends each line of `reader` to `sender` until the pipe closes.
+async fn forward_lines<R>(reader: R, sender: tokio::sync::mpsc::UnboundedSender<String>)
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut lines = BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        if sender.send(line).is_err() {
+            break;
+        }
+    }
+}
+
+type Boxed<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// What the daemon asks of Claude Code's account. The daemon holds it as a port so that its tests
+/// use a fake instead of a program.
+pub trait AccountPort: Send + Sync {
+    /// Whether Claude Code is signed in, and with what kind of account.
+    fn status(&self) -> Boxed<'_, AccountStatus>;
+    /// The connection check.
+    fn check(&self) -> Boxed<'_, CheckOutcome>;
+    /// Starts a sign-in; the address of its page.
+    fn start_sign_in(&self, console: bool) -> Boxed<'_, Result<String, SignInError>>;
+    /// Gives the sign-in its code, then checks the connection.
+    fn finish_sign_in<'a>(&'a self, code: &'a str) -> Boxed<'a, Result<CheckOutcome, SignInError>>;
+    /// Signs Claude Code out.
+    fn sign_out(&self) -> Boxed<'_, Result<(), String>>;
+}
+
+impl AccountPort for ClaudeAccount {
+    fn status(&self) -> Boxed<'_, AccountStatus> {
+        Box::pin(ClaudeAccount::status(self))
+    }
+
+    fn check(&self) -> Boxed<'_, CheckOutcome> {
+        Box::pin(ClaudeAccount::check(self))
+    }
+
+    fn start_sign_in(&self, console: bool) -> Boxed<'_, Result<String, SignInError>> {
+        Box::pin(ClaudeAccount::start_sign_in(self, console))
+    }
+
+    fn finish_sign_in<'a>(&'a self, code: &'a str) -> Boxed<'a, Result<CheckOutcome, SignInError>> {
+        Box::pin(ClaudeAccount::finish_sign_in(self, code))
+    }
+
+    fn sign_out(&self) -> Boxed<'_, Result<(), String>> {
+        Box::pin(ClaudeAccount::sign_out(self))
+    }
+}
+
+/// A fake account for the daemon's tests.
+#[cfg(test)]
+#[allow(dead_code, reason = "the daemon's tests use it from the next task on")]
+pub(crate) mod fixtures {
+    use std::sync::Mutex;
+
+    use super::{AccountPort, AccountStatus, Boxed, CheckOutcome, SignInError};
+    use crate::locked;
+
+    /// An account whose answers a test sets, and which records each call by name, the code
+    /// included.
+    pub(crate) struct FakeAccount {
+        pub(crate) status: Mutex<AccountStatus>,
+        pub(crate) check: Mutex<CheckOutcome>,
+        pub(crate) address: Mutex<Result<String, SignInError>>,
+        pub(crate) finish: Mutex<Result<CheckOutcome, SignInError>>,
+        pub(crate) sign_out: Mutex<Result<(), String>>,
+        /// The calls so far: `status`, `check`, `start_sign_in(true)`, `finish_sign_in(<code>)`,
+        /// `sign_out`.
+        pub(crate) calls: Mutex<Vec<String>>,
+    }
+
+    impl FakeAccount {
+        /// A signed-out account whose every answer is the plainest one.
+        pub(crate) fn new() -> FakeAccount {
+            FakeAccount {
+                status: Mutex::new(AccountStatus {
+                    signed_in: false,
+                    kind: None,
+                }),
+                check: Mutex::new(CheckOutcome::Working),
+                address: Mutex::new(Ok("https://claude.com/cai/oauth/authorize?x=1".to_string())),
+                finish: Mutex::new(Ok(CheckOutcome::Working)),
+                sign_out: Mutex::new(Ok(())),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn record(&self, call: String) {
+            locked(&self.calls).push(call);
+        }
+    }
+
+    impl AccountPort for FakeAccount {
+        fn status(&self) -> Boxed<'_, AccountStatus> {
+            self.record("status".to_string());
+            Box::pin(async { locked(&self.status).clone() })
+        }
+
+        fn check(&self) -> Boxed<'_, CheckOutcome> {
+            self.record("check".to_string());
+            Box::pin(async { locked(&self.check).clone() })
+        }
+
+        fn start_sign_in(&self, console: bool) -> Boxed<'_, Result<String, SignInError>> {
+            self.record(format!("start_sign_in({console})"));
+            Box::pin(async { locked(&self.address).clone() })
+        }
+
+        fn finish_sign_in<'a>(
+            &'a self,
+            code: &'a str,
+        ) -> Boxed<'a, Result<CheckOutcome, SignInError>> {
+            self.record(format!("finish_sign_in({code})"));
+            Box::pin(async { locked(&self.finish).clone() })
+        }
+
+        fn sign_out(&self) -> Boxed<'_, Result<(), String>> {
+            self.record("sign_out".to_string());
+            Box::pin(async { locked(&self.sign_out).clone() })
+        }
     }
 }
