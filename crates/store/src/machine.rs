@@ -1,11 +1,14 @@
 //! The machine-level index of the owner's Claude Code history, apart from every project's log.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use catervas_core::claude_history::ToolUse;
-use catervas_core::claude_services::{ConfiguredServer, ServiceSource};
+use catervas_core::claude_services::{
+    Call, Configured, ConfiguredServer, ServerKind, Service, ServiceSource, ServiceUse, SessionUse,
+    Work, find_services, is_bookkeeping_folder,
+};
 use catervas_core::jobs::{JobKind, SESSION_CRON_DAYS};
 use catervas_core::pricing::Usage;
 use chrono::{DateTime, Duration as Days, SecondsFormat, Utc};
@@ -251,6 +254,36 @@ pub struct Found {
     pub unreadable_sessions: u64,
     /// Lines in all transcript files that could not be read.
     pub unreadable_lines: u64,
+}
+
+/// A project formed from connector work done at home, with what its sessions did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormedFound {
+    /// `"<Work> (<service>)"`.
+    pub name: String,
+    /// The work.
+    pub work: Work,
+    /// When any of its sessions last did anything.
+    pub last_at: DateTime<Utc>,
+    /// Its sessions and the tokens they used.
+    pub activity: Activity,
+    /// Every service its sessions called, most calls first.
+    pub services: Vec<ServiceUse>,
+}
+
+/// The services the owner reaches through Claude's connectors, as the index holds them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundServices {
+    /// Every service, by kind then name.
+    pub services: Vec<Service>,
+    /// The services the sessions under each project root called, most calls first.
+    pub by_root: BTreeMap<String, Vec<ServiceUse>>,
+    /// Projects formed from connector work at home.
+    pub formed: Vec<FormedFound>,
+    /// Present roots without git whose owner sessions called spreadsheet files often enough.
+    pub bookkeeping_roots: BTreeSet<String>,
+    /// The sessions at home or in a temporary folder that formed no project.
+    pub not_a_project: Activity,
 }
 
 /// A root as the index remembers it.
@@ -860,6 +893,151 @@ impl MachineIndex {
         })
     }
 
+    fn configured(&self) -> Result<Vec<Configured>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT source, name, kind, host, program FROM configured_servers
+             ORDER BY source, found_in, name",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut configured = Vec::new();
+        while let Some(row) = rows.next()? {
+            let odd = |what: &str| StoreError::Sqlite {
+                detail: format!("the index holds a configured server with a bad {what}"),
+            };
+            configured.push(Configured {
+                source: ServiceSource::from_wire(&row.get::<_, String>(0)?)
+                    .ok_or_else(|| odd("source"))?,
+                server: ConfiguredServer {
+                    name: row.get(1)?,
+                    kind: ServerKind::from_wire(&row.get::<_, String>(2)?)
+                        .ok_or_else(|| odd("kind"))?,
+                    host: row.get(3)?,
+                    program: row.get(4)?,
+                },
+            });
+        }
+        Ok(configured)
+    }
+
+    /// The owner's sessions with their tool calls: the owner's, the gone and the home sessions.
+    fn session_uses(&self) -> Result<Vec<(SessionUse, DateTime<Utc>)>, StoreError> {
+        let mut calls: HashMap<String, Vec<Call>> = HashMap::new();
+        let mut statement = self.connection.prepare(
+            "SELECT replies.session_id, tool_calls.tool_use_id, tool_calls.tool_name, tool_calls.at
+             FROM tool_calls JOIN replies ON replies.reply_key = tool_calls.reply_key
+             ORDER BY tool_calls.at, tool_calls.tool_use_id",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            calls.entry(row.get(0)?).or_default().push(Call {
+                tool_use_id: row.get(1)?,
+                tool_name: row.get(2)?,
+                at: read_time(&row.get::<_, String>(3)?)?,
+            });
+        }
+        let mut statement = self.connection.prepare(
+            "SELECT session_id, place, project_root, last_at FROM sessions
+             WHERE place IN ('owner', 'gone', 'not_a_project') AND last_at IS NOT NULL
+             ORDER BY session_id",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut sessions = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let place: String = row.get(1)?;
+            let root: Option<String> = row.get(2)?;
+            sessions.push((
+                SessionUse {
+                    calls: calls.remove(&id).unwrap_or_default(),
+                    session_id: id,
+                    root: if place == "owner" { root } else { None },
+                    is_home: place == "not_a_project",
+                },
+                read_time(&row.get::<_, String>(3)?)?,
+            ));
+        }
+        Ok(sessions)
+    }
+
+    /// The roots of present folders without git with the spreadsheet calls their owner sessions made.
+    fn spreadsheet_roots(&self) -> Result<BTreeSet<String>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT projects.root, projects.is_git, count(*) FROM projects
+             JOIN sessions ON sessions.project_root = projects.root AND sessions.place = 'owner'
+             JOIN replies ON replies.session_id = sessions.session_id
+             JOIN tool_calls ON tool_calls.reply_key = replies.reply_key
+                            AND tool_calls.touches_spreadsheet = 1
+             WHERE projects.present = 1
+             GROUP BY projects.root, projects.is_git",
+        )?;
+        let mut roots = BTreeSet::new();
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            if is_bookkeeping_folder(row.get::<_, i64>(1)? != 0, natural(row.get(2)?)) {
+                roots.insert(row.get(0)?);
+            }
+        }
+        Ok(roots)
+    }
+
+    /// The services named by Claude's settings or called in the owner's sessions, where each is used,
+    /// the projects connector work at home forms, and the folders of spreadsheets. Catervas's agents'
+    /// sessions do not count.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn found_services(&self) -> Result<FoundServices, StoreError> {
+        let sessions = self.session_uses()?;
+        let uses: Vec<SessionUse> = sessions
+            .iter()
+            .map(|(session, _)| session.clone())
+            .collect();
+        let found = find_services(&self.configured()?, &uses);
+        let tokens = self.reply_tokens()?;
+        let last_at: HashMap<&str, DateTime<Utc>> = sessions
+            .iter()
+            .map(|(session, at)| (session.session_id.as_str(), *at))
+            .collect();
+        let formed: Vec<FormedFound> = found
+            .formed
+            .iter()
+            .map(|project| {
+                let mut activity = Activity::default();
+                let mut latest: Option<DateTime<Utc>> = None;
+                for id in &project.session_ids {
+                    add(&mut activity, tokens.get(id));
+                    latest = latest.max(last_at.get(id.as_str()).copied());
+                }
+                FormedFound {
+                    name: project.name.clone(),
+                    work: project.work,
+                    last_at: latest.unwrap_or(DateTime::UNIX_EPOCH),
+                    activity,
+                    services: project.services.clone(),
+                }
+            })
+            .collect();
+        let taken: BTreeSet<&str> = found
+            .formed
+            .iter()
+            .flat_map(|project| project.session_ids.iter().map(String::as_str))
+            .collect();
+        let mut not_a_project = Activity::default();
+        for (session, _) in &sessions {
+            if session.is_home && !taken.contains(session.session_id.as_str()) {
+                add(&mut not_a_project, tokens.get(&session.session_id));
+            }
+        }
+        Ok(FoundServices {
+            services: found.services,
+            by_root: found.by_root,
+            formed,
+            bookkeeping_roots: self.spreadsheet_roots()?,
+            not_a_project,
+        })
+    }
+
     /// The migration versions applied to this index, in order.
     ///
     /// # Errors
@@ -1110,6 +1288,234 @@ mod tests {
         );
         assert_eq!(found[1].project_root.as_deref(), Some("/r"));
         assert_eq!(found[1].last_seen, now());
+    }
+
+    fn seed_project(connection: &Connection, root: &str, is_git: bool) {
+        connection
+            .execute(
+                "INSERT INTO projects (root, is_git, ownership, present, first_seen_at, checked_at)
+                 VALUES (?1, ?2, 'yours', 1, '2026-10-12T09:00:00.000Z', '2026-10-12T09:00:00.000Z')",
+                (root, i64::from(is_git)),
+            )
+            .expect("a project");
+    }
+
+    fn seed_session_at(
+        connection: &Connection,
+        id: &str,
+        place: &str,
+        root: Option<&str>,
+        last_at: &str,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO sessions (session_id, place, project_root, last_at) VALUES (?1, ?2, ?3, ?4)",
+                (id, place, root, last_at),
+            )
+            .expect("a session");
+    }
+
+    fn seed_reply(connection: &Connection, key: &str, session: &str, tokens: i64) {
+        connection
+            .execute(
+                "INSERT INTO replies (reply_key, session_id, model, at, input_tokens, output_tokens,
+                                      cache_read_tokens, cache_write_tokens)
+                 VALUES (?1, ?2, 'm', '2026-10-12T09:00:00.000Z', ?3, ?3, 0, 0)",
+                (key, session, tokens),
+            )
+            .expect("a reply");
+    }
+
+    /// A call to server `x`: a `tool_calls` row of tool `mcp__x__do` on reply `reply`.
+    fn seed_call(
+        connection: &Connection,
+        id: &str,
+        reply: &str,
+        tool: &str,
+        sheet: bool,
+        at: &str,
+    ) {
+        connection
+            .execute(
+                "INSERT INTO tool_calls (tool_use_id, reply_key, tool_name, touches_spreadsheet, at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                (id, reply, tool, i64::from(sheet), at),
+            )
+            .expect("a tool call");
+    }
+
+    fn seed_server(connection: &Connection, source: &str, name: &str) {
+        connection
+            .execute(
+                "INSERT INTO configured_servers (source, found_in, name, kind) VALUES (?1, '', ?2, 'http')",
+                (source, name),
+            )
+            .expect("a configured server");
+    }
+
+    fn open_seeded(name: &str) -> (TempProject, MachineIndex) {
+        let temp = TempProject::new(name);
+        let index =
+            open_machine_index(&temp.root.join(MACHINE_DB), now()).expect("the index opens");
+        (temp, index)
+    }
+
+    #[test]
+    fn reports_services_per_project() {
+        let (_temp, index) = open_seeded("reports-services-per-project");
+        let c = &index.connection;
+        seed_project(c, "/home/me/shop", true);
+        seed_session_at(
+            c,
+            "s1",
+            "owner",
+            Some("/home/me/shop"),
+            "2026-10-12T09:00:00.000Z",
+        );
+        seed_reply(c, "r1", "s1", 1);
+        seed_reply(c, "r2", "s1", 1);
+        seed_call(
+            c,
+            "t1",
+            "r1",
+            "mcp__github__do",
+            false,
+            "2026-10-12T09:00:00.000Z",
+        );
+        seed_call(
+            c,
+            "t2",
+            "r2",
+            "mcp__claude_ai_Zoho_Books__do",
+            false,
+            "2026-10-12T09:01:00.000Z",
+        );
+        seed_server(c, "claude_code", "stripe");
+        let found = index.found_services().expect("services");
+        let uses: Vec<(&str, u64)> = found.by_root["/home/me/shop"]
+            .iter()
+            .map(|u| (u.name.as_str(), u.calls))
+            .collect();
+        assert_eq!(uses, [("GitHub", 1), ("Zoho Books", 1)]);
+        let names: Vec<&str> = found.services.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Zoho Books", "Stripe", "GitHub"]);
+    }
+
+    #[test]
+    fn forms_a_project_and_leaves_the_rest_not_in_a_project() {
+        let (_temp, index) = open_seeded("forms-a-project");
+        let c = &index.connection;
+        seed_session_at(c, "h1", "not_a_project", None, "2026-10-12T09:30:00.000Z");
+        seed_session_at(c, "h2", "not_a_project", None, "2026-10-12T10:00:00.000Z");
+        for (i, at) in ["09:10", "09:20", "09:30"].iter().enumerate() {
+            seed_reply(c, &format!("r{i}"), "h1", 1);
+            seed_call(
+                c,
+                &format!("t{i}"),
+                &format!("r{i}"),
+                "mcp__claude_ai_Zoho_Books__do",
+                false,
+                &format!("2026-10-12T{at}:00.000Z"),
+            );
+        }
+        seed_reply(c, "r9", "h2", 5);
+        let found = index.found_services().expect("services");
+        assert_eq!(found.formed.len(), 1);
+        let formed = &found.formed[0];
+        assert_eq!(formed.name, "Bookkeeping (Zoho Books)");
+        assert_eq!(
+            formed.last_at,
+            Utc.with_ymd_and_hms(2026, 10, 12, 9, 30, 0)
+                .single()
+                .expect("a time")
+        );
+        assert_eq!(formed.activity.sessions, 1);
+        assert_eq!(formed.activity.tokens["m"].input_tokens, 3);
+        assert_eq!(formed.activity.tokens["m"].output_tokens, 3);
+        assert_eq!(
+            (formed.services[0].name.as_str(), formed.services[0].calls),
+            ("Zoho Books", 3)
+        );
+        assert_eq!(found.not_a_project.sessions, 1);
+        assert_eq!(found.not_a_project.tokens["m"].input_tokens, 5);
+    }
+
+    #[test]
+    fn leaves_catervas_sessions_out_of_services() {
+        let (_temp, index) = open_seeded("leaves-catervas-out");
+        let c = &index.connection;
+        seed_project(c, "/home/me/shop", true);
+        seed_session_at(
+            c,
+            "s1",
+            "catervas",
+            Some("/home/me/shop"),
+            "2026-10-12T09:00:00.000Z",
+        );
+        seed_reply(c, "r1", "s1", 1);
+        seed_call(
+            c,
+            "t1",
+            "r1",
+            "mcp__claude_ai_Zoho_Books__do",
+            false,
+            "2026-10-12T09:00:00.000Z",
+        );
+        let found = index.found_services().expect("services");
+        assert!(found.services.is_empty());
+        assert!(found.by_root.is_empty());
+    }
+
+    #[test]
+    fn tells_a_folder_of_spreadsheets() {
+        let (_temp, index) = open_seeded("tells-a-folder-of-spreadsheets");
+        let c = &index.connection;
+        seed_project(c, "/home/me/books", false);
+        seed_project(c, "/home/me/app", true);
+        seed_session_at(
+            c,
+            "b",
+            "owner",
+            Some("/home/me/books"),
+            "2026-10-12T09:00:00.000Z",
+        );
+        seed_session_at(
+            c,
+            "a",
+            "owner",
+            Some("/home/me/app"),
+            "2026-10-12T09:00:00.000Z",
+        );
+        seed_reply(c, "rb", "b", 1);
+        seed_reply(c, "ra", "a", 1);
+        let sheets = |count: usize, reply: &str, prefix: &str| {
+            for i in 0..count {
+                seed_call(
+                    c,
+                    &format!("{prefix}{i}"),
+                    reply,
+                    "Read",
+                    true,
+                    "2026-10-12T09:00:00.000Z",
+                );
+            }
+        };
+        sheets(3, "rb", "b");
+        sheets(5, "ra", "a");
+        let found = index.found_services().expect("services");
+        assert_eq!(
+            found.bookkeeping_roots,
+            BTreeSet::from(["/home/me/books".to_string()])
+        );
+        c.execute("DELETE FROM tool_calls WHERE tool_use_id = 'b0'", [])
+            .expect("one call fewer");
+        assert!(
+            index
+                .found_services()
+                .expect("services")
+                .bookkeeping_roots
+                .is_empty()
+        );
     }
 
     #[test]

@@ -274,7 +274,7 @@ Files: `machine.rs` (`found_services`: owner, gone and not-a-project sessions wi
 - `leaves_catervas_sessions_out_of_services`: a `catervas` session under `shop` calling Zoho gives no service and no `by_root` entry. RED.
 - `tells_a_folder_of_spreadsheets`: present root `/home/me/books`, `is_git` 0, owner session with three spreadsheet calls: `bookkeeping_roots` is `{books}`; with two, empty; a git root with five, empty. RED.
 
-- [ ] `feat(store): report services and connector projects from the machine index`
+- [x] `feat(store): report services and connector projects from the machine index`
 
 ### Task 8: `catervas discover` prints the services
 
