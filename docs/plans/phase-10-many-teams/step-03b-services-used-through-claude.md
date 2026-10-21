@@ -225,7 +225,7 @@ Files: `claude_services/catalog.rs`.
 - `matches_by_host_then_name_then_program`: name `github` with host `mcp.stripe.com` is `stripe`; name `my-books` with program `quickbooks-mcp.exe` is `quickbooks`; host `notstripe.com` alone matches none. RED.
 - `leaves_out_catervas_and_claude_codes_own_servers`: `is_a_service` is false for each of `NOT_SERVICES`, for `Catervas`, `FARIK` and `farik-mcp`, true for `zoho-books`. RED.
 
-- [ ] `feat(core): sort the services used through claude by a catalog`
+- [x] `feat(core): sort the services used through claude by a catalog`
 
 ### Task 4: One record per service, and projects from connector work
 

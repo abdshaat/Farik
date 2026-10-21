@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value;
 use url::Url;
 
+pub use catalog::{NOT_SERVICES, is_a_service};
+
 /// How a configured server is reached.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ServerKind {
@@ -267,6 +269,8 @@ pub fn called_server(segment: &str) -> Option<(String, ServerOrigin)> {
     Some((segment.to_string(), ServerOrigin::Settings))
 }
 
+/// The catalog that sorts a connector into a kind of service.
+pub mod catalog;
 /// Settings files full of made-up keys, for tests.
 pub mod fixtures;
 
