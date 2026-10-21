@@ -170,8 +170,23 @@ pub(super) async fn tick(
     let in_scope = in_scope(scope, &busy);
     let runs = |rule: u8| rule_runs(scope.rules, rule);
     let mut waiting = Waiting::default();
+    // Under autopilot a task the team flagged for the owner stays where it is, whatever status it
+    // is in (ADR 0082 decision 4); turned off, a standing flag holds nothing.
+    let held: BTreeSet<TaskId> = if catervas_store::autopilot::autopilot_on(&deps.tools.log)? {
+        catervas_store::autopilot::flags(&deps.tools.log)?
+            .into_iter()
+            .filter_map(|flag| flag.task_id)
+            .collect()
+    } else {
+        BTreeSet::new()
+    };
     // The tasks each agent may work: those past its limit are "returning", and wait for a hand-over.
-    let within = transitions::within_limit(&team, &board);
+    let within = transitions::within_limit_or_idle(
+        &team,
+        &board,
+        catervas_store::autopilot::autopilot_on(&deps.tools.log)?,
+        |agent| deps.work.is_busy(agent),
+    );
     if let Some(report) = chat(deps, scope, &team, &mut waiting).await? {
         return Ok(report);
     }
@@ -215,8 +230,15 @@ pub(super) async fn tick(
     if let Some(report) = budget_and_channel(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
+    // While autopilot is on, the team answers its own questions and takes the owner's decisions
+    // before any other work is picked (ADR 0082).
+    if let Some(report) =
+        super::autopilot::autopilot_rule(deps, scope, &team, &board, &mut waiting).await?
+    {
+        return Ok(report);
+    }
     if runs(3) {
-        for row in waiting_on_nobody(&board, TaskStatus::Rejected)
+        for row in waiting_on_nobody(&board, TaskStatus::Rejected, &held)
             .filter(in_scope)
             .filter(|row| within.contains(&row.task_id))
         {
@@ -226,14 +248,14 @@ pub(super) async fn tick(
         }
     }
     if runs(4) {
-        for row in waiting_on_nobody(&board, TaskStatus::Blocked).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Blocked, &held).filter(in_scope) {
             if let Some(report) = blocked(deps, &team, row)? {
                 return Ok(report);
             }
         }
     }
     if runs(5) {
-        for row in waiting_on_nobody(&board, TaskStatus::Verifying).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Verifying, &held).filter(in_scope) {
             if let Some(report) = verifying(orchestrator, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
@@ -248,7 +270,7 @@ pub(super) async fn tick(
     // implement session.
     let epics_only = scope.rules == TickRules::Planning;
     if runs(6) || epics_only {
-        for row in waiting_on_nobody(&board, TaskStatus::InProgress)
+        for row in waiting_on_nobody(&board, TaskStatus::InProgress, &held)
             .filter(in_scope)
             .filter(|row| within.contains(&row.task_id))
             .filter(|row| !epics_only || requests::is_epic(row))
@@ -259,7 +281,7 @@ pub(super) async fn tick(
         }
     }
     if runs(7) {
-        for row in waiting_on_nobody(&board, TaskStatus::Assigned)
+        for row in waiting_on_nobody(&board, TaskStatus::Assigned, &held)
             .filter(in_scope)
             .filter(|row| within.contains(&row.task_id))
         {
@@ -271,7 +293,7 @@ pub(super) async fn tick(
     // A task whose dependency was cancelled goes back to the Product Manager (ADR 0079), before
     // the plan of a ready task is asked for.
     if scope.rules == TickRules::All {
-        for row in waiting_on_nobody(&board, TaskStatus::Ready).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Ready, &held).filter(in_scope) {
             if let Some(report) = dependency_cancelled(deps, &team, &board, row)? {
                 return Ok(report);
             }
@@ -279,7 +301,7 @@ pub(super) async fn tick(
     }
     if runs(8) {
         // The tasks given in a chat go first (ADR 0063): next in their agent's queue.
-        let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready)
+        let (given, others): (Vec<_>, Vec<_>) = waiting_on_nobody(&board, TaskStatus::Ready, &held)
             .filter(in_scope)
             .partition(|row| {
                 catervas_store::requests::given_to(&deps.tools.log, &row.task_id)
@@ -299,14 +321,14 @@ pub(super) async fn tick(
         }
     }
     if runs(9) {
-        for row in waiting_on_nobody(&board, TaskStatus::Refining).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Refining, &held).filter(in_scope) {
             if let Some(report) = requests::refining(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
         }
     }
     if runs(10) {
-        for row in waiting_on_nobody(&board, TaskStatus::Draft).filter(in_scope) {
+        for row in waiting_on_nobody(&board, TaskStatus::Draft, &held).filter(in_scope) {
             if let Some(report) = requests::draft(deps, &team, row, &mut waiting).await? {
                 return Ok(report);
             }
@@ -1170,7 +1192,12 @@ fn aged(
     scope: &TickScope,
     team: &Team,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if scope.rules != TickRules::All || scope.task_id.is_some() {
+    // An escalation the team decides is not waiting on the owner, so it grows no older in the
+    // owner's sight (ADR 0082).
+    if scope.rules != TickRules::All
+        || scope.task_id.is_some()
+        || catervas_store::autopilot::team_decides(&deps.tools.log, team)?
+    {
         return Ok(None);
     }
     let already_aged: Vec<u64> = deps
@@ -1243,14 +1270,15 @@ fn rule_runs(rules: TickRules, rule: u8) -> bool {
 }
 
 /// The tasks in `status`, in the board's order, but those waiting on the human's answer to a
-/// question, which rules 3 to 10 pass over.
-fn waiting_on_nobody(
-    board: &[TaskProjection],
+/// question and those the team flagged for the owner (`held`), which rules 3 to 10 pass over.
+fn waiting_on_nobody<'a>(
+    board: &'a [TaskProjection],
     status: TaskStatus,
-) -> impl Iterator<Item = &TaskProjection> {
-    board
-        .iter()
-        .filter(move |row| row.status == status && !row.waiting_on_human)
+    held: &'a BTreeSet<TaskId>,
+) -> impl Iterator<Item = &'a TaskProjection> {
+    board.iter().filter(move |row| {
+        row.status == status && !row.waiting_on_human && !held.contains(&row.task_id)
+    })
 }
 
 /// Rule 3: a task `rejected` goes back to `in_progress` for its next iteration, or, when the
@@ -2078,7 +2106,8 @@ async fn ready(
     }
     // The tasks of a lane go to one builder, who waits for room rather than give them away.
     let lane_builder = transitions::lane_builder(&deps.tools.files, team, board, row, &contract)?;
-    let with_room = |role: Role| -> Vec<String> {
+    let autopilot = catervas_store::autopilot::autopilot_on(&deps.tools.log)?;
+    let with_room = |role: Role, past_limit: bool| -> Vec<String> {
         team.active_agents()
             .filter(|agent| Role::from(agent.role) == role)
             .filter(|agent| {
@@ -2086,15 +2115,18 @@ async fn ready(
                     .as_deref()
                     .is_none_or(|builder| agent.id.as_str() == builder)
             })
-            .filter(|agent| has_room(team, board, agent, row.parent.as_ref()))
+            .filter(|agent| {
+                has_room(team, board, agent, row.parent.as_ref())
+                    || (past_limit && autopilot && idle_past_limit(deps, team, agent))
+            })
             .map(|agent| agent.id.to_string())
             .collect()
     };
     // The Architect builds a Developer's task only when no Developer has room (ADR 0077).
-    let mut assignees = with_room(contract.assignee_role);
+    let mut assignees = with_room(contract.assignee_role, true);
     let mut architect_builds = false;
     if assignees.is_empty() && may_build(Role::Architect, contract.assignee_role) {
-        assignees = with_room(Role::Architect);
+        assignees = with_room(Role::Architect, false);
         architect_builds = true;
     }
     let Some(first) = assignees.first() else {
@@ -2161,7 +2193,9 @@ fn ready_given(
     agent: &Agent,
     waiting: &mut Waiting,
 ) -> Result<Option<TickReport>, OrchestratorError> {
-    if !has_room(team, board, agent, None)
+    if !(has_room(team, board, agent, None)
+        || (catervas_store::autopilot::autopilot_on(&deps.tools.log)?
+            && idle_past_limit(deps, team, agent)))
         || refused_since_entering(deps, &row.task_id, TaskStatus::Ready, TaskStatus::Assigned)?
     {
         return Ok(None);
@@ -2242,6 +2276,12 @@ pub(super) fn has_room(
 ) -> bool {
     u64::from(transitions::open_tasks(board, agent.id.as_str(), under))
         < u64::try_from(team.policy.wip_limit_per_agent).unwrap_or(0)
+}
+
+/// Whether `agent` may be given work past the team's limit under autopilot: it has no session
+/// running, and the limit is not zero, which still stops new work (ADR 0082 decision 8).
+fn idle_past_limit(deps: &OrchestratorDeps, team: &Team, agent: &Agent) -> bool {
+    team.policy.wip_limit_per_agent > 0 && !deps.work.is_busy(agent.id.as_str())
 }
 
 /// Whether the governor would let `candidate` be assigned the task on the rules the orchestrator
@@ -2334,6 +2374,9 @@ pub(super) fn ran(agent: &Agent, purpose: &str, end: &SessionEnd) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::transitions::{TransitionAsk, TransitionOutcome};
+    use catervas_core::governor::transition::TransitionRequest;
+    use catervas_core::governor::transition_table::TransitionActor;
     use std::collections::BTreeSet;
     use std::num::NonZeroU64;
     use std::sync::Arc;
@@ -2364,12 +2407,13 @@ mod tests {
         waits_for,
     };
     use crate::orchestrator::{OrchestratorError, TickReport, TickRules, TickScope};
+    use crate::prompt::{AUTOPILOT_ASK, AUTOPILOT_DECIDE};
     use crate::recorded::fixtures::{
-        accept_ctv_1, chat_answers_with_a_request, credential_refused, hits_the_turn_limit,
-        implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1, plan_assigns_ctv_2,
-        provider_limit_429, provider_limit_rejected, reads_a_file, replays_catervas_read_board,
-        reply_to_a_mention, retro, review, review_answers_nothing, review_writes_note,
-        success_with_is_error,
+        accept_ctv_1, chat_answers_with_a_request, credential_refused, ends_without_a_decision,
+        hits_the_turn_limit, implement_finishes_ctv_1, implement_stops_early, plan_assigns_ctv_1,
+        plan_assigns_ctv_2, provider_limit_429, provider_limit_rejected, reads_a_file,
+        replays_catervas_read_board, reply_to_a_mention, retro, review, review_answers_nothing,
+        review_writes_note, success_with_is_error,
     };
     use crate::recorded::{RecordedAdapter, Transcript};
     use crate::session::SessionPurpose;
@@ -6881,6 +6925,12 @@ mod tests {
                     "catervas_record_design_review",
                     "catervas_chat_reply",
                     "catervas_take_task",
+                    // Asked of the team only while autopilot is on, and answered in a decide
+                    // session.
+                    "catervas_ask_team",
+                    "catervas_answer_question",
+                    "catervas_decide",
+                    "catervas_decide_data_pipeline",
                     "catervas_read_costs",
                     "catervas_write_sheet",
                     "catervas_write_evaluation",
@@ -7041,6 +7091,103 @@ mod tests {
     /// The Catervas tools a session was given, in no order.
     fn tools_of(spec: &crate::session::SessionSpec) -> BTreeSet<&str> {
         spec.catervas_tools.iter().map(String::as_str).collect()
+    }
+
+    /// Autopilot on or off in `harness`'s log, as the owner's switch would leave it.
+    fn autopilot(harness: &Harness, on: bool) {
+        harness
+            .project
+            .record("", "autopilot.changed", &json!({ "on": on }));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_task_flagged_under_autopilot_gets_no_session_until_the_owner_acts() {
+        let harness = Harness::new("orch-autopilot-flagged", |_| {});
+        autopilot(&harness, true);
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        harness.project.record(
+            "CTV-1",
+            "task.flagged",
+            &json!({ "needs": "dev-a kept calling search", "flagged_by": "catervas" }),
+        );
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        for _ in 0..2 {
+            orchestrator.tick().await.expect("the tick runs");
+        }
+
+        assert!(adapter.started().is_empty(), "{:?}", adapter.started());
+
+        // Turned off, a standing flag holds nothing: the task runs as it does now.
+        autopilot(&harness, false);
+        orchestrator.tick().await.expect("the tick runs");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0].purpose, SessionPurpose::Implement);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn offers_the_team_and_not_the_owner_under_autopilot() {
+        // The Developer's implement session, then the Product Manager's refine session, with
+        // autopilot on and off.
+        let rules_end = |spec: &crate::session::SessionSpec| {
+            spec.system_prompt
+                .split("## Team rules")
+                .nth(1)
+                .and_then(|rest| rest.split("\n## ").next())
+                .expect("a Team rules section")
+                .trim_end()
+                .to_string()
+        };
+        for on in [true, false] {
+            let harness = Harness::new(&format!("orch-autopilot-dev-{on}"), |_| {});
+            autopilot(&harness, on);
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
+            let adapter = harness.recorded(vec![implement_stops_early()]);
+            harness
+                .orchestrator(adapter.clone())
+                .tick()
+                .await
+                .expect("the tick runs");
+            let started = adapter.started();
+            let developer = &started[0];
+            assert_eq!(developer.purpose, SessionPurpose::Implement);
+            if on {
+                assert!(tools_of(developer).contains("catervas_ask_team"));
+                assert!(!tools_of(developer).contains("catervas_ask_human"));
+                assert!(rules_end(developer).ends_with(AUTOPILOT_ASK));
+            } else {
+                assert!(tools_of(developer).contains("catervas_ask_human"));
+                assert!(!tools_of(developer).contains("catervas_ask_team"));
+                assert!(!developer.system_prompt.contains(AUTOPILOT_ASK));
+                assert!(!developer.system_prompt.contains(AUTOPILOT_DECIDE));
+            }
+
+            let harness = Harness::new(&format!("orch-autopilot-pm-{on}"), |_| {});
+            autopilot(&harness, on);
+            harness.a_request("Add done.txt");
+            triaged_small(&harness, "CTV-1");
+            let adapter = harness.recorded(vec![ends_without_a_decision()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            for _ in 0..2 {
+                orchestrator.tick().await.expect("the tick runs");
+            }
+            let started = adapter.started();
+            let manager = &started[0];
+            assert_eq!(manager.purpose, SessionPurpose::Refine);
+            assert!(!tools_of(manager).contains("catervas_ask_team"));
+            if on {
+                assert!(!tools_of(manager).contains("catervas_ask_human"));
+                assert!(rules_end(manager).ends_with(AUTOPILOT_DECIDE));
+            } else {
+                assert!(tools_of(manager).contains("catervas_ask_human"));
+                assert!(!manager.system_prompt.contains(AUTOPILOT_ASK));
+                assert!(!manager.system_prompt.contains(AUTOPILOT_DECIDE));
+            }
+        }
     }
 
     /// The Catervas tools the standup and the review are given.
@@ -7365,6 +7512,102 @@ mod tests {
             "{}",
             started[0].initial_prompt
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn an_idle_agent_takes_a_ready_task_of_its_role_past_its_limit_under_autopilot() {
+        let one_developer = |wire: &mut serde_json::Value| {
+            with_a_scrum_master(wire);
+            wire["policy"]["wip_limit_per_agent"] = json!(1);
+            wire["agents"]
+                .as_array_mut()
+                .expect("a list of agents")
+                .retain(|agent| agent["id"] != "dev-b");
+        };
+        // Per case: autopilot on, the developer busy; the Planning tick's session, if any.
+        for (name, on, busy, planned) in [
+            ("orch-idle-past-limit", true, false, true),
+            ("orch-idle-past-limit-off", false, false, false),
+            ("orch-idle-past-limit-busy", true, true, false),
+        ] {
+            let harness = Harness::new(name, one_developer);
+            harness.in_progress("CTV-1", "dev-a", "pm");
+            harness.file("CTV-2", "ready", |wire| {
+                wire["reviewer_role"] = json!("product_manager");
+            });
+            // A ready task of a role nobody on the team holds is never offered to dev-a.
+            harness.file("CTV-3", "ready", |wire| {
+                wire["assignee_role"] = json!("architect");
+            });
+            autopilot(&harness, on);
+            let adapter = harness.recorded(vec![reads_a_file()]);
+            let orchestrator = harness.orchestrator(adapter.clone());
+            let claim = busy.then(|| {
+                orchestrator
+                    .deps
+                    .work
+                    .claim(
+                        "dev-a",
+                        Some(&"CTV-1".parse().expect("a task id")),
+                        SessionPurpose::Implement,
+                    )
+                    .expect("the claim is held")
+            });
+            orchestrator
+                .tick_within(&TickScope {
+                    rules: TickRules::Planning,
+                    ..TickScope::default()
+                })
+                .await
+                .expect("the tick runs");
+
+            let started = adapter.started();
+            assert_eq!(started.len(), usize::from(planned), "{name}: {started:?}");
+            if planned {
+                assert_eq!(
+                    (started[0].agent_id.as_str(), started[0].purpose),
+                    ("sm", SessionPurpose::Plan),
+                    "{name}"
+                );
+                assert!(
+                    started[0].initial_prompt.contains("CTV-2")
+                        && started[0]
+                            .initial_prompt
+                            .contains("with room for it: dev-a."),
+                    "{name}: {}",
+                    started[0].initial_prompt
+                );
+            }
+            // The governor agrees: dev-a may be assigned CTV-2 only while autopilot is on and
+            // it has no session running.
+            let request = TransitionRequest {
+                task_id: "CTV-2".parse().expect("a task id"),
+                to: TaskStatus::Assigned,
+                actor: TransitionActor::ScrumMaster,
+                agent_id: Some("sm".to_string()),
+            };
+            let outcome = harness
+                .project
+                .deps
+                .transitions
+                .request(
+                    &request,
+                    &TransitionAsk {
+                        assignee_id: Some("dev-a".to_string()),
+                        reviewer_id: Some("pm".to_string()),
+                        ..TransitionAsk::default()
+                    },
+                    &harness.project.deps.files.read_team().expect("the team"),
+                )
+                .expect("the request is judged");
+            drop(claim);
+            assert_eq!(
+                matches!(outcome, TransitionOutcome::Moved(_)),
+                planned,
+                "{name}: {outcome:?}"
+            );
+        }
     }
 
     #[tokio::test]

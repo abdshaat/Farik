@@ -35,6 +35,7 @@ mod chat;
 mod connections;
 pub(crate) mod contracts;
 mod costs;
+mod decide;
 pub(crate) mod design;
 mod evaluation;
 mod exec;
@@ -46,7 +47,7 @@ mod goals;
 mod marketing;
 pub(crate) mod media;
 mod memory;
-mod pipeline;
+pub(crate) mod pipeline;
 mod posts;
 mod purchase_order;
 mod reading;
@@ -255,6 +256,11 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             Read,
             "Ask the human a question; end your turn after asking.",
         ),
+        tool::<work::AskTeamInput>(
+            "catervas_ask_team",
+            Read,
+            "While autopilot is on, ask the team instead of the owner: `about` is `product` for what the product should do and `technical` for how to build it. End your turn after asking; the answer starts your next session.",
+        ),
         tool::<connections::RequestConnectionInput>(
             "catervas_request_connection",
             Read,
@@ -269,6 +275,21 @@ static TOOLS: LazyLock<Vec<CatervasTool>> = LazyLock::new(|| {
             "catervas_record_goal_progress",
             Read,
             "Record the goal's number as you read it from its service, with a short note on what you counted.",
+        ),
+        tool::<decide::AnswerQuestionInput>(
+            "catervas_answer_question",
+            Read,
+            "Autopilot: answer a question an agent put to the team, as the owner would. Decide, and say why in the answer.",
+        ),
+        tool::<decide::DecidePipelineInput>(
+            "catervas_decide_data_pipeline",
+            Read,
+            "Autopilot: approve or decline a data source the Procurement Specialist asked for and the owner would decide, with your reason. An approval files the request that sets it up.",
+        ),
+        tool::<decide::DecideInput>(
+            "catervas_decide",
+            Read,
+            "Autopilot: decide what waits on the owner, with one of the choices the first message offers and your reason; or flag what only the owner can give. Name the task, or the folder change.",
         ),
         tool::<bugs::FileBugInput>(
             "catervas_file_bug",
@@ -521,9 +542,13 @@ pub async fn call_tool(
         "catervas_record_criterion_result" => work::record_criterion(&call, parse(input)?),
         "catervas_write_note" => work::write_note(&call, parse(input)?),
         "catervas_ask_human" => work::ask_human(&call, parse(input)?),
+        "catervas_ask_team" => work::ask_team(&call, &parse(input)?),
         "catervas_request_connection" => connections::request_connection(&call, &parse(input)?),
         "catervas_file_goal_work" => goals::file_goal_work(&call, &parse(input)?),
         "catervas_record_goal_progress" => goals::record_goal_progress(&call, &parse(input)?),
+        "catervas_answer_question" => decide::answer_question(&call, &parse(input)?),
+        "catervas_decide" => decide::decide(&call, &parse(input)?),
+        "catervas_decide_data_pipeline" => decide::decide_data_pipeline(&call, &parse(input)?),
         "catervas_file_bug" => bugs::file_bug(&call, &parse(input)?),
         "catervas_write_folder_doc" => folders::write_folder_doc(&call, &parse(input)?),
         "catervas_post_message" => channel::post_message(&call, parse(input)?),
@@ -897,9 +922,13 @@ mod tests {
             "catervas_record_criterion_result",
             "catervas_write_note",
             "catervas_ask_human",
+            "catervas_ask_team",
             "catervas_request_connection",
             "catervas_file_goal_work",
             "catervas_record_goal_progress",
+            "catervas_answer_question",
+            "catervas_decide_data_pipeline",
+            "catervas_decide",
             "catervas_file_bug",
             "catervas_write_folder_doc",
             "catervas_post_message",
@@ -949,7 +978,7 @@ mod tests {
             tier("catervas_propose_marketing_plan"),
             Some(PermissionTier::WriteWorkspace)
         );
-        for tool in &tools[..37] {
+        for tool in &tools[..41] {
             assert_eq!(tool.tier, PermissionTier::Read, "{}", tool.name);
         }
         for tool in &tools {

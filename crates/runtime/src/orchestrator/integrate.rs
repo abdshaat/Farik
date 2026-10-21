@@ -22,9 +22,9 @@ use catervas_protocol::event::{
     PullRequestRefreshedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
 };
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
+use catervas_store::autopilot::merges_on_its_own;
 use catervas_store::files::FilesError;
 use catervas_store::folder_docs::{FolderChange, folder_docs};
-use catervas_store::merging::merging_allowed;
 use catervas_store::repos::{TaskRepositoryError, task_repository};
 use catervas_store::waiting::name_of;
 use catervas_store::{
@@ -657,7 +657,7 @@ fn through_the_forge(
             ..
         } => {
             // Only Catervas's own tick merges, and only as ADR 0073 allows.
-            if asker == Asker::Tick && merging_allowed(&tools.log, team)? {
+            if asker == Asker::Tick && merges_on_its_own(&tools.log, team)? {
                 let open = OpenPullRequest {
                     merge_state,
                     head,
@@ -1453,14 +1453,23 @@ fn escalated_since_accepted(
 ) -> Result<bool, OrchestratorError> {
     match subject {
         Subject::Task(task_id) => {
-            Ok(
-                since_accepted(tools, task_id, &[EventKind::EscalationRaised])?
-                    .iter()
-                    .any(|event| {
-                        matches!(&event.body, EventBody::EscalationRaised(body)
+            // The team's `reopen_integration` after the last integration escalation lets the
+            // tick try again (ADR 0082).
+            let events = since_accepted(
+                tools,
+                task_id,
+                &[EventKind::EscalationRaised, EventKind::TeamDecided],
+            )?;
+            let escalated = events.iter().rposition(|event| {
+                matches!(&event.body, EventBody::EscalationRaised(body)
                     if body.reason == EscalationRaisedBodyReason::Integration)
-                    }),
-            )
+            });
+            Ok(escalated.is_some_and(|at| {
+                !events[at..].iter().any(|event| {
+                    matches!(&event.body, EventBody::TeamDecided(body)
+                        if body.choice.to_string() == "reopen_integration")
+                })
+            }))
         }
         Subject::FolderChange(change) => Ok(folder_change(tools, *change)?.escalated),
     }
@@ -3061,6 +3070,101 @@ mod tests {
             assert_eq!(at_root(&harness, &["rev-parse", "main"]), sha, "{name}");
             let _ = std::fs::remove_dir_all(&origin);
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    #[allow(clippy::too_many_lines, reason = "one story, step by step")]
+    async fn merges_under_autopilot_and_tries_again_after_a_reopen() {
+        let autopilot = |harness: &Harness| {
+            harness
+                .project
+                .record("", "autopilot.changed", &json!({ "on": true }));
+        };
+        // No `merge_when_checks_pass` and no grant: autopilot alone merges a pull request whose
+        // checks passed.
+        let (harness, origin) = merging("int-autopilot-merges", "pull_request", false, false);
+        autopilot(&harness);
+        let sha = harness.merge_on_the_forge(&origin, "CTV-1");
+        harness
+            .gh
+            .answers_on_call("view", 1, &viewed_open("CLEAN", PASSED))
+            .answers_on_call(
+                "view",
+                2,
+                &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
+            );
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(merges(&harness).len(), 1);
+        let kinds: Vec<EventKind> = harness
+            .events(&[EventKind::PullRequestMerged, EventKind::TaskIntegrated])
+            .iter()
+            .map(|event| event.body.kind())
+            .collect();
+        assert_eq!(
+            kinds,
+            [EventKind::PullRequestMerged, EventKind::TaskIntegrated]
+        );
+        assert_eq!(
+            integrations(&harness)[0].integrated_by,
+            TaskIntegratedBodyIntegratedBy::Governor
+        );
+        let _ = std::fs::remove_dir_all(&origin);
+
+        // A failed check is never merged over: it escalates, and the next tick leaves it.
+        let failed = r#"[{"__typename":"CheckRun","name":"lint","status":"COMPLETED","conclusion":"FAILURE"}]"#;
+        let (harness, origin) = merging("int-autopilot-failed", "pull_request", false, false);
+        autopilot(&harness);
+        harness
+            .gh
+            .answers("view", &viewed_open("UNSTABLE", failed), "", 0);
+        // The Product Manager is asked about the escalation and decides nothing.
+        let orchestrator = harness.orchestrator(harness.recorded(vec![
+            crate::recorded::fixtures::tool_calls(&[]),
+            crate::recorded::fixtures::tool_calls(&[]),
+            crate::recorded::fixtures::tool_calls(&[]),
+        ]));
+        orchestrator.tick().await.expect("the tick runs");
+        assert!(merges(&harness).is_empty());
+        assert_eq!(escalations(&harness).len(), 1);
+        let calls = harness.gh.calls().len();
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(harness.gh.calls().len(), calls, "left alone");
+
+        // After the team reopens it, with checks that now pass, the next tick merges it.
+        let sha = harness.merge_on_the_forge(&origin, "CTV-1");
+        harness
+            .gh
+            .answers_on_call("view", 2, &viewed_open("CLEAN", PASSED))
+            .answers_on_call(
+                "view",
+                3,
+                &format!(r#"{{"state":"MERGED","mergeCommit":{{"oid":"{sha}"}}}}"#),
+            );
+        harness.project.record_by(
+            Some("pm"),
+            harness.project.deps.clock.now(),
+            "CTV-1",
+            "team.decided",
+            &json!({ "choice": "reopen_integration", "reason": "The lint is fixed.",
+                     "decided_by": "pm" }),
+        );
+        orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(merges(&harness).len(), 1);
+        assert_eq!(integrations(&harness).len(), 1);
+        let _ = std::fs::remove_dir_all(&origin);
+
+        // Off, the first pull request waits for the owner.
+        let (harness, origin) = merging("int-autopilot-off", "pull_request", false, false);
+        harness
+            .gh
+            .answers("view", &viewed_open("CLEAN", PASSED), "", 0);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+        assert!(merges(&harness).is_empty());
+        assert!(integrations(&harness).is_empty());
+        let _ = std::fs::remove_dir_all(&origin);
     }
 
     #[tokio::test]

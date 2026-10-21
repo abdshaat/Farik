@@ -1,6 +1,7 @@
 //! The first user message of each kind of session: what it is about, in words the agent reads
 //! before anything else.
 
+use catervas_core::autopilot::{DecideChoice, QuestionAbout};
 use catervas_core::branch::task_branch;
 use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus, Verification};
 use catervas_core::folders::{DocumentFormat, with_format};
@@ -422,22 +423,34 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
                 decision_block(history, event, body.approval.get(), agent_id)
             }
             _ if event.envelope.seq <= since => None,
+            // The team answered its own question (ADR 0082): the answer is an agent's words, as
+            // the question is.
+            EventBody::TeamQuestionAnswered(body) => {
+                let id = body.question_seq.get();
+                let question = asked_question(history, id);
+                Some(format!(
+                    "Question {id}, asked of the team:\n{}\nAnswer:\n{}",
+                    untrusted_block("question", &question, QUESTION_CAP_BYTES),
+                    untrusted_block("answer", &body.answer, NOTE_CAP_BYTES)
+                ))
+            }
             EventBody::QuestionAnswered(body) => {
                 let id = body.question_id.get();
-                let question = history
-                    .iter()
-                    .find(|asked| asked.envelope.seq == id)
-                    .and_then(|asked| match &asked.body {
-                        EventBody::QuestionAsked(asked) => Some(asked.question.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
+                let question = asked_question(history, id);
                 Some(format!(
                     "Question {id}:\n{}\nAnswer: {}",
                     untrusted_block("question", &question, QUESTION_CAP_BYTES),
                     body.answer
                 ))
             }
+            // The team's Product Manager decided in the owner's place (ADR 0082): its words are an
+            // agent's.
+            EventBody::EscalationResolved(body) if body.resolved_by != "human" => Some(format!(
+                "{} decided for the team, moving this to {}:\n{}",
+                body.resolved_by,
+                body.to,
+                untrusted_block("decision", &body.message, NOTE_CAP_BYTES)
+            )),
             EventBody::EscalationResolved(body) => Some(format!(
                 "The human, moving this to {}: {}",
                 body.to, body.message
@@ -483,6 +496,163 @@ pub(super) fn human_message(history: &[CatervasEvent], agent_id: &str) -> Option
     }
     told.extend(blocks);
     (!told.is_empty()).then(|| told.join("\n\n"))
+}
+
+/// The question asked at `seq`, the owner's or the team's, or nothing when the history has none.
+fn asked_question(history: &[CatervasEvent], seq: u64) -> String {
+    history
+        .iter()
+        .find(|asked| asked.envelope.seq == seq)
+        .and_then(|asked| match &asked.body {
+            EventBody::QuestionAsked(asked) => Some(asked.question.clone()),
+            EventBody::TeamQuestionAsked(asked) => Some(asked.question.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// The first message of the session in which `answerer` answers a question `asker` put to the team
+/// (ADR 0082 decision 2): the task's title and the question are the agents' words, so they are
+/// untrusted.
+pub(super) fn question_message(
+    answerer: &Agent,
+    asker: &str,
+    about: QuestionAbout,
+    task: &TaskContract,
+    seq: u64,
+    question: &str,
+) -> String {
+    format!(
+        "{answerer}, {asker} asked the team a {about} question about {id}.\n\nThe task's title:\n{title}\n\nThe question:\n{question}\n\nAnswer it with `catervas_answer_question` (question {seq}), as the owner would: decide, and say why in the answer.",
+        answerer = answerer.display_name.as_str(),
+        about = match about {
+            QuestionAbout::Product => "product",
+            QuestionAbout::Technical => "technical",
+        },
+        id = task.id.as_str(),
+        title = untrusted_block("title", &task.title.to_string(), NOTE_CAP_BYTES),
+        question = untrusted_block("question", question, QUESTION_CAP_BYTES),
+    )
+}
+
+/// The first message of the session in which the Product Manager decides what waits on the owner
+/// (ADR 0082 decision 3): the task, why it waits, the agents' words in untrusted blocks, what it
+/// has used, and the choices with what each does. `used` is its sessions, its sessions' limit and
+/// its dollars.
+pub(super) fn decide_message(
+    decider: &Agent,
+    contract: &TaskContract,
+    status: TaskStatus,
+    reason: &str,
+    detail: &str,
+    used: (u32, u32, f64),
+    offered: &[DecideChoice],
+) -> String {
+    let choices = offered
+        .iter()
+        .map(|choice| format!("- `{}`: {}", choice.wire(), choice.meaning()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{decider}, {id} waits on a decision the owner would make.\n\nThe task's title:\n{title}\n\nIt is {status}, and {why}. What it says:\n{detail}\n\nIt is on try {iteration}, and has used {sessions} of {most} sessions and ${spent:.2} of ${max_usd:.2}.\n\nYou may choose:\n{choices}\n\nDecide with `catervas_decide`.",
+        decider = decider.display_name.as_str(),
+        id = contract.id.as_str(),
+        title = untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
+        status = status,
+        why = catervas_store::waiting::reason_in_words(reason),
+        detail = untrusted_block("detail", detail, NOTE_CAP_BYTES),
+        iteration = contract.iteration,
+        sessions = used.0,
+        most = used.1,
+        spent = used.2,
+        max_usd = contract.budget.max_cost_usd,
+    )
+}
+
+/// The first message of the session in which the Product Manager decides whether to accept a
+/// result for the owner (ADR 0082 decision 11): the task, its criteria and the results recorded,
+/// the agents' words in untrusted blocks.
+pub(super) fn acceptance_message(
+    decider: &Agent,
+    contract: &TaskContract,
+    results: &str,
+    offered: &[DecideChoice],
+) -> String {
+    let criteria = contract
+        .exit_criteria
+        .iter()
+        .map(|criterion| format!("{}: {}", criterion.id.as_str(), criterion.text.as_str()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let said = if contract.kind == TaskKind::Epic {
+        "It is an epic, and its tasks are done."
+    } else {
+        "Its review passed."
+    };
+    let choices = offered
+        .iter()
+        .map(|choice| format!("- `{}`: {}", choice.wire(), choice.meaning()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{decider}, the result of {id} waits for the owner's acceptance. {said}\n\nThe task's title:\n{title}\n\nIts criteria:\n{criteria}\n\nThe results recorded:\n{results}\n\nYou may choose:\n{choices}\n\nAccept it with `catervas_decide` (`accept_result`) once you have read the work, or flag it.",
+        decider = decider.display_name.as_str(),
+        id = contract.id.as_str(),
+        title = untrusted_block("title", &contract.title.to_string(), NOTE_CAP_BYTES),
+        criteria = untrusted_block("criteria", &criteria, RESULTS_CAP_BYTES),
+        results = untrusted_block("results", results, RESULTS_CAP_BYTES),
+    )
+}
+
+/// The first message of the session in which the Product Manager decides a folder change whose
+/// integration failed (ADR 0082 decision 11): its documents, and what failed, an agent's or a
+/// tool's words.
+pub(super) fn folder_change_message(
+    decider: &Agent,
+    change: &catervas_store::folder_docs::FolderChange,
+    detail: &str,
+    offered: &[DecideChoice],
+) -> String {
+    let choices = offered
+        .iter()
+        .map(|choice| format!("- `{}`: {}", choice.wire(), choice.meaning()))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{decider}, adding the documents of folder change {n} to the project failed.\n\nIts documents:\n{paths}\n\nWhat failed:\n{detail}\n\nYou may choose:\n{choices}\n\nDecide with `catervas_decide` and `folder_change` {n}.",
+        decider = decider.display_name.as_str(),
+        n = change.change,
+        paths = untrusted_block("paths", &change.paths.join("\n"), NOTE_CAP_BYTES),
+        detail = untrusted_block("detail", detail, NOTE_CAP_BYTES),
+    )
+}
+
+/// The first message of the session in which the Product Manager decides a data source the
+/// Procurement Specialist asked for (ADR 0082 decision 5): everything the request says is the
+/// agent's, so it is untrusted, and so is the reason Catervas passed it on, which is its own.
+pub(super) fn pipeline_message(
+    decider: &Agent,
+    record: &catervas_store::pipelines::PipelineRecord,
+) -> String {
+    let asked = &record.requested;
+    let block = |name: &str, text: &str| untrusted_block(name, text, NOTE_CAP_BYTES);
+    let answer = |yes: bool| if yes { "yes" } else { "no" };
+    format!(
+        "{decider}, the Procurement Specialist asks for a data source, and it waits on a decision the owner would make.\n\nPipeline {number}: {name}\nWhat it gives:\n{what}\nIts page:\n{url}\nWhy it asks:\n{why}\nWhat it says it costs: {cost}. Needs an account: {account}. Sends the project's data out: {sends}.\n\nWhy it waits: {waits}\n\nApprove or decline it with `catervas_decide_data_pipeline` (pipeline {number}), weighing what it costs against what it would change; the daily limit still stops all spending.",
+        decider = decider.display_name.as_str(),
+        number = record.pipeline,
+        name = block("name", asked.name.as_str()),
+        what = block("what", asked.what.as_str()),
+        url = block("source_url", asked.source_url.as_str()),
+        why = block("why", asked.why.as_str()),
+        cost = asked.cost,
+        account = answer(asked.needs_account),
+        sends = answer(asked.sends_project_data),
+        waits = record
+            .escalated_reason
+            .as_deref()
+            .unwrap_or("it was passed on to the owner"),
+    )
 }
 
 /// The owner's answers to this task's blocks and escalations that came before `since`, the start of

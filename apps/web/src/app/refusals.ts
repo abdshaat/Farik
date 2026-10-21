@@ -8,6 +8,8 @@ export type Refusal = { path: string; message: string; code?: string };
 /** Each refusal code the daemon gives, and the words a person reads for it (SPEC 10, ADR 0016). */
 const WORDS: Record<string, keyof typeof en> = {
 	too_many: "refuseTooMany",
+	autopilot_unconfirmed: "refuseAutopilotUnconfirmed",
+	daily_limit_required: "refuseDailyLimitRequired",
 	needs_product_manager: "refuseNeedsProductManager",
 	repeated_id: "refuseRepeatedId",
 	worked: "refuseWorked",

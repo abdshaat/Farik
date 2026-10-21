@@ -16,6 +16,7 @@ use catervas_protocol::event::{
     EventBody, SellerMessageDiscardedBody, SellerMessageFailedBody, SellerMessagePurpose,
     SellerMessageSentBody,
 };
+use catervas_protocol::generated::event::SellerMessageSentBodySentBy;
 use catervas_store::StoreError;
 use catervas_store::seller_mail::{
     MessageState, SellerMail, SellerMessageRecord, seller_mail, sent_on,
@@ -124,6 +125,8 @@ pub(crate) struct Prepared {
     message_id: String,
     edited: bool,
     attachment: Option<(String, Vec<u8>)>,
+    /// Who sent it when Catervas did, under autopilot (ADR 0082 decision 6); `None` for the owner.
+    sent_by: Option<SellerMessageSentBodySentBy>,
 }
 
 impl Prepared {
@@ -334,6 +337,7 @@ pub(crate) fn prepare(
         message_id,
         edited,
         attachment,
+        sent_by: None,
     })
 }
 
@@ -390,6 +394,7 @@ pub(crate) fn record_sent(deps: &ToolDeps, prepared: &Prepared) -> Result<u64, M
             .map_err(mail_failed)?,
         sha256: hash.try_into().map_err(mail_failed)?,
         edited: prepared.edited,
+        sent_by: prepared.sent_by,
     };
     record_unattended(
         deps,
@@ -434,10 +439,10 @@ pub(crate) async fn send_message(
     deps: &ToolDeps,
     mailer: &Mailer<'_>,
     message: u64,
-    subject: &str,
-    body: &str,
+    (subject, body): (&str, &str),
+    sent_by: Option<SellerMessageSentBodySentBy>,
 ) -> Result<(u64, String), MailboxRefusal> {
-    let prepared = prepare(
+    let mut prepared = prepare(
         deps,
         mailer,
         SendAsk {
@@ -447,6 +452,7 @@ pub(crate) async fn send_message(
             order: None,
         },
     )?;
+    prepared.sent_by = sent_by;
     match transmit(&prepared).await {
         Ok(()) => record_sent(deps, &prepared).map(|seq| (seq, prepared.seller())),
         Err(error) => Err(record_failed(deps, &prepared, &error)),

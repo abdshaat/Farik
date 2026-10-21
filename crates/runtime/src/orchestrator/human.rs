@@ -5,7 +5,7 @@
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
-use catervas_core::contract::{Role, TaskContract, TaskId, TaskKind, TaskStatus};
+use catervas_core::contract::{Role, TaskId, TaskKind, TaskStatus};
 use catervas_core::folders::{agent_twin, folder_doc_author, folder_doc_message};
 use catervas_core::governor::gates::{Blocker, DesignerBrowser, Rejection};
 use catervas_core::governor::transition::TransitionRequest;
@@ -14,13 +14,11 @@ use catervas_core::marketing::parse_amount;
 use catervas_core::team::{Agent, AgentStatus, Team, custom_server, plain_role};
 use catervas_protocol::command::{AcceptSubject, Command, RequestSize, SkillScope};
 use catervas_protocol::event::{
-    AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineApprovedBody, DataPipelineDecidedBy,
-    DataPipelineDeclinedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventBody,
-    EventIds, EventKind, HumanAcceptedBody, HumanAcceptedBodySubject, MessageKind,
-    QuestionAnsweredBody, TaskRoomGrantedBody, new_event,
+    AgentUpdatedBody, ConnectorDisconnectedBody, DataPipelineDecidedBy, EscalationRaisedBodyReason,
+    EscalationResolvedBody, EventBody, EventIds, EventKind, HumanAcceptedBody,
+    HumanAcceptedBodySubject, MessageKind, QuestionAnsweredBody, TaskRoomGrantedBody, new_event,
 };
 use catervas_store::folder_docs::{ProposalState, folder_docs};
-use catervas_store::pipelines::{PipelineState, data_pipelines};
 use catervas_store::product_plan::{drafts_the_plan, new_project, product_plan_tasks};
 use catervas_store::purchase_orders::{OrderState, PurchaseOrderRecord, purchase_orders};
 use catervas_store::requests::{
@@ -31,7 +29,6 @@ use catervas_store::{EventQuery, TaskProjection};
 use serde_json::json;
 
 use super::requests::{HUMAN, product_manager};
-use super::verify::{governor_results, is_mechanical, since_verifying};
 
 use super::{CommandError, CommandReport, IntegrationOutcome, Orchestrator, OrchestratorError};
 use crate::catervafication::{self, Project};
@@ -43,8 +40,7 @@ use crate::marketing::{decide_plan, decide_post, end_plan, stop_post};
 use crate::pause::paused;
 use crate::procurement::{
     MailboxRefusal, Mailer, ORDERS, PIPELINES, check_follow_up, discard_message, dismiss_reply,
-    file_pipeline_request, order_is_sending, prepare, record_failed, record_sent, send_message,
-    transmit,
+    order_is_sending, prepare, record_failed, record_sent, send_message, transmit,
 };
 use crate::skills::{
     SkillCommandError, SkillLevel, confirm_skill, confirmed_sentence, remove_skill,
@@ -52,9 +48,11 @@ use crate::skills::{
 };
 use crate::tools::ToolDeps;
 use crate::tools::folders::{LandRefusal, land};
+use crate::tools::pipeline::{PipelineDecideError, decide_pipeline};
 use crate::transitions::{
-    TransitionAsk, TransitionOutcome, contract_accepted, last_move_into, refusal_details,
-    result_accepted, result_awaits_human, review_passed, status_wire,
+    TransitionAsk, TransitionOutcome, contract_accepted, last_move_into,
+    mechanical_criteria_passed, refusal_details, result_accepted, result_awaits_human,
+    review_passed, status_wire,
 };
 use catervas_core::governor::gates::return_from_block;
 
@@ -201,7 +199,7 @@ pub(super) async fn handle(
             } else {
                 None
             };
-            decide_plan(tools, &plan, approve, note)
+            decide_plan(tools, &plan, approve, note, None)
         }
         Command::MarketingPlanEnd { plan, note } => {
             let _writing = orchestrator.deps.daemon.ads_writes().lock().await;
@@ -854,7 +852,11 @@ fn answer_question(
         .ok_or_else(|| CommandError::NotFound {
             what: format!("question {question_id}"),
         })?;
-    if asked.body.kind() != EventKind::QuestionAsked {
+    // The team's own questions are the owner's to answer too (ADR 0082).
+    if !matches!(
+        asked.body.kind(),
+        EventKind::QuestionAsked | EventKind::TeamQuestionAsked
+    ) {
         return Err(CommandError::Refused {
             reason: format!(
                 "not_a_question: event {question_id} is a {}, not a question.asked",
@@ -865,13 +867,15 @@ fn answer_question(
     let answered = tools
         .log
         .read(&EventQuery {
-            kinds: vec![EventKind::QuestionAnswered],
+            kinds: vec![EventKind::QuestionAnswered, EventKind::TeamQuestionAnswered],
             ..EventQuery::default()
         })
         .map_err(failed)?
         .iter()
-        .any(|event| {
-            matches!(&event.body, EventBody::QuestionAnswered(body) if body.question_id.get() == question_id)
+        .any(|event| match &event.body {
+            EventBody::QuestionAnswered(body) => body.question_id.get() == question_id,
+            EventBody::TeamQuestionAnswered(body) => body.question_seq.get() == question_id,
+            _ => false,
         });
     if answered {
         return Err(CommandError::Refused {
@@ -1176,9 +1180,15 @@ async fn send_to_seller(
 ) -> Result<CommandReport, CommandError> {
     let secrets = orchestrator.deps.daemon.connector_secrets();
     let mailer = mailer_of(orchestrator, &secrets)?;
-    let (seq, seller) = send_message(&orchestrator.deps.tools, &mailer, message, subject, body)
-        .await
-        .map_err(mail_refusal)?;
+    let (seq, seller) = send_message(
+        &orchestrator.deps.tools,
+        &mailer,
+        message,
+        (subject, body),
+        None,
+    )
+    .await
+    .map_err(mail_refusal)?;
     Ok(CommandReport {
         said: format!("Sent to {seller}."),
         events: vec![seq],
@@ -1297,65 +1307,20 @@ fn pipeline_decide(
         ));
     }
     let _deciding = crate::locked(&PIPELINES);
-    let records = data_pipelines(&tools.log).map_err(failed)?;
-    let Some(record) = records.iter().find(|record| record.pipeline == pipeline) else {
-        return Err(order_refusal(
-            "unknown_pipeline",
-            format!("{pipeline} is no data source the Procurement Specialist asked for"),
-        ));
-    };
-    let source = crate::tools::sites::shown(record.requested.name.as_str());
-    match record.state {
-        PipelineState::Escalated => {}
-        PipelineState::Open => {
-            return Err(order_refusal(
-                "pipeline_not_escalated",
-                format!("the Product Manager has not passed {source} to you yet"),
-            ));
-        }
-        PipelineState::Approved | PipelineState::Declined => {
-            return Err(order_refusal(
-                "pipeline_decided",
-                format!("{source} was decided already"),
-            ));
-        }
-    }
-    let number = NonZeroU64::new(pipeline).ok_or_else(|| failed("a request is numbered from 1"))?;
-    let by = DataPipelineDecidedBy::Human;
-    if !approve {
-        let seq = append(
-            tools,
-            None,
-            EventBody::DataPipelineDeclined(DataPipelineDeclinedBody {
-                pipeline: number.into(),
-                by,
-                reason: said.try_into().map_err(failed)?,
-            }),
-        )?;
-        return Ok(CommandReport {
-            said: format!("Declined {source}."),
-            events: vec![seq],
-        });
-    }
-    let team = tools.files.read_team().map_err(failed)?;
-    let filed = file_pipeline_request(tools, &team, record, HUMAN, &tools.ids)
-        .map_err(|why| order_refusal("pipeline_not_filed", why))?;
-    let seq = append(
+    let decided = decide_pipeline(
         tools,
-        None,
-        EventBody::DataPipelineApproved(DataPipelineApprovedBody {
-            pipeline: number.into(),
-            by,
-            reason: said.try_into().map_err(failed)?,
-            request: filed.as_str().to_string().try_into().map_err(failed)?,
-        }),
-    )?;
+        pipeline,
+        (approve, &said),
+        DataPipelineDecidedBy::Human,
+        &tools.ids,
+    )
+    .map_err(|error| match error {
+        PipelineDecideError::Refused { code, detail } => order_refusal(code, detail),
+        PipelineDecideError::Failed { detail } => failed(detail),
+    })?;
     Ok(CommandReport {
-        said: format!(
-            "Approved {source}. The team has your request, {}, to set it up.",
-            filed.as_str()
-        ),
-        events: vec![seq],
+        said: decided.said,
+        events: vec![decided.seq],
     })
 }
 
@@ -1627,7 +1592,8 @@ fn accept_result(
     }
     let message = message.filter(|text| !text.trim().is_empty());
     if contract.kind == TaskKind::Epic {
-        mechanical_criteria_passed(&contract, &history)?;
+        mechanical_criteria_passed(&contract, &history)
+            .map_err(|reason| CommandError::Refused { reason })?;
         if message.is_none() {
             return Err(CommandError::Invalid {
                 detail: "an epic's acceptance carries the human's words: say what you checked"
@@ -1742,49 +1708,6 @@ fn send_result_back(
         said: format!("{} is sent back to its assignee", task_id.as_str()),
         events,
     })
-}
-
-/// Every `command`, `test`, or `artifact` criterion of the epic has Catervas's passing result since
-/// it last moved into `verifying` (ADR 0013).
-fn mechanical_criteria_passed(
-    contract: &TaskContract,
-    history: &[catervas_protocol::event::CatervasEvent],
-) -> Result<(), CommandError> {
-    let results = governor_results(history, since_verifying(history));
-    let mechanical: Vec<String> = contract
-        .exit_criteria
-        .iter()
-        .filter(|criterion| is_mechanical(criterion))
-        .map(|criterion| criterion.id.to_string())
-        .collect();
-    let not_run: Vec<&str> = mechanical
-        .iter()
-        .filter(|id| !results.iter().any(|result| &result.criterion_id == *id))
-        .map(String::as_str)
-        .collect();
-    if !not_run.is_empty() {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "criteria_not_run: Catervas has not yet run {} on the integration branch",
-                not_run.join(", ")
-            ),
-        });
-    }
-    let failed: Vec<&str> = results
-        .iter()
-        .filter(|result| mechanical.contains(&result.criterion_id) && !result.passed)
-        .map(|result| result.criterion_id.as_str())
-        .collect();
-    if !failed.is_empty() {
-        return Err(CommandError::Refused {
-            reason: format!(
-                "criterion_failed: {} failed on the integration branch: escalate the epic and \
-                 send it back to in_progress with what is missing",
-                failed.join(", ")
-            ),
-        });
-    }
-    Ok(())
 }
 
 /// Resolves an escalation (5.7), or a task its agent blocked (ADR 0068, with the message as the

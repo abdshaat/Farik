@@ -14,6 +14,7 @@ use catervas_core::marketing::{
     PostDetails, PriceKind, is_carried, plans_to_end, price_kind,
 };
 use catervas_protocol::event::{CatervasEvent, EventBody, EventIds, new_event};
+use catervas_protocol::generated::event::MarketingPlanApprovedBodyBy;
 use catervas_store::marketing::{
     MarketingPlan, PlanState, PostState, SocialPost, budgets_reached, marketing_plans, social_posts,
 };
@@ -144,6 +145,7 @@ pub(crate) fn decide_plan(
     plan: &str,
     approve: bool,
     note: Option<String>,
+    by: Option<MarketingPlanApprovedBodyBy>,
 ) -> Result<CommandReport, CommandError> {
     let held = hold_plans();
     let plans = marketing_plans(&tools.log).map_err(failed)?;
@@ -163,7 +165,10 @@ pub(crate) fn decide_plan(
     let note = owner_words(note);
     let task = Some(found.task_id.clone());
     let (body, report) = if approve {
-        let body = json!({ "plan": plan, "note": note.unwrap_or_default() });
+        let mut body = json!({ "plan": plan, "note": note.unwrap_or_default() });
+        if let Some(by) = by {
+            body["by"] = json!(by.to_string());
+        }
         (
             serde_json::from_value(body).map(EventBody::MarketingPlanApproved),
             format!("approved marketing plan {plan}"),
@@ -858,7 +863,7 @@ mod tests {
         let held = hold_plans();
         let approving = {
             let deps = Arc::clone(&deps);
-            thread::spawn(move || decide_plan(&deps, "MP-1", true, None))
+            thread::spawn(move || decide_plan(&deps, "MP-1", true, None, None))
         };
         thread::sleep(LONG_ENOUGH);
         assert_eq!(

@@ -162,6 +162,10 @@ pub(crate) struct Session {
     pub(crate) registration: SessionRegistration,
     pub(crate) tool_calls: u32,
     pub(crate) stop_reason: Option<String>,
+    /// How many of its paid calls were refused for their rate under autopilot (ADR 0082
+    /// decision 12): the third ends the session. In memory, since a session does not outlive the
+    /// daemon, and the calls themselves are counted from the log.
+    pub(crate) rate_limited: u32,
     /// The sha256, in hex, of the ticket each Catervas connector that signs in was launched with in
     /// this session, by server (ADR 0038, ADR 0042): a call to `POST /connector/call` names its
     /// session by the ticket alone, and the ticket ends with the session.
@@ -740,6 +744,7 @@ impl DaemonState {
                 registration,
                 tool_calls: 0,
                 stop_reason: None,
+                rate_limited: 0,
                 tickets: BTreeMap::new(),
             },
         );

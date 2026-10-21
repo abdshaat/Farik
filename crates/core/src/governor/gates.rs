@@ -115,6 +115,9 @@ pub struct AssignmentInput {
     pub lane_builder: Option<String>,
     /// Whether the team is one agent alone (ADR 0071): the task names no reviewer.
     pub solo: bool,
+    /// Whether the assignee may take the task past its limit: autopilot is on and the assignee
+    /// has no session running (ADR 0082 decision 8). A limit of zero is held whatever this says.
+    pub past_limit_allowed: bool,
 }
 
 /// The `Assignment` gate of `ready -> assigned` (`docs/SPEC.md` sections 5.2, 5.14, 5.16): who may
@@ -291,23 +294,26 @@ pub fn check_reassignment(contract: &TaskContract, input: &ReassignmentInput) ->
     verdict(reasons)
 }
 
-/// Why the assignee can take no more work, if it cannot: the team's limit on work in progress.
+/// Why the assignee can take no more work, if it cannot: the team's limit on work in progress,
+/// which an idle agent under autopilot passes unless the limit is zero (ADR 0082 decision 8).
 fn over_the_limit(input: &AssignmentInput) -> Option<String> {
-    (input.assignee_open_tasks >= input.wip_limit).then(|| {
-        if input.wip_limit == 0 {
-            format!(
-                "{} takes no work: its limit is zero",
-                input.assignee_id.trim()
-            )
-        } else {
-            format!(
-                "{} already holds {} unfinished tasks and the limit is {}",
-                input.assignee_id.trim(),
-                input.assignee_open_tasks,
-                input.wip_limit
-            )
-        }
-    })
+    (input.assignee_open_tasks >= input.wip_limit
+        && !(input.past_limit_allowed && input.wip_limit > 0))
+        .then(|| {
+            if input.wip_limit == 0 {
+                format!(
+                    "{} takes no work: its limit is zero",
+                    input.assignee_id.trim()
+                )
+            } else {
+                format!(
+                    "{} already holds {} unfinished tasks and the limit is {}",
+                    input.assignee_id.trim(),
+                    input.assignee_open_tasks,
+                    input.wip_limit
+                )
+            }
+        })
 }
 
 /// Why the task cannot be assigned while another holds the assignee's private folder, if it
@@ -1257,6 +1263,7 @@ mod tests {
             private_folder_busy: false,
             lane_builder: None,
             solo: false,
+            past_limit_allowed: false,
         }
     }
 
@@ -1618,6 +1625,26 @@ mod tests {
         );
         // A limit of zero is how a team pauses an agent, and the refusal says that rather than
         // counting to zero.
+        input.assignee_open_tasks = 0;
+        input.wip_limit = 0;
+        assert_eq!(
+            reasons(check_assignment(&a_contract(), &input)),
+            ["dev-1 takes no work: its limit is zero"]
+        );
+    }
+
+    #[test]
+    fn an_idle_agent_under_autopilot_takes_work_past_its_limit() {
+        let mut input = an_assignment();
+        input.assignee_open_tasks = 1;
+        input.wip_limit = 1;
+        assert_eq!(
+            reasons(check_assignment(&a_contract(), &input)),
+            ["dev-1 already holds 1 unfinished tasks and the limit is 1"]
+        );
+        input.past_limit_allowed = true;
+        assert_eq!(check_assignment(&a_contract(), &input), Ok(()));
+        // An owner who set the limit to zero meant it.
         input.assignee_open_tasks = 0;
         input.wip_limit = 0;
         assert_eq!(

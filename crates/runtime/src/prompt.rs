@@ -79,6 +79,9 @@ pub struct PromptInput<'a> {
     /// The remotes the team lets an agent push to (`policy.push_remotes`, ADR 0080), for the Team
     /// rules' line about them, said only to an agent that holds `git_remote`.
     pub push_remotes: &'a [String],
+    /// Whether the team decides what would wait on the owner (ADR 0082): the Team rules then end
+    /// with the paragraph that overrides the roles' and skills' asking of the owner.
+    pub autopilot: bool,
 }
 
 /// One repository of the project, as the Team rules' line says it.
@@ -123,7 +126,7 @@ pub const PROMPT_SECTIONS: [&str; 12] = [
 ];
 
 /// The `This session` section of each purpose: what the session is for and the tool it ends with.
-pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
+pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 11] = [
     (
         SessionPurpose::Triage,
         "This session sizes the request you were given. Decide whether it is large (an epic) or \
@@ -216,7 +219,24 @@ pub const CLOSING_INSTRUCTIONS: [(SessionPurpose, &str); 10] = [
         "This session works towards the owner's goal; the first message says what to do. Change \
          nothing in the project. Then end the session.",
     ),
+    (
+        SessionPurpose::Decide,
+        "This session decides for the team what would otherwise wait on the owner; the first \
+         message says what waits and what you may choose. Read what you need, weigh the options, \
+         and answer once, with your reason in one or two sentences, using the tool the first \
+         message names. Flag only what only the owner can give: a sign-in, a key, a connector to \
+         connect, a confirmation of a skill's or connector's hash, a purchase to place, a legal or \
+         account step, or money above the day's limit. Change nothing in the project. Then end \
+         the session.",
+    ),
 ];
+
+/// The last paragraph of the Team rules for the Product Manager and an agent working alone while
+/// autopilot is on (ADR 0082): nobody is asked, so they decide.
+pub const AUTOPILOT_DECIDE: &str = "Autopilot is on: the owner is asked nothing. Where your role or a skill says to ask the owner or the user with `catervas_ask_human`, decide yourself: weigh the options, write your decision and its reason with `catervas_write_note` of kind `progress`, and go on. Block a task only for what only the owner can give: a sign-in, a key, a connector to connect, a purchase, a legal or account step, or money above the day's limit.";
+
+/// The same for every other agent: the team is asked, and answers in a session of its own.
+pub const AUTOPILOT_ASK: &str = "Autopilot is on: the owner is asked nothing. Where your role or a skill says to ask the owner or the user with `catervas_ask_human`, ask the team with `catervas_ask_team` instead, `about` `product` for what the product should do and `technical` for how to build it, then end your turn: the answer starts your next session. Block a task only for what only the owner can give: a sign-in, a key, a connector to connect, a purchase, a legal or account step, or money above the day's limit.";
 
 /// The `This session` section of a new project's Product Manager's chat session while the owner's
 /// product plan is not approved (`docs/SPEC.md` 4.3), in place of the chat's.
@@ -255,26 +275,29 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
             .project_scan
             .and_then(|scan| untrusted("project_scan", scan, 16 * KIB)),
         Some(memory_section(input)),
-        Some(rules_section(
-            input.rules,
-            input.role.id,
-            (
-                input.active_roles,
-                input.stale_twins,
-                input.members,
-                input.own_repo.as_ref(),
+        Some(rules_with_autopilot(
+            input,
+            rules_section(
+                input.rules,
+                input.role.id,
+                (
+                    input.active_roles,
+                    input.stale_twins,
+                    input.members,
+                    input.own_repo.as_ref(),
+                ),
+                input.document_format,
+                input.documents_local,
+                if input
+                    .agent
+                    .tiers(input.permissions)
+                    .contains(&PermissionTier::GitRemote)
+                {
+                    input.push_remotes
+                } else {
+                    &[]
+                },
             ),
-            input.document_format,
-            input.documents_local,
-            if input
-                .agent
-                .tiers(input.permissions)
-                .contains(&PermissionTier::GitRemote)
-            {
-                input.push_remotes
-            } else {
-                &[]
-            },
         )),
         if input.criteria.criteria.is_empty() {
             None
@@ -552,6 +575,20 @@ fn team_section(agent: &Agent, team: &[&Agent], solo: bool) -> Option<String> {
         "Anyone else named in your notes, memory or the channel has left the team.".to_string(),
     );
     Some(lines.join("\n"))
+}
+
+/// `rules`, and under autopilot the paragraph that tells the agent whom to ask: the Product Manager
+/// and an agent working alone decide, every other agent asks the team (ADR 0082).
+fn rules_with_autopilot(input: &PromptInput<'_>, rules: String) -> String {
+    if !input.autopilot {
+        return rules;
+    }
+    let paragraph = if input.role.id == Role::ProductManager || input.solo {
+        AUTOPILOT_DECIDE
+    } else {
+        AUTOPILOT_ASK
+    };
+    format!("{rules}\n\n{paragraph}")
 }
 
 /// One line per rule, named as `team.yaml` names it; a list rule with nothing in it says nothing,
@@ -845,6 +882,7 @@ mod tests {
                 documents_local: false,
                 team: &[],
                 push_remotes: &[],
+                autopilot: false,
             }
         }
     }

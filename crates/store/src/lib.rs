@@ -3,6 +3,8 @@
 
 /// What each agent does, and what moved.
 pub mod activity;
+/// What the log says about autopilot (ADR 0082).
+pub mod autopilot;
 /// The copy of a private folder a task is judged against.
 pub mod baseline;
 /// The branch names a new branch may not take.

@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 use catervas_core::folders::{SwitchState, agent_twin, twin_is_stale_by_log};
 use catervas_protocol::event::{CatervasEvent, EventBody, EventKind, LocalDocumentsWrittenBodyBy};
+use catervas_protocol::generated::event::TeamDecidedBodyChoice;
 use chrono::{DateTime, Utc};
 
 use crate::{EventLog, EventQuery, StoreError};
@@ -167,6 +168,7 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
             EventKind::DocumentStorageChanged,
             EventKind::FolderChangeIntegrated,
             EventKind::FolderChangeEscalated,
+            EventKind::TeamDecided,
         ],
         ..EventQuery::default()
     })?;
@@ -299,6 +301,18 @@ pub fn folder_docs(log: &EventLog) -> Result<FolderDocs, StoreError> {
             EventBody::FolderChangeEscalated(body) if is_unattended(event) => {
                 if let Some(change) = change_of(&mut docs, body.change.get()) {
                     change.escalated = true;
+                }
+            }
+            // The Product Manager's decision to try a failed change again (ADR 0082 decision 11).
+            EventBody::TeamDecided(body)
+                if body.choice == TeamDecidedBodyChoice::RetryFolderChange =>
+            {
+                if let Some(change) = body
+                    .folder_change
+                    .as_ref()
+                    .and_then(|number| change_of(&mut docs, number.get()))
+                {
+                    change.escalated = false;
                 }
             }
             _ => {}

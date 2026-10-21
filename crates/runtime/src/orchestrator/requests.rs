@@ -187,9 +187,13 @@ pub(super) async fn refining(
     {
         return Ok(None);
     }
-    let asked = history
-        .iter()
-        .any(|event| event.envelope.seq > began && event.body.kind() == EventKind::QuestionAsked);
+    let asked = history.iter().any(|event| {
+        event.envelope.seq > began
+            && matches!(
+                event.body.kind(),
+                EventKind::QuestionAsked | EventKind::TeamQuestionAsked
+            )
+    });
     let failures = last_readiness_failures(&history, began);
     let stuck = came_back_from_a_block(&history);
     let goal = match lead {

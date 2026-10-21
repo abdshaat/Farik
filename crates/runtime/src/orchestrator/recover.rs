@@ -109,6 +109,7 @@ fn purpose(wire: SessionStartedBodyPurpose) -> SessionPurpose {
         SessionStartedBodyPurpose::Conversation => SessionPurpose::Conversation,
         SessionStartedBodyPurpose::Chat => SessionPurpose::Chat,
         SessionStartedBodyPurpose::Goal => SessionPurpose::Goal,
+        SessionStartedBodyPurpose::Decide => SessionPurpose::Decide,
     }
 }
 

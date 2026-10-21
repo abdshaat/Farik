@@ -7,8 +7,8 @@ use catervas_core::contract::Role;
 use catervas_core::governor::sites::site_of;
 use catervas_core::pipeline::{PipelineCost, pipeline_needs_owner};
 use catervas_protocol::event::{
-    DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineEscalatedBody,
-    DataPipelineRequestedBody, EventBody,
+    DataPipelineApprovedBody, DataPipelineCost, DataPipelineDecidedBy, DataPipelineDeclinedBody,
+    DataPipelineEscalatedBody, DataPipelineRequestedBody, EventBody, EventIds, new_event,
 };
 use catervas_store::pipelines::{
     DecidedBy, PipelineRecord, PipelineState, cost_of, data_pipelines,
@@ -323,6 +323,133 @@ fn settle(
     .map_err(failed)?;
     Ok((PipelineState::Approved, Some(filed.as_str().to_string())))
 }
+
+/// A decision `decide_pipeline` recorded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PipelineDecided {
+    /// The decision's place in the log.
+    pub(crate) seq: u64,
+    /// What it did, in a sentence.
+    pub(crate) said: String,
+}
+
+/// Why `decide_pipeline` decided nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PipelineDecideError {
+    /// A rule refused, under the code it names.
+    Refused {
+        /// The refusal's kind.
+        code: &'static str,
+        /// What it says.
+        detail: String,
+    },
+    /// The log could not be read or written.
+    Failed {
+        /// What failed.
+        detail: String,
+    },
+}
+
+/// Decides an escalated request, for the owner or, under autopilot, for the Product Manager: an
+/// approval files the ordinary request that sets the source up, a decline files nothing. The
+/// caller holds the `PIPELINES` lock and has held `reason` to its length. `ids` is who decides: the
+/// owner names no agent and no session, the Product Manager names itself and its session.
+///
+/// # Errors
+///
+/// `unknown_pipeline` for a number no request has, `pipeline_not_escalated` for a request not yet
+/// passed on, `pipeline_decided` for one decided before, `pipeline_not_filed` when the request
+/// that sets the source up cannot be filed; `Failed` when the log refuses.
+pub(crate) fn decide_pipeline(
+    deps: &super::ToolDeps,
+    pipeline: u64,
+    (approve, reason): (bool, &str),
+    by: DataPipelineDecidedBy,
+    ids: &EventIds,
+) -> Result<PipelineDecided, PipelineDecideError> {
+    let refuse = |code: &'static str, detail: String| PipelineDecideError::Refused { code, detail };
+    let broke = |detail: String| PipelineDecideError::Failed { detail };
+    let records = data_pipelines(&deps.log).map_err(|error| broke(error.to_string()))?;
+    let Some(record) = records.iter().find(|record| record.pipeline == pipeline) else {
+        return Err(refuse(
+            "unknown_pipeline",
+            format!("{pipeline} is no data source the Procurement Specialist asked for"),
+        ));
+    };
+    let source = shown(record.requested.name.as_str());
+    match record.state {
+        PipelineState::Escalated => {}
+        PipelineState::Open => {
+            return Err(refuse(
+                "pipeline_not_escalated",
+                format!("the Product Manager has not passed {source} to you yet"),
+            ));
+        }
+        PipelineState::Approved | PipelineState::Declined => {
+            return Err(refuse(
+                "pipeline_decided",
+                format!("{source} was decided already"),
+            ));
+        }
+    }
+    let number = std::num::NonZeroU64::new(pipeline)
+        .ok_or_else(|| broke("a request is numbered from 1".to_string()))?;
+    let record_event = |body: EventBody| -> Result<u64, PipelineDecideError> {
+        let event = new_event(body, deps.clock.now(), ids.clone())
+            .map_err(|error| broke(format!("the event cannot be stamped: {error:?}")))?;
+        let appended = deps
+            .log
+            .append(&event)
+            .map_err(|error| broke(error.to_string()))?;
+        deps.projections
+            .apply(&appended)
+            .map_err(|error| broke(error.to_string()))?;
+        Ok(appended.envelope.seq)
+    };
+    let reason = reason.to_string();
+    if !approve {
+        let seq = record_event(EventBody::DataPipelineDeclined(DataPipelineDeclinedBody {
+            pipeline: number.into(),
+            by,
+            reason: reason
+                .try_into()
+                .map_err(|error| broke(format!("{error}")))?,
+        }))?;
+        return Ok(PipelineDecided {
+            seq,
+            said: format!("Declined {source}."),
+        });
+    }
+    let team = deps
+        .files
+        .read_team()
+        .map_err(|error| broke(error.to_string()))?;
+    let created_by = ids.agent_id.as_deref().unwrap_or(HUMAN);
+    let filed = file_pipeline_request(deps, &team, record, created_by, &deps.ids)
+        .map_err(|why| refuse("pipeline_not_filed", why))?;
+    let seq = record_event(EventBody::DataPipelineApproved(DataPipelineApprovedBody {
+        pipeline: number.into(),
+        by,
+        reason: reason
+            .try_into()
+            .map_err(|error| broke(format!("{error}")))?,
+        request: filed
+            .as_str()
+            .to_string()
+            .try_into()
+            .map_err(|error| broke(format!("{error}")))?,
+    }))?;
+    Ok(PipelineDecided {
+        seq,
+        said: format!(
+            "Approved {source}. The team has your request, {}, to set it up.",
+            filed.as_str()
+        ),
+    })
+}
+
+/// Who the owner is in the log, and so what an approval of theirs files its request as.
+const HUMAN: &str = "human";
 
 /// One request as `catervas_read_data_pipelines` words it: what the agent wrote, its state, and how
 /// it was passed on and decided. The Product Manager's words are inside an untrusted block; the

@@ -308,19 +308,29 @@ pub fn escalation_choices(offer: &Offer<'_>) -> Vec<Choice> {
     choices
 }
 
-/// What the task's open escalation offers: its reason, `before`, and the names, read from the log
+/// What the task waits on the human for: the reason of its open escalation or `blocked`, the status
+/// it left for `escalated`, and the status a block came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Waits {
+    /// The reason of its escalation, as the log writes it, or `blocked`.
+    pub reason: String,
+    /// The status the task left for `escalated`, when known.
+    pub before: Option<TaskStatus>,
+    /// The status the task was in when it was blocked, when known.
+    pub blocked_from: Option<TaskStatus>,
+}
+
+/// What the task's open escalation, or its block, waits for (ADR 0062, ADR 0068), read from the log
 /// and the board; `None` when nothing is open for the task.
 ///
 /// # Errors
 ///
-/// When the log, the board or the contract cannot be read.
-pub fn offer_for(
+/// When the log or the board cannot be read.
+pub(crate) fn waits_of(
     log: &EventLog,
     projections: &Projections,
-    files: &ProjectFiles,
-    team: &Team,
     task_id: &TaskId,
-) -> Result<Option<Vec<Choice>>, StoreError> {
+) -> Result<Option<Waits>, StoreError> {
     // A task its agent blocked is answered as an escalation is (ADR 0068).
     let blocked = projections
         .task(task_id)?
@@ -343,8 +353,7 @@ pub fn offer_for(
             EventBody::TaskTransitioned(body) => TaskStatus::from_str(&body.from.to_string()).ok(),
             _ => None,
         });
-    // Whoever blocked the task is who the owner answers, and where it came from is where the
-    // answer goes (ADR 0069).
+    // Where the block came from is where the answer goes (ADR 0069).
     let blocking = if blocked || before == Some(TaskStatus::Blocked) {
         last_move_into(&history, TaskStatus::Blocked)
     } else {
@@ -354,6 +363,48 @@ pub fn offer_for(
         EventBody::TaskTransitioned(body) => TaskStatus::from_str(&body.from.to_string()).ok(),
         _ => None,
     });
+    Ok(Some(Waits {
+        reason,
+        before,
+        blocked_from,
+    }))
+}
+
+/// What the task's open escalation offers: its reason, `before`, and the names, read from the log
+/// and the board; `None` when nothing is open for the task.
+///
+/// # Errors
+///
+/// When the log, the board or the contract cannot be read.
+pub fn offer_for(
+    log: &EventLog,
+    projections: &Projections,
+    files: &ProjectFiles,
+    team: &Team,
+    task_id: &TaskId,
+) -> Result<Option<Vec<Choice>>, StoreError> {
+    let Some(Waits {
+        reason,
+        before,
+        blocked_from,
+    }) = waits_of(log, projections, task_id)?
+    else {
+        return Ok(None);
+    };
+    let history = log.read(&EventQuery {
+        task_id: Some(task_id.clone()),
+        kinds: vec![EventKind::TaskTransitioned],
+        ..EventQuery::default()
+    })?;
+    // Whoever blocked the task is who the owner answers.
+    let blocked = projections
+        .task(task_id)?
+        .is_some_and(|row| row.status == TaskStatus::Blocked);
+    let blocking = if blocked || before == Some(TaskStatus::Blocked) {
+        last_move_into(&history, TaskStatus::Blocked)
+    } else {
+        None
+    };
     let who = blocking
         .and_then(|event| event.envelope.ids.agent_id.clone())
         .or(projections.task(task_id)?.and_then(|row| row.assignee_id))

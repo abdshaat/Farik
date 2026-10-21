@@ -95,6 +95,8 @@ export type Team = {
 		blockedLimitHours?: number;
 		/** How long an open escalation may wait on the owner; absent means 24. */
 		escalationAgeHours?: number;
+		/** Paid or asking connector calls one agent may make an hour under autopilot; absent means 30. */
+		paidCallsPerHour?: number;
 		wipLimitPerAgent?: number;
 		[key: string]: unknown;
 	};

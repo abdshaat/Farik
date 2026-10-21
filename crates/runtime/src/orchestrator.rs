@@ -31,6 +31,7 @@ use crate::sleep::Sleeper;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
+mod autopilot;
 mod design;
 #[cfg(test)]
 pub(crate) mod fixtures;
@@ -49,6 +50,7 @@ mod session;
 pub(crate) use session::read_roots;
 mod spend;
 mod verify;
+pub(crate) use verify::{governor_results, is_mechanical, since_verifying};
 mod work;
 pub use work::Work;
 
@@ -543,6 +545,10 @@ impl Orchestrator {
     /// An orchestrator that has done nothing yet.
     #[must_use]
     pub fn new(deps: OrchestratorDeps) -> Orchestrator {
+        let work = Arc::clone(&deps.work);
+        deps.tools
+            .transitions
+            .set_busy(Arc::new(move |agent| work.is_busy(agent)));
         Orchestrator {
             deps,
             sandboxes: Mutex::new(BTreeMap::new()),
@@ -597,6 +603,11 @@ impl Orchestrator {
                 why: "the team is paused; catervas resume starts it again".to_string(),
                 until: None,
             });
+        }
+        // Seller messages go out under autopilot with no model, as the owner's Send would send
+        // them, once the team is not paused (ADR 0082 decision 6).
+        if scope.task_id.is_none() {
+            autopilot::send_seller_messages(&self.deps).await?;
         }
         rules::tick(self, scope).await
     }

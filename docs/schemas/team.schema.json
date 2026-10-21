@@ -569,6 +569,13 @@
           "default": 24,
           "description": "How long an open escalation may wait on the human before the aged rule ages it and says so in the channel (spec 5.7). Left out, a day."
         },
+        "paid_calls_per_hour": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 30,
+          "description": "How many paid or asking connector calls one agent may make in an hour while autopilot is on, a third of them, at least one, of one tool (spec 8.6, ADR 0082). Left out, 30."
+        },
         "memory_cap_tokens": {
           "type": "integer",
           "minimum": 500,

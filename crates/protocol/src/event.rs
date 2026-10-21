@@ -17,26 +17,27 @@ pub use crate::generated::event::AttachmentPaths;
 /// The body of `document.attached`, the owner attaching a file.
 pub use crate::generated::event::DocumentAttachedBody;
 pub use crate::generated::event::{
-    AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, BudgetExhaustedBody,
-    BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope, CatervaficationStartedBody,
-    CatervaficationStartedBodyProject, ChatMessagePostedBody, CheckTheme, CheckWidth,
-    ConnectionRequestedBody, ConnectorConnectedBody, ConnectorDisconnectedBody,
-    ConnectorTag as ConnectorTagWire, ContractEvaluatedBody, ContractEvaluatedBodyGate,
-    ContractJudgedBody, ContractLockedBody, ContractSummary, ContractSummaryKind,
-    ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus, ContractUnlockedBody,
-    ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId, CostRecordedBodyPurpose,
-    CriteriaUpdatedBody, CriterionRecordedBody, CriterionRecordedBodyRunBy, DecisionWrittenBody,
-    DeliveryClosedBody, DesignPlanProposedBody, DesignReviewCheck, DesignReviewRecordedBody,
-    DocumentRewriteStartedBody, DocumentStorageChangedBody, DriftDetectedBody,
-    DriftDetectedBodyDrift, EscalationAgedBody, EscalationRaisedBody, EscalationRaisedBodyReason,
-    EscalationResolvedBody, EventKind, GoalEndedBody, GoalEndedBodyOutcome, GoalIdBody,
-    GoalMeasuredBody, GoalMeasuredBodySource, GoalPlannedBody, GoalSetBody, Heard,
-    HumanAcceptedBody, HumanAcceptedBodySubject, JudgmentAnswer, LocalDocumentsWrittenBody,
-    LocalDocumentsWrittenBodyBy, MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope,
-    MarketingCampaignCreatedBody, MarketingCampaignCreatedBodyBudgetKind,
-    MarketingCampaignPausedBody, MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody,
-    MarketingPlanBudget, MarketingPlanCampaign, MarketingPlanCampaignChannel,
-    MarketingPlanEndedBody, MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
+    AgentSleptBody, AgentUpdatedBody, AgentUpdatedBodyStatus, AutopilotChangedBody,
+    BudgetExhaustedBody, BudgetExhaustedBodyConsequence, BudgetExhaustedBodyScope,
+    CatervaficationStartedBody, CatervaficationStartedBodyProject, ChatMessagePostedBody,
+    CheckTheme, CheckWidth, ConnectionRequestedBody, ConnectorConnectedBody,
+    ConnectorDisconnectedBody, ConnectorTag as ConnectorTagWire, ContractEvaluatedBody,
+    ContractEvaluatedBodyGate, ContractJudgedBody, ContractLockedBody, ContractSummary,
+    ContractSummaryKind, ContractSummaryParent, ContractSummaryRisk, ContractSummaryStatus,
+    ContractUnlockedBody, ContractWrittenBody, CostRecordedBody, CostRecordedBodyModelId,
+    CostRecordedBodyPurpose, CriteriaUpdatedBody, CriterionRecordedBody,
+    CriterionRecordedBodyRunBy, DecisionWrittenBody, DeliveryClosedBody, DesignPlanProposedBody,
+    DesignReviewCheck, DesignReviewRecordedBody, DocumentRewriteStartedBody,
+    DocumentStorageChangedBody, DriftDetectedBody, DriftDetectedBodyDrift, EscalationAgedBody,
+    EscalationRaisedBody, EscalationRaisedBodyReason, EscalationResolvedBody, EventKind,
+    GoalEndedBody, GoalEndedBodyOutcome, GoalIdBody, GoalMeasuredBody, GoalMeasuredBodySource,
+    GoalPlannedBody, GoalSetBody, Heard, HumanAcceptedBody, HumanAcceptedBodySubject,
+    JudgmentAnswer, LocalDocumentsWrittenBody, LocalDocumentsWrittenBodyBy,
+    MarketingBudgetReachedBody, MarketingBudgetReachedBodyScope, MarketingCampaignCreatedBody,
+    MarketingCampaignCreatedBodyBudgetKind, MarketingCampaignPausedBody,
+    MarketingCampaignPausedBodyWhy, MarketingPlanApprovedBody, MarketingPlanBudget,
+    MarketingPlanCampaign, MarketingPlanCampaignChannel, MarketingPlanEndedBody,
+    MarketingPlanEndedBodyWhy, MarketingPlanPost, MarketingPlanPostChannel,
     MarketingPlanProposedBody, MarketingPlanProposedBodyFormat, MarketingPlanReturnedBody,
     MemoryWrittenBody, MergePermissionBody, MessagePostedBody, NoteWrittenBody,
     NoteWrittenBodyKind, PageCheckedBody, PreviewPreparedBody, PreviewStartedBody,
@@ -47,10 +48,11 @@ pub use crate::generated::event::{
     SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
     SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody,
     SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskCreatedBodyFiledAs, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskReassignedBody,
-    TaskReassignedBodyReason, TaskRoomGrantedBody, TaskTransitionedBody,
-    TaskTransitionedBodyEffectsItem, TeamPausedBody, TeamPausedBodyBy, TeamPausedBodyReason,
-    TeamUpdatedBody, TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody,
+    TaskCreatedBodyFiledAs, TaskFlaggedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    TaskReassignedBody, TaskReassignedBodyReason, TaskRoomGrantedBody, TaskTransitionedBody,
+    TaskTransitionedBodyEffectsItem, TeamDecidedBody, TeamPausedBody, TeamPausedBodyBy,
+    TeamPausedBodyReason, TeamQuestionAnsweredBody, TeamQuestionAskedBody, TeamUpdatedBody,
+    TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody, ToolApprovedBody,
     ToolCalledBody, ToolDeniedBody, ToolReturnedBody, TransitionRefusedBody,
     TransitionRefusedBodyRefusal, Violation, WorktreeTidiedBody,
 };
@@ -315,6 +317,12 @@ fn body_def_name(kind: EventKind) -> &'static str {
             "mergePermissionBody"
         }
         EventKind::PullRequestMerged => "pullRequestMergedBody",
+        EventKind::AutopilotChanged => "autopilotChangedBody",
+        EventKind::TeamQuestionAsked => "teamQuestionAskedBody",
+        EventKind::TeamQuestionAnswered => "teamQuestionAnsweredBody",
+        EventKind::TeamDecided => "teamDecidedBody",
+        EventKind::TaskFlagged => "taskFlaggedBody",
+        EventKind::ToolApproved => "toolApprovedBody",
     }
 }
 
@@ -378,7 +386,20 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::WorktreeTidied
             | EventKind::PullRequestConflicted
             | EventKind::PullRequestRefreshed
+            | EventKind::TeamQuestionAsked
+            | EventKind::TeamQuestionAnswered
+            | EventKind::TeamDecided
+            | EventKind::TaskFlagged
     )
+}
+
+/// Whether this body may not be recorded without a task: its kind is about one contract, except a
+/// `team.decided` that names a folder change, which is about the change and no task (ADR 0082).
+fn needs_a_task(body: &EventBody) -> bool {
+    match body {
+        EventBody::TeamDecided(decided) if decided.folder_change.is_some() => false,
+        _ => is_about_one_contract(body.kind()),
+    }
 }
 
 /// The field naming who acted, for the kinds that name one, and nothing for `drift.detected`,
@@ -446,6 +467,10 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         EventBody::MarketingPlanProposed(body) => Some(("proposed_by", &mut body.proposed_by)),
         EventBody::FolderDocWritten(body) => Some(("written_by", &mut body.written_by)),
         EventBody::FolderDocProposed(body) => Some(("proposed_by", &mut body.proposed_by)),
+        EventBody::TeamQuestionAsked(body) => Some(("asked_by", &mut body.asked_by)),
+        EventBody::TeamQuestionAnswered(body) => Some(("answered_by", &mut body.answered_by)),
+        EventBody::TeamDecided(body) => Some(("decided_by", &mut body.decided_by)),
+        EventBody::TaskFlagged(body) => Some(("flagged_by", &mut body.flagged_by)),
         EventBody::DriftDetected(_)
         | EventBody::ProjectScanned(_)
         | EventBody::CostRecorded(_)
@@ -547,13 +572,15 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::GoalPlanned(_)
         | EventBody::DocumentStorageChanged(_)
         | EventBody::LocalDocumentsWritten(_)
-        | EventBody::PullRequestMerged(_) => None,
+        | EventBody::PullRequestMerged(_)
+        | EventBody::AutopilotChanged(_)
+        | EventBody::ToolApproved(_) => None,
     }
 }
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 134] = [
+pub const EVERY_KIND: [EventKind; 140] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -688,6 +715,12 @@ pub const EVERY_KIND: [EventKind; 134] = [
     EventKind::MergePermissionGranted,
     EventKind::MergePermissionWithdrawn,
     EventKind::PullRequestMerged,
+    EventKind::AutopilotChanged,
+    EventKind::TeamQuestionAsked,
+    EventKind::TeamQuestionAnswered,
+    EventKind::TeamDecided,
+    EventKind::TaskFlagged,
+    EventKind::ToolApproved,
 ];
 
 /// The ids an event is stamped with: which team and project it belongs to, and the contract, agent
@@ -1131,6 +1164,24 @@ pub enum EventBody {
     /// `pull_request.merged`: Catervas merged a pull request itself.
     #[serde(rename = "pull_request.merged")]
     PullRequestMerged(PullRequestMergedBody),
+    /// `autopilot.changed`: the owner turned autopilot on or off (ADR 0082).
+    #[serde(rename = "autopilot.changed")]
+    AutopilotChanged(AutopilotChangedBody),
+    /// `team.question_asked`: an agent asked the team a question (ADR 0082).
+    #[serde(rename = "team.question_asked")]
+    TeamQuestionAsked(TeamQuestionAskedBody),
+    /// `team.question_answered`: the team answered it.
+    #[serde(rename = "team.question_answered")]
+    TeamQuestionAnswered(TeamQuestionAnsweredBody),
+    /// `team.decided`: the Product Manager took a decision the owner would take.
+    #[serde(rename = "team.decided")]
+    TeamDecided(TeamDecidedBody),
+    /// `task.flagged`: a task needs what only the owner can give.
+    #[serde(rename = "task.flagged")]
+    TaskFlagged(TaskFlaggedBody),
+    /// `tool.approved`: a paid or asking call ran under autopilot.
+    #[serde(rename = "tool.approved")]
+    ToolApproved(ToolApprovedBody),
 }
 
 impl EventBody {
@@ -1273,6 +1324,12 @@ impl EventBody {
             Self::MergePermissionGranted(_) => EventKind::MergePermissionGranted,
             Self::MergePermissionWithdrawn(_) => EventKind::MergePermissionWithdrawn,
             Self::PullRequestMerged(_) => EventKind::PullRequestMerged,
+            Self::AutopilotChanged(_) => EventKind::AutopilotChanged,
+            Self::TeamQuestionAsked(_) => EventKind::TeamQuestionAsked,
+            Self::TeamQuestionAnswered(_) => EventKind::TeamQuestionAnswered,
+            Self::TeamDecided(_) => EventKind::TeamDecided,
+            Self::TaskFlagged(_) => EventKind::TaskFlagged,
+            Self::ToolApproved(_) => EventKind::ToolApproved,
         }
     }
 }
@@ -1335,7 +1392,7 @@ pub fn new_event(
     if let Some((field, actor)) = attribution(&mut body) {
         *actor = named(actor, field)?;
     }
-    if is_about_one_contract(body.kind()) && ids.task_id.is_none() {
+    if needs_a_task(&body) && ids.task_id.is_none() {
         return Err(EventError::NoContractNamed { kind: body.kind() });
     }
     Ok(NewEvent {
@@ -1384,16 +1441,6 @@ pub fn event_from_value(input: &Value) -> Result<CatervasEvent, Vec<ValidationEr
         }]
     })?;
     let envelope = envelope_from_wire(&wire)?;
-    if is_about_one_contract(wire.kind) && envelope.ids.task_id.is_none() {
-        return Err(vec![ValidationError {
-            path: "/task_id".to_string(),
-            message: format!(
-                "a {} event is about one contract and names none, and an append-only log cannot \
-                 attach it to one afterwards",
-                wire.kind
-            ),
-        }]);
-    }
     // The wire enum answers "which body is this?" by shape; the kind is what the event says it
     // is, so the body is read by kind and one that does not fit is refused.
     let mut body = serde_json::from_value::<EventBody>(
@@ -1405,6 +1452,16 @@ pub fn event_from_value(input: &Value) -> Result<CatervasEvent, Vec<ValidationEr
             message: format!("a {} event does not carry this body: {error}", wire.kind),
         }]
     })?;
+    if needs_a_task(&body) && envelope.ids.task_id.is_none() {
+        return Err(vec![ValidationError {
+            path: "/task_id".to_string(),
+            message: format!(
+                "a {} event is about one contract and names none, and an append-only log cannot \
+                 attach it to one afterwards",
+                wire.kind
+            ),
+        }]);
+    }
     if let Some(fault) = site_fault(&body) {
         return Err(vec![ValidationError {
             path: "/body".to_string(),
@@ -1597,6 +1654,51 @@ mod tests {
                 "{kind}"
             );
         }
+
+        // The autopilot's six kinds (ADR 0082): four are about their task, two about none.
+        for (kind, about_a_task) in [
+            (EventKind::AutopilotChanged, false),
+            (EventKind::TeamQuestionAsked, true),
+            (EventKind::TeamQuestionAnswered, true),
+            (EventKind::TeamDecided, true),
+            (EventKind::TaskFlagged, true),
+            (EventKind::ToolApproved, false),
+        ] {
+            assert!(EVERY_KIND.contains(&kind), "{kind}");
+            assert_eq!(is_about_one_contract(kind), about_a_task, "{kind}");
+            let wire = an_event_wire(kind);
+            let event = event_from_value(&wire).expect("valid");
+            assert_eq!(event.body.kind(), kind);
+            assert_eq!(event_to_value(&event)["kind"], kind.to_string());
+            let mut body_with_more = wire.clone();
+            body_with_more["body"]["surprise"] = json!(1);
+            assert!(!refusal(&body_with_more).is_empty(), "{kind}");
+        }
+
+        // A decision about a folder change has no task, and still reads back.
+        let mut wire = an_event_wire(EventKind::TeamDecided);
+        wire.as_object_mut().expect("an object").remove("task_id");
+        assert!(
+            !refusal(&wire).is_empty(),
+            "a decision about a task names it"
+        );
+        wire["body"]["folder_change"] = json!(4);
+        let event = event_from_value(&wire).expect("a folder change's decision names no task");
+        assert!(event.envelope.ids.task_id.is_none());
+
+        // The older bodies gain an optional autopilot field, the gate and the purpose a word.
+        let mut plan = an_event_wire(EventKind::MarketingPlanApproved);
+        plan["body"]["by"] = json!("autopilot");
+        event_from_value(&plan).expect("a plan the team approved");
+        let mut sent = an_event_wire(EventKind::SellerMessageSent);
+        sent["body"]["sent_by"] = json!("autopilot");
+        event_from_value(&sent).expect("a message Catervas sent");
+        let mut started = an_event_wire(EventKind::SessionStarted);
+        started["body"]["purpose"] = json!("decide");
+        event_from_value(&started).expect("a decide session");
+        let mut moved = an_event_wire(EventKind::TaskTransitioned);
+        moved["body"]["gate"] = json!("autopilot");
+        event_from_value(&moved).expect("a move through the autopilot gate");
     }
 
     #[test]
@@ -2299,7 +2401,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 134);
+        assert_eq!(EVERY_KIND.len(), 140);
     }
 
     #[test]
@@ -2328,7 +2430,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 134);
+        assert_eq!(EVERY_KIND.len(), 140);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2815,7 +2917,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 134);
+        assert_eq!(EVERY_KIND.len(), 140);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -2956,7 +3058,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 134);
+        assert_eq!(EVERY_KIND.len(), 140);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3271,7 +3373,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 134);
+        assert_eq!(EVERY_KIND.len(), 140);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

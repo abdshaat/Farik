@@ -320,9 +320,11 @@ pub fn decision_on(events: &[CatervasEvent], approval: u64) -> Option<&CatervasE
 }
 
 /// The kinds that say what an agent asked the human, and what the human answered.
-const ASKED: [EventKind; 6] = [
+const ASKED: [EventKind; 8] = [
     EventKind::QuestionAsked,
     EventKind::QuestionAnswered,
+    EventKind::TeamQuestionAsked,
+    EventKind::TeamQuestionAnswered,
     EventKind::EscalationRaised,
     EventKind::ToolApprovalRequested,
     EventKind::ToolApprovalGranted,
@@ -365,17 +367,29 @@ pub fn waiting(
         order: None,
         pipeline: None,
     };
-    let mut waiting = unanswered(&board, &history, &item);
+    // While the team decides, its questions to itself wait on the team, not on the owner
+    // (ADR 0082); turned off, they wait on the owner again.
+    let team_decides = crate::autopilot::team_decides(log, team)?;
+    let mut waiting = unanswered(&board, &history, team_decides, &item);
     waiting.extend(undecided(&board, &history, team, &item));
     waiting.extend(plans_waiting(&board, log, team, &item)?);
     waiting.extend(posts_waiting(&board, log, team, &item)?);
     waiting.extend(orders_waiting(&board, log, team, &item)?);
-    waiting.extend(pipelines_waiting(&board, log, team, &item)?);
+    // While the team decides, the Product Manager takes a data source (ADR 0082 decision 5).
+    if !team_decides {
+        waiting.extend(pipelines_waiting(&board, log, team, &item)?);
+    }
     let product_manager = team
         .active_agents()
         .find(|agent| Role::from(agent.role) == Role::ProductManager)
         .map(|agent| agent.id.to_string());
-    for row in board.iter().filter(|row| row.awaiting_approval) {
+    // While the team decides, the Product Manager takes these (ADR 0082): they wait on it, not on
+    // the owner, and turned off they wait on the owner again.
+    let owner_decides = !team_decides;
+    for row in board
+        .iter()
+        .filter(|row| owner_decides && row.awaiting_approval)
+    {
         let pm = product_manager.as_deref();
         let line = format!(
             "{} wrote a plan for you to approve",
@@ -383,10 +397,9 @@ pub fn waiting(
         );
         waiting.push(item(row, WaitingKind::Approval, pm, line));
     }
-    for row in board
-        .iter()
-        .filter(|row| row.status == TaskStatus::Escalated && !row.awaiting_approval)
-    {
+    for row in board.iter().filter(|row| {
+        owner_decides && row.status == TaskStatus::Escalated && !row.awaiting_approval
+    }) {
         let reason = history
             .iter()
             .rev()
@@ -410,7 +423,10 @@ pub fn waiting(
     }
     // A task its agent blocked waits on the owner from the moment it is blocked, with the
     // agent's own words (ADR 0068); the owner answers it as an escalation is answered.
-    for row in board.iter().filter(|row| row.status == TaskStatus::Blocked) {
+    for row in board
+        .iter()
+        .filter(|row| owner_decides && row.status == TaskStatus::Blocked)
+    {
         let moves = log.read(&EventQuery {
             task_id: Some(row.task_id.clone()),
             kinds: vec![EventKind::TaskTransitioned],
@@ -438,24 +454,9 @@ pub fn waiting(
     }
     for row in board
         .iter()
-        .filter(|row| row.status == TaskStatus::Verifying)
+        .filter(|row| owner_decides && row.status == TaskStatus::Verifying)
     {
-        let mut contract = files
-            .read_contract(&row.task_id)
-            .map_err(|error| StoreError::Io {
-                detail: error.to_string(),
-            })?;
-        contract.status = row.status;
-        if !result_awaits_human(&contract) {
-            continue;
-        }
-        // A task's result reaches the human once its reviewer passed it; an epic's is theirs.
-        if contract.kind != TaskKind::Epic
-            && !review_passed(&log.read(&EventQuery {
-                task_id: Some(row.task_id.clone()),
-                ..EventQuery::default()
-            })?)
-        {
+        if !awaits_acceptance(log, files, row)? {
             continue;
         }
         let assignee = row.assignee_id.as_deref();
@@ -472,7 +473,7 @@ pub fn waiting(
     // Catervas merges only as ADR 0073 allows: every accepted task awaiting integration waits
     // for the human, or for its checks when merging is on, with its pull request when one was
     // opened since it was accepted.
-    let merging = crate::merging::merging_allowed(log, team)?;
+    let merging = crate::autopilot::merges_on_its_own(log, team)?;
     for row in board.iter().filter(|row| row.awaiting_integration) {
         // A plan task has no pull request of its own: its tasks carry the plan, so there is
         // nothing of it for the human to merge.
@@ -515,6 +516,38 @@ pub fn waiting(
     Ok(waiting)
 }
 
+/// Whether the result of a task in `verifying` waits on the human's acceptance (5.4): it is an epic,
+/// risk `high`, or has a `human` criterion, and, for a task, its reviewer passed it; an epic's is
+/// the human's to review. The owner's acceptance is not looked for: the caller asks that.
+///
+/// # Errors
+///
+/// What the store refused.
+pub fn awaits_acceptance(
+    log: &EventLog,
+    files: &ProjectFiles,
+    row: &TaskProjection,
+) -> Result<bool, StoreError> {
+    if row.status != TaskStatus::Verifying {
+        return Ok(false);
+    }
+    let mut contract = files
+        .read_contract(&row.task_id)
+        .map_err(|error| StoreError::Io {
+            detail: error.to_string(),
+        })?;
+    contract.status = row.status;
+    if !result_awaits_human(&contract) {
+        return Ok(false);
+    }
+    // A task's result reaches the human once its reviewer passed it; an epic's is theirs.
+    Ok(contract.kind == TaskKind::Epic
+        || review_passed(&log.read(&EventQuery {
+            task_id: Some(row.task_id.clone()),
+            ..EventQuery::default()
+        })?))
+}
+
 /// Whether the latest `review.recorded` since the task last entered `verifying` passed.
 #[must_use]
 pub fn review_passed(history: &[CatervasEvent]) -> bool {
@@ -552,34 +585,36 @@ fn wire_status(status: TaskStatusWire) -> Option<TaskStatus> {
     TaskStatus::from_str(&status.to_string()).ok()
 }
 
-/// Every question nobody answered, by task.
+/// Every question nobody answered, by task. A question the team asked itself is one only while the
+/// team does not decide.
 fn unanswered(
     board: &[TaskProjection],
     history: &[CatervasEvent],
+    team_decides: bool,
     item: &impl Fn(&TaskProjection, WaitingKind, Option<&str>, String) -> Waiting,
 ) -> Vec<Waiting> {
     let mut waiting = Vec::new();
     for row in board {
         for event in history {
-            let EventBody::QuestionAsked(body) = &event.body else {
-                continue;
+            let (asked_by, question) = match &event.body {
+                EventBody::QuestionAsked(body) => (&body.asked_by, body.question.clone()),
+                EventBody::TeamQuestionAsked(body) if !team_decides => {
+                    (&body.asked_by, body.question.to_string())
+                }
+                _ => continue,
             };
             let seq = event.envelope.seq;
-            let answered = history.iter().any(|later| {
-                matches!(&later.body, EventBody::QuestionAnswered(answer)
-                    if answer.question_id.get() == seq)
+            let answered = history.iter().any(|later| match &later.body {
+                EventBody::QuestionAnswered(answer) => answer.question_id.get() == seq,
+                EventBody::TeamQuestionAnswered(answer) => answer.question_seq.get() == seq,
+                _ => false,
             });
             if answered || event.envelope.ids.task_id.as_ref() != Some(&row.task_id) {
                 continue;
             }
             waiting.push(Waiting {
                 question_id: Some(seq),
-                ..item(
-                    row,
-                    WaitingKind::Question,
-                    Some(&body.asked_by),
-                    body.question.clone(),
-                )
+                ..item(row, WaitingKind::Question, Some(asked_by), question)
             });
         }
     }

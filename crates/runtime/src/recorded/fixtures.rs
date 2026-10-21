@@ -48,6 +48,78 @@ pub fn a_session_spec() -> SessionSpec {
     }
 }
 
+/// A session that calls each of `calls` in order, as `(Catervas tool, input)`, and ends
+/// successfully. Each tool is really called when the adapter has a runner, and its answer replaces
+/// the recorded one. Hand-written, because the inputs depend on the project a test builds.
+#[must_use]
+pub fn tool_calls(calls: &[(&str, serde_json::Value)]) -> Transcript {
+    let session = "4ccfbbbf-2922-471d-8437-b057f91b60e5";
+    let usage = json!({
+        "input_tokens": 8, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+        "output_tokens": 40, "service_tier": "standard"
+    });
+    let mut lines = vec![json!({
+        "type": "system", "subtype": "init", "cwd": "/workspace", "session_id": session,
+        "model": "claude-haiku-4-5-20251001", "claude_code_version": "2.1.280",
+        "apiKeySource": "none", "permissionMode": "default"
+    })];
+    for (at, (tool, input)) in calls.iter().enumerate() {
+        let id = format!("toolu_{at:024}");
+        lines.push(json!({
+            "type": "assistant",
+            "message": {
+                "model": "claude-haiku-4-5-20251001", "id": format!("msg_{at:024}"),
+                "type": "message", "role": "assistant",
+                "content": [{
+                    "type": "tool_use", "id": id, "name": format!("{CATERVAS_PREFIX}{tool}"),
+                    "input": input, "caller": { "type": "direct" }
+                }],
+                "stop_reason": null, "stop_sequence": null, "usage": usage
+            },
+            "parent_tool_use_id": null, "session_id": session,
+            "uuid": format!("00000000-0000-4000-8000-{at:012}")
+        }));
+        lines.push(json!({
+            "type": "user",
+            "message": { "role": "user", "content": [{
+                "tool_use_id": id, "type": "tool_result",
+                "content": [{ "type": "text", "text": "{}" }]
+            }]},
+            "parent_tool_use_id": null, "session_id": session,
+            "uuid": format!("00000000-0000-4000-9000-{at:012}"),
+            "timestamp": "2026-10-20T12:00:00.000Z"
+        }));
+    }
+    lines.push(json!({
+        "type": "assistant",
+        "message": {
+            "model": "claude-haiku-4-5-20251001", "id": "msg_done", "type": "message",
+            "role": "assistant", "content": [{ "type": "text", "text": "Done." }],
+            "stop_reason": null, "stop_sequence": null, "usage": usage
+        },
+        "parent_tool_use_id": null, "session_id": session,
+        "uuid": "00000000-0000-4000-a000-000000000000"
+    }));
+    lines.push(json!({
+        "type": "result", "subtype": "success", "is_error": false, "duration_ms": 5100,
+        "duration_api_ms": 4700, "num_turns": calls.len() + 1, "result": "Done.",
+        "stop_reason": "end_turn", "session_id": session, "total_cost_usd": 0.0,
+        "usage": {
+            "input_tokens": 2400, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0,
+            "output_tokens": 160, "service_tier": "standard"
+        },
+        "permission_denials": [], "terminal_reason": "completed",
+        "uuid": "00000000-0000-4000-b000-000000000000"
+    }));
+    Transcript::from_jsonl(
+        &lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+    )
+}
+
 /// A Read of `/workspace/note.txt`, its result, the text `hello fixture`, and a successful end.
 #[must_use]
 pub fn reads_a_file() -> Transcript {

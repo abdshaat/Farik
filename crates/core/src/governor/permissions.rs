@@ -208,6 +208,9 @@ pub struct ConnectorPass {
     /// Whether the active marketing plan approved the call: a tool the kit marks, called while
     /// a plan is active, never asked (ADR 0042).
     pub plan_approved: bool,
+    /// Whether autopilot let a call that would have needed the owner run (ADR 0082 decision 5):
+    /// no grant or allowance is used, and the call is recorded `tool.approved`.
+    pub autopilot_approved: bool,
 }
 
 /// The largest input, in bytes of its compact JSON, that the human is asked to allow: anything
@@ -272,7 +275,9 @@ pub enum ConnectorRefusal {
 /// first. A `network` call ignores both. The tag governs whatever the agent's tiers. A tool the
 /// connector marks as approved by the marketing plan (`plan_tools`) runs only while a plan is
 /// active (`active_plan`), as the plan's own call, and neither a grant nor an allowance applies to
-/// it. `tool` is the bare tool name, without `mcp__<server>__`.
+/// it. Under `autopilot` a `paid` or `ask` tool that no plan marks runs with neither a grant nor an
+/// allowance, and says so in `autopilot_approved` (ADR 0082 decision 5). `tool` is the bare tool
+/// name, without `mcp__<server>__`.
 ///
 /// # Errors
 ///
@@ -288,6 +293,7 @@ pub fn evaluate_connector_call(
     granted: Option<u64>,
     used: u32,
     active_plan: bool,
+    autopilot: bool,
 ) -> Result<ConnectorPass, ConnectorRefusal> {
     let connector = connector.ok_or(ConnectorRefusal::ConnectorNotInSession)?;
     let tag = match connector.tools.get(tool) {
@@ -303,6 +309,7 @@ pub fn evaluate_connector_call(
         approval,
         allowance,
         plan_approved: false,
+        autopilot_approved: false,
     };
     if tag == ConnectorTag::Network {
         return Ok(pass(None, None));
@@ -325,10 +332,20 @@ pub fn evaluate_connector_call(
                 approval: None,
                 allowance: None,
                 plan_approved: true,
+                autopilot_approved: false,
             })
         } else {
             Err(ConnectorRefusal::NoActivePlan)
         };
+    }
+    // Under autopilot a call that costs money, or that the owner chose to be asked about, runs
+    // within the daily limit and the call's rate, and is recorded so (ADR 0082 decision 5): no
+    // grant is used up and no allowance counted.
+    if autopilot {
+        return Ok(ConnectorPass {
+            autopilot_approved: true,
+            ..pass(None, None)
+        });
     }
     if let Some(approval) = granted {
         return Ok(pass(Some(approval), None));
@@ -641,7 +658,7 @@ mod tests {
         connector: Option<&SessionConnector>,
         granted: Option<u64>,
     ) -> Result<(ConnectorTag, Option<u64>), Refused> {
-        evaluate_connector_call(tool, input, connector, granted, 0, false)
+        evaluate_connector_call(tool, input, connector, granted, 0, false, false)
             .map(|pass| (pass.tag, pass.approval))
     }
 
@@ -800,12 +817,21 @@ mod tests {
         };
         // An `external_effect` call with no grant runs, recorded as every call is, with no approval.
         assert_eq!(
-            evaluate_connector_call("send_note", &json!({}), Some(&connector), None, 0, false),
+            evaluate_connector_call(
+                "send_note",
+                &json!({}),
+                Some(&connector),
+                None,
+                0,
+                false,
+                false
+            ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::ExternalEffect,
                 approval: None,
                 allowance: None,
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
         // A `paid` call with no grant and no allowance asks.
@@ -819,6 +845,7 @@ mod tests {
                 }),
                 None,
                 0,
+                false,
                 false
             ),
             Err(Refused::ApprovalNeeded)
@@ -831,13 +858,15 @@ mod tests {
                 Some(&connector),
                 None,
                 2,
+                false,
                 false
             ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::Paid,
                 approval: None,
                 allowance: Some(3),
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
         assert_eq!(
@@ -847,6 +876,7 @@ mod tests {
                 Some(&connector),
                 None,
                 3,
+                false,
                 false
             ),
             Err(Refused::ApprovalNeeded)
@@ -868,6 +898,7 @@ mod tests {
                 granted,
                 used,
                 false,
+                false,
             )
         };
         assert_eq!(call(None, 2), Err(Refused::ApprovalNeeded));
@@ -877,7 +908,8 @@ mod tests {
                 tag: ConnectorTag::Ask,
                 approval: Some(7),
                 allowance: None,
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
         assert_eq!(
@@ -886,7 +918,8 @@ mod tests {
                 tag: ConnectorTag::Ask,
                 approval: None,
                 allowance: Some(2),
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
         assert_eq!(
@@ -998,13 +1031,15 @@ mod tests {
                 Some(&with_allowance(20)),
                 None,
                 19,
+                false,
                 false
             ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::Paid,
                 approval: None,
                 allowance: Some(20),
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
     }
@@ -1019,6 +1054,7 @@ mod tests {
                     Some(&with_allowance(20)),
                     None,
                     used,
+                    false,
                     false
                 ),
                 Err(Refused::ApprovalNeeded),
@@ -1030,7 +1066,15 @@ mod tests {
     #[test]
     fn asks_at_any_count_for_a_tool_without_one() {
         assert_eq!(
-            evaluate_connector_call("create_issue", &json!({}), Some(&github()), None, 0, false),
+            evaluate_connector_call(
+                "create_issue",
+                &json!({}),
+                Some(&github()),
+                None,
+                0,
+                false,
+                false
+            ),
             Err(Refused::ApprovalNeeded)
         );
     }
@@ -1044,6 +1088,7 @@ mod tests {
                 Some(&with_allowance(0)),
                 None,
                 0,
+                false,
                 false
             ),
             Err(Refused::ApprovalNeeded)
@@ -1059,13 +1104,15 @@ mod tests {
                 Some(&with_allowance(20)),
                 Some(7),
                 0,
+                false,
                 false
             ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::Paid,
                 approval: Some(7),
                 allowance: None,
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
     }
@@ -1080,6 +1127,7 @@ mod tests {
                 Some(&with_allowance(20)),
                 None,
                 0,
+                false,
                 false
             ),
             Err(Refused::InputTooLarge)
@@ -1099,13 +1147,15 @@ mod tests {
                 Some(&connector),
                 None,
                 0,
+                false,
                 false
             ),
             Ok(ConnectorPass {
                 tag: ConnectorTag::Network,
                 approval: None,
                 allowance: None,
-                plan_approved: false
+                plan_approved: false,
+                autopilot_approved: false,
             })
         );
     }
@@ -1131,6 +1181,7 @@ mod tests {
                 granted,
                 used,
                 active,
+                false,
             )
         };
         // Inside a plan it passes as the plan's: no grant, no allowance, whatever was on offer.
@@ -1141,7 +1192,8 @@ mod tests {
                     tag: ConnectorTag::Paid,
                     approval: None,
                     allowance: None,
-                    plan_approved: true
+                    plan_approved: true,
+                    autopilot_approved: false,
                 }),
                 "{granted:?} {used}"
             );
@@ -1172,13 +1224,15 @@ mod tests {
                     Some(&with_allowance(5)),
                     None,
                     0,
-                    active
+                    active,
+                    false
                 ),
                 Ok(ConnectorPass {
                     tag: ConnectorTag::Paid,
                     approval: None,
                     allowance: Some(5),
-                    plan_approved: false
+                    plan_approved: false,
+                    autopilot_approved: false,
                 }),
                 "{active}"
             );
@@ -1189,7 +1243,8 @@ mod tests {
                     Some(&github()),
                     None,
                     0,
-                    active
+                    active,
+                    false
                 ),
                 Err(Refused::ApprovalNeeded),
                 "{active}"
@@ -1203,6 +1258,7 @@ mod tests {
                 Some(&connector),
                 None,
                 0,
+                false,
                 false
             )
             .map(|pass| pass.plan_approved),
@@ -1837,5 +1893,62 @@ mod tests {
         };
         assert_eq!(pattern, "(unclosed");
         assert!(!detail.is_empty());
+    }
+
+    #[test]
+    fn a_paid_or_ask_call_runs_under_autopilot_and_says_so() {
+        let connector = SessionConnector {
+            tools: [
+                ("generate_image", ConnectorTag::Paid),
+                ("review_draft", ConnectorTag::Ask),
+                ("make_video", ConnectorTag::Denied),
+                ("create_issue", ConnectorTag::Paid),
+            ]
+            .into_iter()
+            .map(|(tool, tag)| (tool.to_string(), tag))
+            .collect(),
+            plan_tools: ["create_issue".to_string()].into(),
+            ..github()
+        };
+        let run = |tool: &str, input: &serde_json::Value, granted, autopilot| {
+            evaluate_connector_call(tool, input, Some(&connector), granted, 0, false, autopilot)
+        };
+        for (tool, tag) in [
+            ("generate_image", ConnectorTag::Paid),
+            ("review_draft", ConnectorTag::Ask),
+        ] {
+            // With a grant on file too: it is not used up.
+            for granted in [None, Some(7)] {
+                assert_eq!(
+                    run(tool, &json!({}), granted, true),
+                    Ok(ConnectorPass {
+                        tag,
+                        approval: None,
+                        allowance: None,
+                        plan_approved: false,
+                        autopilot_approved: true,
+                    }),
+                    "{tool} {granted:?}"
+                );
+            }
+            // Autopilot off: the existing answers hold.
+            assert_eq!(
+                run(tool, &json!({}), None, false),
+                Err(Refused::ApprovalNeeded)
+            );
+        }
+        let big = json!({ "b": "x".repeat(MAX_APPROVAL_INPUT) });
+        assert_eq!(
+            run("generate_image", &big, None, true),
+            Err(Refused::InputTooLarge)
+        );
+        assert_eq!(
+            run("make_video", &json!({}), None, true),
+            Err(Refused::ToolDenied)
+        );
+        assert_eq!(
+            run("create_issue", &json!({}), None, true),
+            Err(Refused::NoActivePlan)
+        );
     }
 }

@@ -40,6 +40,9 @@ pub enum SessionPurpose {
     Chat,
     /// Working towards the owner's goal: planning its next steps, or reading its number (ADR 0075).
     Goal,
+    /// Deciding for the team under autopilot: answering a question or taking the owner's decision
+    /// (ADR 0082).
+    Decide,
 }
 
 /// Whether a session works on a task: only an `implement` session about one does. Every other
