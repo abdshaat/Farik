@@ -173,7 +173,7 @@ Tests:
   - With `ANTHROPIC_API_KEY` set to `x` in the env given to `new`, `status()` has kind `Environment`.
   - `sign_out()` touched `logged_out`.
 
-- [ ] `feat(runtime): ask claude code its account, check it, and sign it out`
+- [x] `feat(runtime): ask claude code its account, check it, and sign it out`
 
 ### Task 4: Signing in through Claude Code's login
 
