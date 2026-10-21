@@ -87,7 +87,7 @@ Tests (`team.test.tsx`, replacing those at :767, :1533, :1613, :1677, :1739, :17
 - `says_the_account_comes_from_the_environment`: asserts that with kind `environment` and `environmentVariable: "ANTHROPIC_API_KEY"`, the section shows the environment sentence and no Sign out.
 - `offers_sign_in_again_after_a_refused_key`: asserts that with `keyRefused: true` the section shows "Sign in again" with both choices.
 
-- [ ] `feat(web): check, sign out and sign in again in settings`
+- [x] `feat(web): check, sign out and sign in again in settings`
 
 ### Task 12: The refused key's lines, and the landing
 

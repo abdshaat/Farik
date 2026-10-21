@@ -147,24 +147,6 @@ export const en = {
 	accountTitle: "Connect your AI account",
 	accountLead:
 		"Your agents think with Claude, and your account pays for it. You sign in through Claude Code, which keeps your sign-in on this computer. Catervas never sees your key.",
-	accountKind: "Your Claude account",
-	subscription: "I have a Claude subscription (Pro or Max)",
-	subscriptionNote:
-		"Recommended if you already pay for Claude. Make a key for Catervas in two steps:",
-	subscriptionStepType: "Open the Terminal and type",
-	subscriptionStepPaste:
-		"Sign in when your browser opens, then paste the key it prints here.",
-	subscriptionKey: "Your subscription key",
-	subscriptionHint: "It starts with sk-ant-oat.",
-	apiKey: "I have an API key",
-	apiKeyNote: "From console.anthropic.com. You pay for what your agents use.",
-	apiKeyField: "Your API key",
-	apiKeyHint: "It starts with sk-ant-api.",
-	saveContinue: "Save and continue",
-	storedKeychain: "Your key is saved in your computer’s keychain.",
-	storedFile:
-		"Your key is saved in a private file on this computer, because it has no keychain Catervas can use.",
-	accountFound: "Catervas already has your key. You can go on.",
 	signInClaude: "Sign in with Claude (Pro or Max)",
 	signInClaudeNote: "Recommended if you already pay for Claude.",
 	signInConsole: "Sign in with an Anthropic Console account",
@@ -537,25 +519,24 @@ export const en = {
 	agentCancel: "Cancel",
 	agentNextWork: "Applies from {name}’s next task.",
 	accountRow: "Your AI account",
-	accountConnected: "Claude, with {kind}.",
-	accountApiKey: "an API key",
+	accountSignedIn: "Claude, through Claude Code: signed in with {kind}.",
 	accountSubscription: "your Claude subscription",
-	accountKeychain: "Kept in your computer’s keychain.",
-	accountFile: "Kept in a private file on this computer.",
-	accountEnvironment: "Read from this computer’s environment.",
-	accountNone: "No AI account is connected.",
-	accountKeyRefused:
-		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
-	accountConnectAgain: "Connect again",
-	accountConnect: "Connect account",
-	accountBack: "Connected. If your team is paused, press Resume.",
+	accountConsole: "your Anthropic Console account",
+	accountOther: "another sign-in",
+	accountNone: "Not signed in.",
+	accountSignInAgain: "Sign in again",
+	accountSignInHeading: "Sign in",
+	accountCheck: "Check connection",
+	accountSignOut: "Sign out",
+	accountSignedBack: "Signed in. If your team is paused, press Resume.",
+	accountSignedOut:
+		"Signed out. The team is paused until you sign in again and press Resume.",
+	accountKeptKeyRemoved:
+		"Catervas no longer keeps your key. It removed the one it kept, so sign in through Claude Code once.",
 	accountKeyRefusedEnvironment:
-		"The key in {variable} did not work, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
-	accountDisconnect: "Disconnect this account",
-	accountGone:
-		"Disconnected. The team is paused until you connect an account and press Resume.",
+		"The key in {variable} was refused, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
 	accountKept:
-		"Catervas reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Catervas again.",
+		"It comes from {variable} where you start Catervas. Remove it there to sign in here instead.",
 	statusPlanning: "Planning",
 	statusToDo: "To do",
 	statusInProgress: "In progress",
@@ -914,11 +895,6 @@ export const en = {
 	setupNameTaken:
 		"A folder with that name is already there. Choose another name.",
 	setupNoGit: "Git is not installed on this computer.",
-	setupNotSubscription:
-		"That is not a subscription key. A subscription key starts with sk-ant-oat.",
-	setupNotApiKey: "That is not an API key. An API key starts with sk-ant-api.",
-	setupNoKeep:
-		"This computer has no keychain and no folder to keep the key in.",
 	setupKeyFromEnvironment:
 		"Your AI account comes from a key set where Catervas runs. Remove it there to sign in here.",
 	setupNoDocker: "Docker is not installed on this computer.",
@@ -955,8 +931,8 @@ export const en = {
 	refuseBranchMissing:
 		"This project has no branch of that name yet. Make it, then save.",
 	accountConfirm:
-		"Disconnecting pauses your team until you start Catervas again and connect an account.",
-	accountDisconnectYes: "Disconnect and pause the team",
+		"Sign out of Claude Code? The team pauses until you sign in again.",
+	accountSignOutYes: "Sign out",
 	board: "Board",
 	costs: "Costs",
 	boardFilters: "Filters",

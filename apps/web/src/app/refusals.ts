@@ -197,7 +197,7 @@ export function saidAll(e: unknown): string {
 
 /**
  * The daemon's refusals that carry no code, by how its sentence starts (crates/cli/src/setup.rs,
- * crates/runtime/src/daemon/setup.rs, computer.rs, credential.rs, daemon/gates.rs), and the words
+ * crates/runtime/src/daemon/setup.rs, computer.rs, daemon/team.rs, daemon/gates.rs), and the words
  * a person reads for each.
  */
 const SENTENCES: [string, keyof typeof en][] = [
@@ -214,9 +214,6 @@ const SENTENCES: [string, keyof typeof en][] = [
 	["that description is too long", "setupDescribeLess"],
 	["a folder with that name is already there", "setupNameTaken"],
 	["git is not installed", "setupNoGit"],
-	["that is not a Claude subscription token", "setupNotSubscription"],
-	["that is not an Anthropic API key", "setupNotApiKey"],
-	["this computer has no keychain", "setupNoKeep"],
 	["your AI account comes from", "setupKeyFromEnvironment"],
 	["no sign-in is waiting for a code", "signInNoneWaiting"],
 	["Claude Code did not give a sign-in address", "signInNoAddress"],
