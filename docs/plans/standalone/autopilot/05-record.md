@@ -30,7 +30,7 @@ Files: `docs/plans/project-plan.md`, `docs/plans/phase-11-milestones/step-01-ask
 - `project-plan.md`: the status line's revision becomes 45, and a revision note is appended after revision 44's: "Revision 45 (2026-10-20; ADR 0082) drops phase 11 step 01, ask or auto: autopilot, built by the standalone plan `autopilot`, is the one switch, and its "Done on its own" reuses the step's approved mockups." The phase 11 heading's name stays; row `01` (near line 660) is kept and its text starts "Dropped by revision 45 (ADR 0082): autopilot replaces it." The phase's "Ends with" line (it opens "the owner chooses, per team, to approve every outward act or to let the team act on its own") loses that clause and starts at "every role's kit but the DevOps Engineer's".
 - `step-01-ask-or-auto.md`: its `Status:` line becomes "dropped (ADR 0082, 2026-10-20): autopilot replaces it; its mockups' Done on its own is reused by `docs/plans/standalone/autopilot/04-web.md`". Nothing else in it changes.
 
-- [ ] `docs(plans): drop phase 11 step 01 for autopilot (ADR 0082)`
+- [x] `docs(plans): drop phase 11 step 01 for autopilot (ADR 0082)`
 
 ## Verification
 
