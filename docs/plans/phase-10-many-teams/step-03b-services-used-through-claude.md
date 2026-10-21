@@ -250,7 +250,7 @@ Files: `0003_services.sql`, `migrations.rs`, `machine.rs` (`FileRead` gains the 
 - `keeps_each_tool_call_once`: the connectors fixture gives `tool_calls` rows `toolu_1`, `toolu_2`, `toolu_3`, `toolu_8` (their full tool names), `toolu_4` and `toolu_9` (`touches_spreadsheet` 1), and no others; both tools of `msg_T3` (`toolu_3`, `toolu_4`) and both of `msg_T8` (`toolu_8`, `toolu_9`), each from its own line, have a row with that `reply_key`; `toolu_1`'s `reply_key` is `msg_T1`; a second file of another session repeating T1 adds no row; after every `transcript_files` row is set to (0, 0, 0) and the file read again, `tool_calls`, `sessions` and `replies` are row for row as before. RED: no table.
 - `keeps_no_tool_input` (guard): after reading the connectors fixture, the bytes of `machine.db` hold no `NEVER-KEPT-TEXT`.
 
-- [ ] `feat(store): keep claude code tool calls in the machine index`
+- [x] `feat(store): keep claude code tool calls in the machine index`
 
 ### Task 6: Reading the settings files
 

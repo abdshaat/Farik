@@ -9,6 +9,7 @@ use catervas_core::claude_history::{
     Folder, KnownRoot, Place, SessionPlace, TranscriptLine, once_per_reply, place_folders,
     place_session, read_line,
 };
+use catervas_core::claude_services::server_segment;
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OpenFlags};
 
@@ -16,7 +17,7 @@ use crate::error::StoreError;
 use crate::git::{Git, GitError};
 use crate::machine::{
     FileRead, FileState, MachineIndex, Ownership, Placement, ProjectRow, ReplyBatch, SessionBatch,
-    SessionCronBatch,
+    SessionCronBatch, ToolCallBatch,
 };
 
 /// Where a Catervas project keeps its log, relative to its root.
@@ -154,6 +155,7 @@ struct Chunk {
     titles: BTreeMap<String, String>,
     replies: BTreeMap<String, ReplyBatch>,
     crons: BTreeMap<(String, String), SessionCronBatch>,
+    tool_calls: BTreeMap<String, ToolCallBatch>,
 }
 
 fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
@@ -179,6 +181,19 @@ fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
                                     cron: call.cron.clone(),
                                     at: turn.at,
                                 });
+                        }
+                    }
+                    for tool in &reply.tools {
+                        if server_segment(&tool.name).is_some() || tool.touches_spreadsheet {
+                            chunk.tool_calls.entry(tool.id.clone()).or_insert_with(|| {
+                                ToolCallBatch {
+                                    tool_use_id: tool.id.clone(),
+                                    reply_key: reply.key.clone(),
+                                    tool_name: tool.name.clone(),
+                                    touches_spreadsheet: tool.touches_spreadsheet,
+                                    at: turn.at,
+                                }
+                            });
                         }
                     }
                     let batch = ReplyBatch {
@@ -301,6 +316,7 @@ pub fn read_transcripts(
                 titles: chunk.titles.into_iter().collect(),
                 replies: chunk.replies.into_values().collect(),
                 crons: chunk.crons.into_values().collect(),
+                tool_calls: chunk.tool_calls.into_values().collect(),
             },
             now,
         )?;
@@ -485,8 +501,8 @@ mod tests {
     use crate::files::fixtures::TempProject;
     use crate::machine::{MACHINE_DB, open_machine_index};
     use catervas_core::claude_history::fixtures::{
-        CLAUDE_CODE_2_1_296, CRON_CREATE_LINES, CronCreateLine, a_cron_create_line, a_reply_line,
-        a_turn_line,
+        CLAUDE_CODE_2_1_296, CLAUDE_CODE_2_1_296_CONNECTORS, CRON_CREATE_LINES, CronCreateLine,
+        a_cron_create_line, a_reply_line, a_turn_line,
     };
     use catervas_core::pricing::Usage;
 
@@ -1002,6 +1018,74 @@ mod tests {
         let bytes = std::fs::read(setup.db()).expect("the index file");
         let marker = b"NEVER-KEPT-TEXT";
         assert!(!bytes.windows(marker.len()).any(|window| window == marker));
+    }
+
+    const CONNECTORS_SESSION: &str = "33333333-3333-4333-8333-333333333333";
+    const TOOL_CALLS: &str = "SELECT printf('%s|%s|%s|%d|%s', tool_use_id, reply_key, tool_name, touches_spreadsheet, at) FROM tool_calls ORDER BY tool_use_id";
+
+    #[test]
+    fn keeps_each_tool_call_once() {
+        let setup = Setup::new("keeps-each-tool-call-once");
+        std::fs::write(
+            setup.transcript(CONNECTORS_SESSION),
+            CLAUDE_CODE_2_1_296_CONNECTORS,
+        )
+        .expect("a transcript");
+        setup.read();
+        let expected = vec![
+            "toolu_1|msg_T1|mcp__claude_ai_Zoho_Books__list_invoices|0|2026-10-12T09:10:00.000Z",
+            "toolu_2|msg_T2|mcp__claude_ai_Zoho_Books__get_invoice|0|2026-10-12T09:10:10.000Z",
+            "toolu_3|msg_T3|mcp__claude_ai_Zoho_Books__create_expense|0|2026-10-12T09:10:20.000Z",
+            "toolu_4|msg_T3|Read|1|2026-10-12T09:10:21.000Z",
+            "toolu_8|msg_T8|mcp__plugin_product-management_slack__send_message|0|2026-10-12T09:11:20.000Z",
+            "toolu_9|msg_T8|Edit|1|2026-10-12T09:11:21.000Z",
+        ];
+        assert_eq!(setup.rows(TOOL_CALLS), expected);
+
+        // Another session's file repeating a reply adds no row and moves none.
+        let other = CLAUDE_CODE_2_1_296_CONNECTORS
+            .lines()
+            .take(1)
+            .map(|line| line.replace(CONNECTORS_SESSION, OTHER))
+            .collect::<Vec<_>>()
+            .join("\n");
+        std::fs::write(setup.transcript(OTHER), format!("{other}\n")).expect("a second file");
+        setup.read();
+        assert_eq!(setup.rows(TOOL_CALLS), expected);
+
+        // Migration 3 reads every file again; nothing changes.
+        let everything = |setup: &Setup| {
+            let mut all = dump(setup);
+            all.extend(setup.rows(TOOL_CALLS));
+            all
+        };
+        let before = everything(&setup);
+        let connection = Connection::open(setup.db()).expect("the index file opens");
+        connection
+            .execute(
+                "UPDATE transcript_files SET read_to = 0, turns = 0, unreadable_lines = 0",
+                [],
+            )
+            .expect("migration 3's reset");
+        drop(connection);
+        setup.read();
+        assert_eq!(everything(&setup), before);
+    }
+
+    /// Guard: checked by mutation (store a tool's input or path), not watched to fail.
+    #[test]
+    fn keeps_no_tool_input() {
+        let setup = Setup::new("keeps-no-tool-input");
+        std::fs::write(
+            setup.transcript(CONNECTORS_SESSION),
+            CLAUDE_CODE_2_1_296_CONNECTORS,
+        )
+        .expect("a transcript");
+        setup.read();
+        let bytes = std::fs::read(setup.db()).expect("the index file");
+        let marker = b"NEVER-KEPT-TEXT";
+        assert!(!bytes.windows(marker.len()).any(|window| window == marker));
+        assert!(!setup.rows(TOOL_CALLS).is_empty());
     }
 
     #[test]

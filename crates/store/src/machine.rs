@@ -88,8 +88,7 @@ pub(crate) struct ReplyBatch {
     pub model: String,
     pub at: DateTime<Utc>,
     pub usage: Usage,
-    /// The tool calls of every line of the reply, once each by tool-use id. Only `CronCreate` calls
-    /// are stored, as session crons; step 03b stores the rest.
+    /// The tool calls of every line of the reply, once each by tool-use id.
     pub tools: Vec<ToolUse>,
 }
 
@@ -102,6 +101,15 @@ pub(crate) struct SessionCronBatch {
     pub at: DateTime<Utc>,
 }
 
+/// A tool call with a server or on a spreadsheet, as the line that carries it reports it.
+pub(crate) struct ToolCallBatch {
+    pub tool_use_id: String,
+    pub reply_key: String,
+    pub tool_name: String,
+    pub touches_spreadsheet: bool,
+    pub at: DateTime<Utc>,
+}
+
 /// Everything one file adds to the index, written in one transaction.
 pub(crate) struct FileRead<'a> {
     pub path: &'a str,
@@ -110,6 +118,7 @@ pub(crate) struct FileRead<'a> {
     pub titles: Vec<(String, String)>,
     pub replies: Vec<ReplyBatch>,
     pub crons: Vec<SessionCronBatch>,
+    pub tool_calls: Vec<ToolCallBatch>,
 }
 
 /// One recurring job, as `machine.db` keeps it. Its key is `(origin, file, name)`.
@@ -289,6 +298,56 @@ fn stamp(time: DateTime<Utc>) -> String {
 // A session's turn fields are those of its earliest turn: the folder it started in.
 const EARLIER: &str = "excluded.first_at IS NOT NULL AND (sessions.first_at IS NULL OR excluded.first_at < sessions.first_at)";
 
+/// Writes a file's session crons and tool calls inside its transaction.
+fn write_crons_and_calls(
+    transaction: &rusqlite::Transaction<'_>,
+    file: &FileRead<'_>,
+    now: DateTime<Utc>,
+) -> Result<(), StoreError> {
+    for cron in &file.crons {
+        // A session-only cron is gone with its session, and at the latest `SESSION_CRON_DAYS`
+        // after the call. Whether the session still runs cannot be known.
+        let schedules =
+            serde_json::to_string(&[&cron.cron]).map_err(|error| StoreError::Sqlite {
+                detail: error.to_string(),
+            })?;
+        transaction.execute(
+            "INSERT INTO jobs (origin, file, name, kind, display_name, schedules, folder, expires_at,
+                               state_at, last_seen)
+             VALUES ('claude_session', ?1, ?2, 'session_cron', ?3, ?4, ?5, ?6, ?7, ?8)
+             ON CONFLICT (origin, file, name) DO UPDATE SET
+                 display_name = excluded.display_name, schedules = excluded.schedules,
+                 folder = excluded.folder, expires_at = excluded.expires_at,
+                 state_at = excluded.state_at, last_seen = excluded.last_seen",
+            (
+                &cron.session_id,
+                &cron.tool_use_id,
+                format!("Session cron {}", cron.cron),
+                schedules,
+                &cron.cwd,
+                stamp(cron.at + Days::days(SESSION_CRON_DAYS)),
+                stamp(cron.at),
+                stamp(now),
+            ),
+        )?;
+    }
+    for call in &file.tool_calls {
+        // The first row of an id stays: a resumed session repeats the line.
+        transaction.execute(
+            "INSERT OR IGNORE INTO tool_calls (tool_use_id, reply_key, tool_name, touches_spreadsheet, at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            (
+                &call.tool_use_id,
+                &call.reply_key,
+                &call.tool_name,
+                i64::from(call.touches_spreadsheet),
+                stamp(call.at),
+            ),
+        )?;
+    }
+    Ok(())
+}
+
 impl MachineIndex {
     pub(crate) fn file_state(&self, path: &str) -> Result<Option<FileState>, StoreError> {
         let state = self
@@ -318,7 +377,7 @@ impl MachineIndex {
         Ok(u64::try_from(count).unwrap_or(0))
     }
 
-    /// Writes one file's sessions, titles, replies and its new offset, all or none.
+    /// Writes one file's sessions, titles, replies, tool calls and its new offset, all or none.
     pub(crate) fn record_file(
         &mut self,
         file: &FileRead<'_>,
@@ -387,33 +446,7 @@ impl MachineIndex {
                 ),
             )?;
         }
-        for cron in &file.crons {
-            // A session-only cron is gone with its session, and at the latest `SESSION_CRON_DAYS`
-            // after the call. Whether the session still runs cannot be known.
-            let schedules =
-                serde_json::to_string(&[&cron.cron]).map_err(|error| StoreError::Sqlite {
-                    detail: error.to_string(),
-                })?;
-            transaction.execute(
-                "INSERT INTO jobs (origin, file, name, kind, display_name, schedules, folder, expires_at,
-                                   state_at, last_seen)
-                 VALUES ('claude_session', ?1, ?2, 'session_cron', ?3, ?4, ?5, ?6, ?7, ?8)
-                 ON CONFLICT (origin, file, name) DO UPDATE SET
-                     display_name = excluded.display_name, schedules = excluded.schedules,
-                     folder = excluded.folder, expires_at = excluded.expires_at,
-                     state_at = excluded.state_at, last_seen = excluded.last_seen",
-                (
-                    &cron.session_id,
-                    &cron.tool_use_id,
-                    format!("Session cron {}", cron.cron),
-                    schedules,
-                    &cron.cwd,
-                    stamp(cron.at + Days::days(SESSION_CRON_DAYS)),
-                    stamp(cron.at),
-                    stamp(now),
-                ),
-            )?;
-        }
+        write_crons_and_calls(&transaction, file, now)?;
         transaction.execute(
             "INSERT OR REPLACE INTO transcript_files (path, read_to, turns, unreadable_lines, read_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -821,10 +854,10 @@ mod tests {
         let temp = TempProject::new("opens-machine-index");
         let path = temp.root.join("state").join(MACHINE_DB);
         let index = open_machine_index(&path, now()).expect("the index opens");
-        assert_eq!(index.applied_migrations().expect("versions"), vec![1, 2]);
+        assert_eq!(index.applied_migrations().expect("versions"), vec![1, 2, 3]);
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
-        assert_eq!(again.applied_migrations().expect("versions"), vec![1, 2]);
+        assert_eq!(again.applied_migrations().expect("versions"), vec![1, 2, 3]);
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
         let mut tables: Vec<String> = connection
@@ -838,10 +871,12 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "configured_servers",
                 "jobs",
                 "projects",
                 "replies",
                 "sessions",
+                "tool_calls",
                 "transcript_files"
             ]
         );
