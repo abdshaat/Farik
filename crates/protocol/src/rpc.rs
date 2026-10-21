@@ -178,7 +178,6 @@ mod tests {
                 Some(q("folders.list", json!({ "path": 3 }))),
             ),
             (q("computer.check", json!({})), None),
-            (q("account.status", json!({})), None),
             (
                 request(
                     2,
@@ -199,14 +198,6 @@ mod tests {
                     &json!({ "parent": "code", "name": "a", "no_sandbox": true }),
                 )),
             ),
-            (
-                request(
-                    4,
-                    "account.connect",
-                    &json!({ "kind": "api_key", "secret": "sk-ant-api-x" }),
-                ),
-                Some(request(4, "account.connect", &json!({ "kind": "api_key" }))),
-            ),
             (request(5, "sandbox.build", &json!({})), None),
         ];
         for (good, bad) in cases {
@@ -215,12 +206,40 @@ mod tests {
                 assert!(rpc_request_from_value(&bad).is_err(), "{bad} was read");
             }
         }
-        let wrong_kind = request(
-            4,
-            "account.connect",
-            &json!({ "kind": "password", "secret": "x" }),
-        );
-        assert!(rpc_request_from_value(&wrong_kind).is_err());
+    }
+
+    #[test]
+    fn holds_the_account_methods_to_the_schema() {
+        let q = |name: &str| request(1, "query", &json!({ "name": name, "params": {} }));
+        for good in [
+            q("account.status"),
+            request(2, "account.sign_in", &json!({ "console": false })),
+            request(3, "account.sign_in_code", &json!({ "code": "abc" })),
+            request(4, "account.check", &json!({})),
+            request(5, "account.sign_out", &json!({})),
+        ] {
+            rpc_request_from_value(&good).unwrap_or_else(|e| panic!("{good} refused: {e:?}"));
+        }
+        for bad in [
+            request(3, "account.sign_in_code", &json!({})),
+            request(3, "account.sign_in_code", &json!({ "code": "" })),
+            request(
+                3,
+                "account.sign_in_code",
+                &json!({ "code": "x".repeat(513) }),
+            ),
+            request(2, "account.sign_in", &json!({})),
+            request(
+                6,
+                "account.connect",
+                &json!({ "kind": "api_key", "secret": "x" }),
+            ),
+        ] {
+            assert!(rpc_request_from_value(&bad).is_err(), "{bad} was read");
+        }
+        let result = super::validator_for("accountCheckResult");
+        assert!(result.is_valid(&json!({ "outcome": "working" })));
+        assert!(!result.is_valid(&json!({ "outcome": "fine" })));
     }
 
     #[test]

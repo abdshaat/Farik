@@ -97,7 +97,7 @@ Tests (in `rpc.rs`'s tests, replacing those of `account.connect` at :181-224):
   - These are rejected: `account.sign_in_code` with no code, with `""`, or with 513 characters; `account.sign_in {}`, which has no `console`; and `account.connect`.
   - `{ outcome: "working" }` is accepted as an `accountCheckResult`, and `{ outcome: "fine" }` is rejected.
 
-- [ ] `feat(protocol): sign in through claude code on the wire`
+- [x] `feat(protocol): sign in through claude code on the wire`
 
 ### Task 6: Sessions on Claude Code's own sign-in
 
