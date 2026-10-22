@@ -984,7 +984,7 @@ fn pause(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Fai
     Ok(json!({ "paused": paused }))
 }
 
-/// `finding.forget`: the index goes, and so do the two settings that belong to finding.
+/// `finding.forget`: the index goes, the export card comes back, and finding stays paused.
 fn forget(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Failure> {
     if params["confirmed"].as_bool() != Some(true) {
         return Err(refusal(
@@ -999,7 +999,7 @@ fn forget(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Fa
         std::thread::sleep(Duration::from_millis(10));
     }
     forget_machine_index(&host.state_dir().join(MACHINE_DB)).map_err(|e| internal(&e))?;
-    host.set_paused(false).map_err(|why| internal(&why))?;
+    host.set_paused(true).map_err(|why| internal(&why))?;
     host.set_export_dismissed(false)
         .map_err(|why| internal(&why))?;
     *finding.run() = Run::default();
@@ -1485,6 +1485,9 @@ mod tests {
         assert_eq!(forgotten, json!({ "forgotten": true }));
         assert!(!fake.state_dir().join(MACHINE_DB).exists());
         assert_eq!(asked(&hub, "finding.status", &json!({}))["phase"], "idle");
+        // Forgetting everything leaves finding paused, as its screen says.
+        assert_eq!(asked(&hub, "finding.status", &json!({}))["paused"], true);
+        assert!(refused(&hub, "finding.start", &json!({})).contains("finding_paused"));
     }
 
     /// Gives the scan thread and the rescan task time to run, without letting paused time move.
