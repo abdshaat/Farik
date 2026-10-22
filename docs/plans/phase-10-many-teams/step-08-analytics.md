@@ -104,7 +104,7 @@ Tests (`crates/runtime/src/analytics.rs`):
   - The `tool.denied` count is right.
   - Commits split by Catervas's identity in a test repository (ignored, git).
 
-- [ ] `feat(runtime): measure a team's activity`
+- [x] `feat(runtime): measure a team's activity`
 
 ### Task 3: The methods
 

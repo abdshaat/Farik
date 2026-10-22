@@ -753,6 +753,36 @@ impl Git {
         })
     }
 
+    /// How many commits of `branch` were committed from `since` up to `until`, no merge commit among
+    /// them, and when `by` is an address, only those it authored (compared without regard to case,
+    /// as a whole address).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `branch` names nothing; `NotARepository` or `NotInstalled`.
+    pub fn commits_in_period(
+        &self,
+        branch: &str,
+        since: chrono::DateTime<chrono::Utc>,
+        until: chrono::DateTime<chrono::Utc>,
+        by: Option<&str>,
+    ) -> Result<u32, GitError> {
+        self.require_repository()?;
+        let since = format!("--since={} +0000", since.timestamp());
+        let until = format!("--until={} +0000", until.timestamp());
+        let author = by.map(|email| format!("--author=<{email}>"));
+        let mut arguments = vec!["rev-list", "--count", "--no-merges", &since, &until];
+        if let Some(author) = &author {
+            arguments.extend(["--fixed-strings", "--regexp-ignore-case", author]);
+        }
+        arguments.extend([branch, "--"]);
+        let counted = self.at_root(&arguments)?;
+        counted.parse().map_err(|_| GitError::CommandFailed {
+            command: "rev-list --count".to_string(),
+            stderr: format!("answered {counted:?}, which is not a number of commits"),
+        })
+    }
+
     /// Every entry under `dir` as `rev` has it, at any depth, in git's order; a directory `rev`
     /// does not hold gives none.
     ///

@@ -7,6 +7,8 @@
 pub mod account;
 /// A kit connector's allowances: the period, the count and what a connect may set.
 pub mod allowances;
+/// What the analytics read from a team's own log and its repositories.
+pub mod analytics;
 /// An attached PDF, Word or text file turned into the Markdown the owner's document is made of.
 pub mod attach;
 /// The Catervafication: the epic that has the team document the project, its fixed tasks, and when
