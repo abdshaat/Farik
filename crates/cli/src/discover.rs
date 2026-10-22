@@ -12,8 +12,8 @@ use catervas_store::claude_services::{
 };
 use catervas_store::jobs::{JobPlaces, find_jobs};
 use catervas_store::machine::{
-    Activity, FormedFound, Found, FoundProject, FoundServices, GoneFolder, JobRow, MACHINE_DB,
-    Ownership, forget_machine_index, open_machine_index,
+    Activity, ClaudeAi, FormedFound, Found, FoundProject, FoundServices, GoneFolder, JobRow,
+    MACHINE_DB, Ownership, forget_machine_index, open_machine_index,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
@@ -49,6 +49,7 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
             not_a_project: Activity::default(),
             unreadable_sessions: 0,
             unreadable_lines: 0,
+            claude_ai: ClaudeAi::default(),
         };
         return Ok(Report {
             lines: vec![first, "no Claude Code history on this computer".to_string()],

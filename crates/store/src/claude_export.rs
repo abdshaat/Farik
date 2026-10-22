@@ -417,7 +417,9 @@ pub mod fixtures;
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use catervas_core::claude_export::fixtures::{EXPORT_2026_10, a_conversation_json};
+    use catervas_core::claude_export::fixtures::{
+        EXPORT_2026_10, a_conversation_json, a_project_json, a_users_json,
+    };
     use chrono::{DateTime, TimeZone, Utc};
     use rusqlite::Connection;
 
@@ -814,5 +816,307 @@ mod tests {
             assert_eq!(setup.rows(), 0);
             assert!(folder_holds_only(&setup.temp.root, &[name]));
         }
+    }
+
+    fn conversations_json(items: &[(&str, &str, &str, &str, usize)]) -> String {
+        let parts: Vec<String> = items
+            .iter()
+            .map(|(uuid, name, created, updated, n)| {
+                a_conversation_json(uuid, name, created, updated, *n)
+            })
+            .collect();
+        format!("[{}]", parts.join(","))
+    }
+
+    fn export_of(account: &str, conversations: &str, projects: &str) -> Vec<u8> {
+        let users = a_users_json(account);
+        an_export_zip(&[
+            ("conversations.json", conversations.as_bytes()),
+            ("projects.json", projects.as_bytes()),
+            ("users.json", users.as_bytes()),
+        ])
+    }
+
+    const U1: &str = "11111111-1111-4111-8111-111111111111";
+    const U2: &str = "22222222-2222-4222-8222-222222222222";
+    const P1: &str = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+    fn id(letter: char) -> String {
+        let l = letter.to_string();
+        format!(
+            "{0}{0}{0}{0}{0}{0}{0}{0}-{0}{0}{0}{0}-4{0}{0}{0}-8{0}{0}{0}-{1}",
+            l,
+            l.repeat(12)
+        )
+    }
+
+    fn export_a() -> Vec<u8> {
+        export_of(
+            U1,
+            &conversations_json(&[
+                (
+                    &id('a'),
+                    "Old title",
+                    "2026-09-03T10:00:00Z",
+                    "2026-10-02T08:00:00Z",
+                    2,
+                ),
+                (
+                    &id('b'),
+                    "Second",
+                    "2026-10-05T12:00:00Z",
+                    "2026-10-05T12:00:00Z",
+                    1,
+                ),
+            ]),
+            &format!(
+                "[{}]",
+                a_project_json(P1, "Shop launch", "2026-10-01T09:00:00Z", &["brief.md"])
+            ),
+        )
+    }
+
+    fn export_b() -> Vec<u8> {
+        export_of(
+            U1,
+            &conversations_json(&[
+                (
+                    &id('a'),
+                    "New title",
+                    "2026-09-03T10:00:00Z",
+                    "2026-10-15T08:00:00Z",
+                    5,
+                ),
+                (
+                    &id('e'),
+                    "Fifth",
+                    "2026-10-20T12:00:00Z",
+                    "2026-10-20T12:00:00Z",
+                    1,
+                ),
+            ]),
+            &format!(
+                "[{}]",
+                a_project_json(
+                    P1,
+                    "Shop launch",
+                    "2026-10-16T09:00:00Z",
+                    &["brief.md", "prices.csv"]
+                )
+            ),
+        )
+    }
+
+    fn dump(connection: &Connection) -> Vec<String> {
+        let mut lines = Vec::new();
+        for table in ["claude_exports", "claude_conversations", "claude_projects"] {
+            let mut statement = connection
+                .prepare(&format!("SELECT * FROM {table} ORDER BY 1, 2"))
+                .expect("a statement");
+            let columns = statement.column_count();
+            let mut rows = statement.query([]).expect("a query");
+            while let Some(row) = rows.next().expect("a row") {
+                let cells: Vec<String> = (0..columns)
+                    .map(|n| format!("{:?}", row.get_ref(n).expect("a cell")))
+                    .collect();
+                lines.push(format!("{table}: {}", cells.join(" | ")));
+            }
+        }
+        lines
+    }
+
+    #[test]
+    fn updates_an_earlier_export_by_uuid() {
+        let mut setup = Setup::new("updates-by-uuid");
+        setup.import("a.zip", &export_a()).expect("A");
+        let summary = setup.import("b.zip", &export_b()).expect("B");
+        assert_eq!(
+            (summary.new_conversations, summary.new_projects),
+            (1, 0),
+            "C5 is new, C1 and P1 are updated"
+        );
+        let title: String = setup
+            .database()
+            .query_row(
+                "SELECT title FROM claude_conversations WHERE uuid = ?1",
+                (id('a'),),
+                |row| row.get(0),
+            )
+            .expect("C1");
+        assert_eq!(title, "New title");
+        let found = setup.index.found().expect("found").claude_ai;
+        assert_eq!(found.conversations, 3);
+        assert_eq!(found.conversations_not_in_latest, 1);
+        assert_eq!(found.projects_not_in_latest, 0);
+        assert_eq!(found.latest_export_at, Some(at("2026-10-20T12:00:00Z")));
+        assert_eq!(found.projects.len(), 1);
+        assert_eq!(found.projects[0].doc_names, ["brief.md", "prices.csv"]);
+        assert!(found.projects[0].in_latest_export);
+        let before = dump(&setup.database());
+        let again = setup.import("b-again.zip", &export_b()).expect("B again");
+        assert_eq!((again.new_conversations, again.new_projects), (0, 0));
+        assert_eq!(dump(&setup.database()), before);
+    }
+
+    #[test]
+    fn reads_overlapping_exports_the_same_in_either_order() {
+        let mut forward = Setup::new("overlap-forward");
+        forward.import("a.zip", &export_a()).expect("A");
+        forward.import("b.zip", &export_b()).expect("B");
+        let mut backward = Setup::new("overlap-backward");
+        backward.import("b.zip", &export_b()).expect("B");
+        backward.import("a.zip", &export_a()).expect("A");
+        let rows = |setup: &Setup| {
+            let mut lines = dump(&setup.database());
+            // When an export was imported is the one thing that follows the order.
+            lines.retain(|line| !line.starts_with("claude_exports"));
+            for line in &mut lines {
+                if let Some((head, _)) = line.rsplit_once(" | ") {
+                    *line = head.to_string();
+                }
+            }
+            lines
+        };
+        assert_eq!(rows(&forward), rows(&backward));
+        assert_eq!(
+            forward.index.found().expect("found").claude_ai,
+            backward.index.found().expect("found").claude_ai
+        );
+    }
+
+    #[test]
+    fn marks_nothing_for_an_export_that_only_lost_items() {
+        let mut setup = Setup::new("only-lost-items");
+        setup.import("a.zip", &export_a()).expect("A");
+        let fewer = export_of(
+            U1,
+            &conversations_json(&[(
+                &id('b'),
+                "Second",
+                "2026-10-05T12:00:00Z",
+                "2026-10-05T12:00:00Z",
+                1,
+            )]),
+            &format!(
+                "[{}]",
+                a_project_json(P1, "Shop launch", "2026-10-01T09:00:00Z", &["brief.md"])
+            ),
+        );
+        setup.import("fewer.zip", &fewer).expect("A without C1");
+        let found = setup.index.found().expect("found").claude_ai;
+        assert_eq!(found.conversations, 2);
+        assert_eq!(found.conversations_not_in_latest, 0);
+    }
+
+    #[test]
+    fn keeps_each_accounts_exports_apart() {
+        let mut setup = Setup::new("accounts-apart");
+        setup.import("a.zip", &export_a()).expect("A");
+        let other = export_of(
+            U2,
+            &conversations_json(&[(
+                &id('9'),
+                "Other",
+                "2026-11-01T00:00:00Z",
+                "2026-11-01T00:00:00Z",
+                1,
+            )]),
+            "[]",
+        );
+        setup
+            .import("other.zip", &other)
+            .expect("the other account");
+        let found = setup.index.found().expect("found").claude_ai;
+        assert_eq!(found.conversations, 3);
+        assert_eq!(found.conversations_not_in_latest, 0);
+        assert_eq!(found.latest_export_at, Some(at("2026-11-01T00:00:00Z")));
+    }
+
+    #[test]
+    fn counts_conversations_by_month() {
+        let mut setup = Setup::new("counts-by-month");
+        let early = export_of(
+            U1,
+            &conversations_json(&[
+                (
+                    &id('x'),
+                    "Only early",
+                    "2026-07-05T00:00:00Z",
+                    "2026-07-06T00:00:00Z",
+                    1,
+                ),
+                (
+                    &id('y'),
+                    "Both",
+                    "2026-07-20T00:00:00Z",
+                    "2026-07-21T00:00:00Z",
+                    1,
+                ),
+            ]),
+            "[]",
+        );
+        setup.import("early.zip", &early).expect("the early export");
+        let late = export_of(
+            U1,
+            &conversations_json(&[
+                (
+                    &id('y'),
+                    "Both",
+                    "2026-07-20T00:00:00Z",
+                    "2026-07-21T00:00:00Z",
+                    1,
+                ),
+                (
+                    &id('o'),
+                    "October",
+                    "2026-10-02T00:00:00Z",
+                    "2026-10-03T00:00:00Z",
+                    1,
+                ),
+                (
+                    &id('p'),
+                    "A year ago",
+                    "2025-11-30T23:59:59Z",
+                    "2026-10-04T00:00:00Z",
+                    1,
+                ),
+                (
+                    &id('q'),
+                    "Too old",
+                    "2025-10-31T23:59:59Z",
+                    "2026-10-04T00:00:00Z",
+                    1,
+                ),
+                (&id('u'), "Undated", "", "", 1),
+            ]),
+            "[]",
+        );
+        setup.import("late.zip", &late).expect("the late export");
+        let found = setup.index.found().expect("found").claude_ai;
+        let months: Vec<(&str, u64)> = found
+            .by_month
+            .iter()
+            .map(|m| (m.month.as_str(), m.conversations))
+            .collect();
+        assert_eq!(
+            months,
+            [
+                ("2026-10", 1),
+                ("2026-09", 0),
+                ("2026-08", 0),
+                ("2026-07", 2),
+                ("2026-06", 0),
+                ("2026-05", 0),
+                ("2026-04", 0),
+                ("2026-03", 0),
+                ("2026-02", 0),
+                ("2026-01", 0),
+                ("2025-12", 0),
+                ("2025-11", 1),
+            ]
+        );
+        assert_eq!((found.earlier, found.undated), (1, 1));
+        assert_eq!(found.conversations, 6);
+        assert_eq!(found.conversations_not_in_latest, 1, "only the early one");
     }
 }

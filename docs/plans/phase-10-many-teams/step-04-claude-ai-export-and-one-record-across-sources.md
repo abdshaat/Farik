@@ -217,7 +217,7 @@ Files: `machine.rs` (`ClaudeAi`); `claude_export.rs` tests. Exports from Task 1'
 - `keeps_each_accounts_exports_apart`: after A, an export of `u2` holding only C9 marks nothing of A's. RED.
 - `counts_conversations_by_month`: conversations created in 2026-10, 2026-07 (two, one not in the latest), 2025-11, 2025-10, and one undated: `by_month` is twelve entries 2026-10 to 2025-11 with 1, 0, 0, 2, 0 … 0, 1; `earlier` 1; `undated` 1. RED.
 
-- [ ] `feat(store): update claude.ai's export by uuid on re-import`
+- [x] `feat(store): update claude.ai's export by uuid on re-import`
 
 ### Task 5: A copied session counted once
 

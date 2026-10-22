@@ -214,6 +214,53 @@ pub struct Activity {
     pub tokens: BTreeMap<String, Usage>,
 }
 
+/// How many conversations were started in a month.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MonthCount {
+    /// The month, `YYYY-MM`, in UTC.
+    pub month: String,
+    /// The conversations started in it.
+    pub conversations: u64,
+}
+
+/// A claude.ai Project, as the imported exports hold it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeAiProject {
+    /// Its id.
+    pub uuid: String,
+    /// Its name.
+    pub name: Option<String>,
+    /// Its description.
+    pub description: Option<String>,
+    /// Its documents' file names.
+    pub doc_names: Vec<String>,
+    /// When it was last changed.
+    pub updated_at: Option<DateTime<Utc>>,
+    /// Whether its account's latest export holds it.
+    pub in_latest_export: bool,
+}
+
+/// What the imported claude.ai exports hold.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ClaudeAi {
+    /// The latest time any account's exports reach, when an export was imported.
+    pub latest_export_at: Option<DateTime<Utc>>,
+    /// Every conversation known, the ones missing from the latest export included.
+    pub conversations: u64,
+    /// Those with no readable start time.
+    pub undated: u64,
+    /// Those started in each of twelve months ending with the newest start, newest first.
+    pub by_month: Vec<MonthCount>,
+    /// Those started before the twelve months.
+    pub earlier: u64,
+    /// The Projects, most recently changed first.
+    pub projects: Vec<ClaudeAiProject>,
+    /// Conversations that an account's latest export no longer holds.
+    pub conversations_not_in_latest: u64,
+    /// Projects that an account's latest export no longer holds.
+    pub projects_not_in_latest: u64,
+}
+
 /// A project on this computer that sessions were placed under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundProject {
@@ -255,6 +302,8 @@ pub struct Found {
     pub unreadable_sessions: u64,
     /// Lines in all transcript files that could not be read.
     pub unreadable_lines: u64,
+    /// What the imported claude.ai exports hold.
+    pub claude_ai: ClaudeAi,
 }
 
 /// A project formed from connector work done at home, with what its sessions did.
@@ -990,7 +1039,108 @@ impl MachineIndex {
             not_a_project,
             unreadable_sessions: natural(unreadable_sessions),
             unreadable_lines: natural(unreadable_lines),
+            claude_ai: self.claude_ai()?,
         })
+    }
+
+    /// The imported claude.ai exports, grouped for the report. Whether an item is in its account's
+    /// latest export is worked out here from the times, so the order exports were imported in never
+    /// matters.
+    fn claude_ai(&self) -> Result<ClaudeAi, StoreError> {
+        let mut latest: HashMap<String, String> = HashMap::new();
+        let mut statement = self
+            .connection
+            .prepare("SELECT account, max(content_at) FROM claude_exports GROUP BY account")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            latest.insert(row.get(0)?, row.get(1)?);
+        }
+        let missing = |account: &str, seen: &str| {
+            latest
+                .get(account)
+                .is_some_and(|latest| seen < latest.as_str())
+        };
+        let mut claude = ClaudeAi {
+            latest_export_at: latest
+                .values()
+                .max()
+                .map(|time| read_time(time))
+                .transpose()?,
+            ..ClaudeAi::default()
+        };
+        let mut created: Vec<String> = Vec::new();
+        let mut statement = self
+            .connection
+            .prepare("SELECT account, created_at, seen_in_export_at FROM claude_conversations")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            claude.conversations += 1;
+            let (account, start, seen): (String, Option<String>, String) =
+                (row.get(0)?, row.get(1)?, row.get(2)?);
+            claude.conversations_not_in_latest += u64::from(missing(&account, &seen));
+            match start {
+                Some(start) => created.push(start),
+                None => claude.undated += 1,
+            }
+        }
+        if let Some(newest) = created.iter().max().and_then(|start| start.get(..7)) {
+            let (mut year, mut month) = (
+                newest[..4].parse::<i32>().unwrap_or(1970),
+                newest[5..7].parse::<u32>().unwrap_or(1),
+            );
+            for _ in 0..12 {
+                claude.by_month.push(MonthCount {
+                    month: format!("{year:04}-{month:02}"),
+                    conversations: 0,
+                });
+                if month == 1 {
+                    (year, month) = (year - 1, 12);
+                } else {
+                    month -= 1;
+                }
+            }
+            for start in &created {
+                let month = start.get(..7).unwrap_or_default();
+                match claude
+                    .by_month
+                    .iter_mut()
+                    .find(|entry| entry.month == month)
+                {
+                    Some(entry) => entry.conversations += 1,
+                    None => claude.earlier += 1,
+                }
+            }
+        }
+        let mut statement = self.connection.prepare(
+            "SELECT uuid, account, name, description, doc_names, updated_at, seen_in_export_at
+             FROM claude_projects",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let account: String = row.get(1)?;
+            let seen: String = row.get(6)?;
+            let doc_names: String = row.get(4)?;
+            let in_latest_export = !missing(&account, &seen);
+            claude.projects_not_in_latest += u64::from(!in_latest_export);
+            claude.projects.push(ClaudeAiProject {
+                uuid: row.get(0)?,
+                name: row.get(2)?,
+                description: row.get(3)?,
+                doc_names: serde_json::from_str(&doc_names).unwrap_or_default(),
+                updated_at: row
+                    .get::<_, Option<String>>(5)?
+                    .map(|time| read_time(&time))
+                    .transpose()?,
+                in_latest_export,
+            });
+        }
+        claude.projects.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| a.name.cmp(&b.name))
+                .then_with(|| a.uuid.cmp(&b.uuid))
+        });
+        Ok(claude)
     }
 
     fn configured(&self) -> Result<Vec<Configured>, StoreError> {
