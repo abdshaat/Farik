@@ -183,7 +183,7 @@ Tests:
   - 8.6: the scrub, the one names run and its cost shown first.
 - Then the project plan's row 06e: "planned and executed 2026-10-22".
 
-- [ ] `docs(spec): the proposal and creating teams, revision 0.150`
+- [x] `docs(spec): the proposal and creating teams, revision 0.150`
 
 ## Verification
 

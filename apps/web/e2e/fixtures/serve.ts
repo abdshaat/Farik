@@ -198,7 +198,7 @@ export async function startServe(o: {
 	deliveryClosed?: boolean;
 	/**
 	 * With `project: false`: a small Claude Code history under the test's home (`.claude/projects`),
-	 * of two projects, `corner-bakery` (a git repository) and `recipe-cards` (a plain folder), each
+	 * of two projects, `corner-bakery` and `recipe-cards` (both git repositories), each
 	 * under `Projects`, with one session in the last day.
 	 */
 	claudeHistory?: boolean;
@@ -311,8 +311,8 @@ export async function startServe(o: {
 
 /**
  * The history of two projects under `home`, as Claude Code writes it: a folder of transcripts per
- * project, one session each, with invented content. `corner-bakery` is a git repository whose
- * owner is whoever git says; `recipe-cards` is a plain folder.
+ * project, one session each, with invented content. Both are git repositories whose
+ * owner is whoever git says, so that a team can be made of either.
  */
 function writeClaudeHistory(home: string): void {
 	const sessions = [
@@ -324,7 +324,7 @@ function writeClaudeHistory(home: string): void {
 		},
 		{
 			folder: join(realpathSync(home), "Projects", "recipe-cards"),
-			git: false,
+			git: true,
 			id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
 			hoursAgo: 20,
 		},
