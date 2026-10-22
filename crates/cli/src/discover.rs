@@ -50,6 +50,7 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
             unreadable_sessions: 0,
             unreadable_lines: 0,
             maybe_same_sessions: 0,
+            by_hand: Vec::new(),
             claude_ai: ClaudeAi::default(),
         };
         return Ok(Report {

@@ -5,12 +5,15 @@
 
 use std::path::{Path, PathBuf};
 
+use catervas_core::claude_history::HandProjectRefusal;
 use catervas_core::claude_history::Source;
 use catervas_core::claude_history::fixtures::{CLAUDE_CODE_2_1_296, a_reply_line, a_turn_line};
 use catervas_core::pricing::Usage;
 use catervas_protocol::event::EventKind;
 use catervas_protocol::event::fixtures::a_new_event;
-use catervas_store::claude_history::{find_copies, place_sessions, read_transcripts};
+use catervas_store::claude_history::{
+    HistoryError, add_project_by_hand, find_copies, place_sessions, read_transcripts,
+};
 use catervas_store::files::fixtures::TempProject;
 use catervas_store::git::fixtures::git_in;
 use catervas_store::machine::{Found, MACHINE_DB, MachineIndex, Ownership, open_machine_index};
@@ -473,4 +476,199 @@ fn marks_ambiguous_copies_maybe_the_same() {
     assert_eq!(project.own.sessions, 3);
     assert_eq!(project.own.tokens.get(MODEL), Some(&tokens(10)));
     assert!(!project.sources.contains(&Source::Teleported));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keys_a_project_by_its_remote() {
+    let mut world = World::new("keys-by-remote");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    git_in(
+        &shop,
+        &["remote", "add", "origin", "git@github.com:Me/Shop.git"],
+    );
+    let plain = world.folder("plain");
+    world.session(&shop);
+    world.session(&plain);
+
+    let found = world.scan();
+
+    let of = |suffix: &str| {
+        found
+            .projects
+            .iter()
+            .find(|project| project.root.ends_with(suffix))
+            .unwrap_or_else(|| panic!("no project {suffix}"))
+    };
+    assert_eq!(of("/shop").remote.as_deref(), Some("github.com/me/shop"));
+    assert_eq!(of("/plain").remote, None);
+}
+
+/// Guard: checked by mutation (store the address as written), not watched to fail.
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_no_token_from_a_remote() {
+    let mut world = World::new("keeps-no-token");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    git_in(
+        &shop,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://x-access-token:SECRET-REMOTE@github.com/me/shop.git",
+        ],
+    );
+    world.session(&shop);
+    let found = world.scan();
+    assert_eq!(
+        found.projects[0].remote.as_deref(),
+        Some("github.com/me/shop")
+    );
+    let bytes = std::fs::read(world.temp.root.join("state").join(MACHINE_DB)).expect("the file");
+    let secret = b"SECRET-REMOTE";
+    assert!(!bytes.windows(secret.len()).any(|window| window == secret));
+}
+
+fn the_shop() -> World {
+    let mut world = World::new("hand-projects");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    git_in(
+        &shop,
+        &["remote", "add", "origin", "git@github.com:me/shop.git"],
+    );
+    world.session(&shop);
+    world
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn adds_a_project_by_hand_to_its_found_project() {
+    let world = the_shop();
+    let shop_root = world.home().join("shop").to_string_lossy().into_owned();
+    world.scan();
+    let mut index = world.index();
+    let blocked = [world.home()];
+
+    let by_address = add_project_by_hand(
+        &mut index,
+        "Shop",
+        None,
+        Some("https://github.com/me/shop"),
+        &blocked,
+        now(),
+    )
+    .expect("added");
+    assert_eq!(by_address.same_as.as_deref(), Some(shop_root.as_str()));
+    let found = world.scan();
+    let shop = &found.projects[0];
+    assert_eq!(shop.name_by_hand.as_deref(), Some("Shop"));
+    assert_eq!(
+        shop.sources,
+        [Source::Local, Source::ByHand].into_iter().collect()
+    );
+    assert!(found.by_hand.is_empty());
+
+    #[cfg(unix)]
+    {
+        let link = world.home().join("link-to-shop");
+        std::os::unix::fs::symlink(world.home().join("shop"), &link).expect("a link");
+        for (name, folder) in [("Linked", link), ("Inside", world.home().join("shop/sub"))] {
+            std::fs::create_dir_all(&folder).ok();
+            let added = add_project_by_hand(&mut index, name, Some(&folder), None, &blocked, now())
+                .expect("added");
+            assert_eq!(added.same_as.as_deref(), Some(shop_root.as_str()), "{name}");
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_an_unmatched_project_by_hand() {
+    let world = the_shop();
+    let mut index = world.index();
+    let blocked = [world.home()];
+    let added = add_project_by_hand(
+        &mut index,
+        "Billing",
+        None,
+        Some("git@github.com:me/billing.git"),
+        &blocked,
+        now(),
+    )
+    .expect("added");
+    assert_eq!(added.same_as, None);
+
+    let found = world.scan();
+    let listed: Vec<(&str, Option<&str>, Option<&str>)> = found
+        .by_hand
+        .iter()
+        .map(|p| (p.name.as_str(), p.root.as_deref(), p.remote.as_deref()))
+        .collect();
+    assert_eq!(listed, [("Billing", None, Some("github.com/me/billing"))]);
+
+    add_project_by_hand(
+        &mut index,
+        "Billing 2",
+        None,
+        Some("https://github.com/me/billing"),
+        &blocked,
+        now(),
+    )
+    .expect("renamed");
+    let found = world.scan();
+    let names: Vec<&str> = found.by_hand.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["Billing 2"]);
+}
+
+/// Guard: a link to a folder is the folder.
+#[cfg(unix)]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn places_a_session_in_a_linked_folder_with_its_project() {
+    let mut world = the_shop();
+    let link = world.home().join("link-to-shop");
+    std::os::unix::fs::symlink(world.home().join("shop"), &link).expect("a link");
+    world.session(&link);
+    let found = world.scan();
+    assert_eq!(found.projects.len(), 1);
+    assert_eq!(found.projects[0].own.sessions, 2);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn refuses_a_project_by_hand_with_nowhere() {
+    let world = the_shop();
+    let mut index = world.index();
+    let blocked = [world.home()];
+    let mut add = |folder: Option<&Path>, repository: Option<&str>| {
+        add_project_by_hand(&mut index, "Shop", folder, repository, &blocked, now())
+    };
+    assert!(matches!(
+        add(None, None),
+        Err(HistoryError::HandProject(HandProjectRefusal::NoPlace))
+    ));
+    let missing = world.home().join("missing");
+    assert!(matches!(
+        add(Some(&missing), None),
+        Err(HistoryError::NoSuchFolder(path)) if path == missing
+    ));
+    for folder in [world.home(), PathBuf::from("/"), PathBuf::from("/tmp")] {
+        assert!(
+            matches!(
+                add(Some(&folder), None),
+                Err(HistoryError::HandProject(
+                    HandProjectRefusal::NotAProjectFolder(_)
+                ))
+            ),
+            "{}",
+            folder.display()
+        );
+    }
+    let connection = rusqlite::Connection::open(world.temp.root.join("state").join(MACHINE_DB))
+        .expect("the index opens");
+    let rows: i64 = connection
+        .query_row("SELECT count(*) FROM hand_projects", [], |row| row.get(0))
+        .expect("the table exists");
+    assert_eq!(rows, 0);
 }

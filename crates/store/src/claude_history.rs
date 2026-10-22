@@ -6,7 +6,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use catervas_core::claude_history::{
-    Folder, KnownRoot, Place, SessionPlace, TranscriptLine, copies_among, once_per_reply,
+    Folder, HandProjectRefusal, KnownRoot, Place, ProjectKey, SessionPlace, TranscriptLine,
+    check_hand_project, copies_among, match_hand_project, normalise_remote, once_per_reply,
     place_folders, place_session, read_line,
 };
 use catervas_core::claude_services::server_segment;
@@ -16,8 +17,8 @@ use rusqlite::{Connection, OpenFlags};
 use crate::error::StoreError;
 use crate::git::{Git, GitError};
 use crate::machine::{
-    FileRead, FileState, MachineIndex, Ownership, Placement, ProjectRow, ReplyBatch, SessionBatch,
-    SessionCronBatch, ToolCallBatch,
+    FileRead, FileState, HandProject, MachineIndex, Ownership, Placement, ProjectRow, ReplyBatch,
+    SessionBatch, SessionCronBatch, ToolCallBatch,
 };
 
 /// Where a Catervas project keeps its log, relative to its root.
@@ -30,6 +31,10 @@ pub enum HistoryError {
     Store(StoreError),
     /// The `git` program could not be run.
     Git(GitError),
+    /// A project cannot be added by hand, for this reason.
+    HandProject(HandProjectRefusal),
+    /// There is no folder at this path.
+    NoSuchFolder(PathBuf),
 }
 
 impl fmt::Display for HistoryError {
@@ -37,6 +42,10 @@ impl fmt::Display for HistoryError {
         match self {
             Self::Store(error) => error.fmt(formatter),
             Self::Git(error) => error.fmt(formatter),
+            Self::HandProject(refusal) => refusal.fmt(formatter),
+            Self::NoSuchFolder(path) => {
+                write!(formatter, "there is no folder at {}", path.display())
+            }
         }
     }
 }
@@ -479,15 +488,102 @@ pub fn place_sessions(
                 (stored.is_git, stored.ownership)
             })
         };
+        let remote = if present && is_git {
+            tolerate(Git::open(PathBuf::from(&root)).remote_url())?
+                .as_deref()
+                .and_then(normalise_remote)
+        } else {
+            None
+        };
         projects.push(ProjectRow {
             root,
             is_git,
             ownership,
             present,
+            remote,
         });
     }
     index.write_placements(&placements, &projects, now)?;
     Ok(())
+}
+
+/// A project the owner added by hand, and the found project it is the same as, when there is one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddedProject {
+    /// What was kept.
+    pub project: HandProject,
+    /// The root of the found project it is the same as.
+    pub same_as: Option<String>,
+}
+
+/// Where a folder given by hand is a project: its repository's main worktree, else itself, as
+/// `place_folders` places a folder.
+fn hand_root(folder: &Path, not_projects: &[PathBuf]) -> Result<String, HistoryError> {
+    let real = folder
+        .canonicalize()
+        .ok()
+        .filter(|real| real.is_dir())
+        .ok_or_else(|| HistoryError::NoSuchFolder(folder.to_path_buf()))?;
+    let git_root = tolerate(Git::open(real.clone()).main_worktree())?;
+    let blocked: Vec<String> = not_projects
+        .iter()
+        .map(|path| {
+            path.canonicalize()
+                .unwrap_or_else(|_| path.clone())
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    let named = Folder {
+        path: real.to_string_lossy().into_owned(),
+        real: Some(real.to_string_lossy().into_owned()),
+        git_root,
+    };
+    match place_folders(&[named], &[], &blocked).pop() {
+        Some(Place::Project { root }) => Ok(root),
+        _ => Err(HistoryError::HandProject(
+            HandProjectRefusal::NotAProjectFolder(folder.display().to_string()),
+        )),
+    }
+}
+
+/// Adds a project by hand, in a folder, a repository, or both, or renames the one with the same key
+/// (its root, else its remote). Whether it is the same as a project a scan found is worked out when
+/// `found` is asked, so that a later scan can still join them; `same_as` says which one it is now.
+///
+/// # Errors
+///
+/// `HandProject` for a blank name, no place or an address that is not a repository's, or a folder
+/// that is home, the root or a temporary folder; `NoSuchFolder`; `Git` when the `git` program cannot
+/// be run; `Store` when the index refuses.
+pub fn add_project_by_hand(
+    index: &mut MachineIndex,
+    name: &str,
+    folder: Option<&Path>,
+    repository: Option<&str>,
+    not_projects: &[PathBuf],
+    now: DateTime<Utc>,
+) -> Result<AddedProject, HistoryError> {
+    let (name, remote) = check_hand_project(name, folder.is_some(), repository)
+        .map_err(HistoryError::HandProject)?;
+    let root = folder
+        .map(|folder| hand_root(folder, not_projects))
+        .transpose()?;
+    let key = root.clone().or_else(|| remote.clone()).unwrap_or_default();
+    let project = HandProject { name, root, remote };
+    index.put_hand_project(&key, &project, now)?;
+    let found = index.found()?;
+    let keys: Vec<ProjectKey<'_>> = found
+        .projects
+        .iter()
+        .map(|shown| ProjectKey {
+            root: &shown.root,
+            remote: shown.remote.as_deref(),
+        })
+        .collect();
+    let same_as = match_hand_project(project.root.as_deref(), project.remote.as_deref(), &keys)
+        .map(|at| found.projects[at].root.clone());
+    Ok(AddedProject { project, same_as })
 }
 
 /// Finds the sessions that are copies of one another (a session teleported from another computer

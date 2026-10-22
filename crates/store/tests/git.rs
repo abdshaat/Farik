@@ -2044,3 +2044,54 @@ fn knows_who_committed() {
             .expect("git answers")
     );
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_a_repositorys_remote() {
+    let repository = TempRepo::new("remote-url");
+    let remote = || repository.adapter().remote_url().expect("the read works");
+    assert_eq!(remote(), None, "no remote, none");
+    git_in(
+        &repository.path,
+        &[
+            "remote",
+            "add",
+            "zeta",
+            "https://example.invalid/me/zeta.git",
+        ],
+    );
+    assert_eq!(
+        remote().as_deref(),
+        Some("https://example.invalid/me/zeta.git")
+    );
+    git_in(
+        &repository.path,
+        &["remote", "add", "upstream", "git@example.invalid:me/up.git"],
+    );
+    assert_eq!(
+        remote().as_deref(),
+        Some("git@example.invalid:me/up.git"),
+        "with no origin, the first remote by name"
+    );
+    git_in(
+        &repository.path,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/me/origin.git",
+        ],
+    );
+    assert_eq!(
+        remote().as_deref(),
+        Some("https://example.invalid/me/origin.git"),
+        "origin's, whatever the others"
+    );
+    let plain = repository.path.join("not-a-repository");
+    std::fs::create_dir_all(&plain).expect("a directory");
+    let nowhere = Git::open(std::env::temp_dir().join("catervas-no-remote-nowhere"));
+    assert!(matches!(
+        nowhere.remote_url(),
+        Err(GitError::NotARepository)
+    ));
+}

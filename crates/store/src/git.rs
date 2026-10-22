@@ -657,6 +657,29 @@ impl Git {
             .map(str::to_string))
     }
 
+    /// The address of the repository's remote: `origin`'s, else the first remote by name, as
+    /// `git remote get-url` gives it (so a `url.<base>.insteadOf` rewrite is applied). None when the
+    /// repository has no remote.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn remote_url(&self) -> Result<Option<String>, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&["remote"])?;
+        let mut names: Vec<&str> = listed.lines().filter(|name| !name.is_empty()).collect();
+        names.sort_unstable();
+        let Some(name) = names
+            .iter()
+            .find(|name| **name == "origin")
+            .or(names.first())
+        else {
+            return Ok(None);
+        };
+        let address = self.at_root(&["remote", "get-url", name])?;
+        Ok((!address.is_empty()).then_some(address))
+    }
+
     /// The email git commits as here, the repository's own setting or the global one; none when
     /// git knows nobody.
     ///

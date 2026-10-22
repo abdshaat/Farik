@@ -242,7 +242,7 @@ Files: `git.rs` (`remote_url`, after step 02's methods); `migrations.rs`, `<n>_b
 - `places_a_session_in_a_linked_folder_with_its_project` (guard, `tests/claude_history.rs`): a session in `link-to-shop` counts under `shop`.
 - `refuses_a_project_by_hand_with_nowhere` (`tests/claude_history.rs`): no folder or repository `HandProject(NoPlace)`; a missing folder `NoSuchFolder`; folders home, `/` and `/tmp` `HandProject(NotAProjectFolder)`; no row written. RED.
 
-- [ ] `feat(store): key projects by remote and add projects by hand`
+- [x] `feat(store): key projects by remote and add projects by hand`
 
 ### Task 7: `catervas discover` with the export, copies and projects by hand
 

@@ -6,7 +6,8 @@ use std::time::Duration;
 
 use catervas_core::claude_export::{ClaudeProjectRecord, ConversationRecord};
 use catervas_core::claude_history::{
-    Copies, CopyLink, SessionReplies, Source, ToolUse, reply_fingerprint,
+    Copies, CopyLink, ProjectKey, SessionReplies, Source, ToolUse, match_hand_project,
+    reply_fingerprint,
 };
 use catervas_core::claude_services::{
     Call, Configured, ConfiguredServer, ServerKind, Service, ServiceSource, ServiceUse, SessionUse,
@@ -278,8 +279,25 @@ pub struct FoundProject {
     pub own: Activity,
     /// Catervas's agents' sessions.
     pub catervas: Activity,
-    /// Where it was found: always `Local` here, and `Teleported` when one of its sessions has a copy.
+    /// Its repository's address as `normalise_remote` writes it, when it has a remote.
+    pub remote: Option<String>,
+    /// The name the owner gave a project added by hand that is this one, which is shown instead of the
+    /// folder's.
+    pub name_by_hand: Option<String>,
+    /// Where it was found: `Local` always, `Teleported` when one of its sessions has a copy, and
+    /// `ByHand` when a project added by hand is this one.
     pub sources: BTreeSet<Source>,
+}
+
+/// A project the owner added by hand: where it is, in a folder, a repository, or both.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandProject {
+    /// The name the owner gave it.
+    pub name: String,
+    /// Its root folder, canonical, when a folder was given.
+    pub root: Option<String>,
+    /// Its repository's address as `normalise_remote` writes it, when one was given.
+    pub remote: Option<String>,
 }
 
 /// A folder that is no longer on this computer, with everything that worked in it.
@@ -308,6 +326,8 @@ pub struct Found {
     pub unreadable_lines: u64,
     /// Sessions that may be copies of others but are not certain enough to drop; none is dropped.
     pub maybe_same_sessions: u64,
+    /// Projects added by hand that no found project is, oldest first.
+    pub by_hand: Vec<HandProject>,
     /// What the imported claude.ai exports hold.
     pub claude_ai: ClaudeAi,
 }
@@ -355,6 +375,8 @@ pub(crate) struct ProjectRow {
     pub is_git: bool,
     pub ownership: Ownership,
     pub present: bool,
+    /// Its normalised remote; kept as it was when the root is not on this computer any more.
+    pub remote: Option<String>,
 }
 
 /// Where one session was placed.
@@ -709,17 +731,20 @@ impl MachineIndex {
         }
         for project in projects {
             transaction.execute(
-                "INSERT INTO projects (root, is_git, ownership, present, first_seen_at, checked_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                "INSERT INTO projects (root, is_git, ownership, present, first_seen_at, checked_at, remote)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
                  ON CONFLICT (root) DO UPDATE SET
                      is_git = excluded.is_git, ownership = excluded.ownership,
-                     present = excluded.present, checked_at = excluded.checked_at",
+                     present = excluded.present, checked_at = excluded.checked_at,
+                     remote = CASE WHEN excluded.present = 1 THEN excluded.remote
+                                   ELSE projects.remote END",
                 (
                     &project.root,
                     i64::from(project.is_git),
                     project.ownership.as_wire(),
                     i64::from(project.present),
                     stamp(now),
+                    &project.remote,
                 ),
             )?;
         }
@@ -919,6 +944,57 @@ impl MachineIndex {
         Ok(jobs)
     }
 
+    /// Adds a project by hand, or renames the one with the same key.
+    pub(crate) fn put_hand_project(
+        &mut self,
+        key: &str,
+        project: &HandProject,
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO hand_projects (key, name, root, remote, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (key) DO UPDATE SET
+                 name = excluded.name, root = excluded.root, remote = excluded.remote",
+            (
+                key,
+                &project.name,
+                &project.root,
+                &project.remote,
+                stamp(now),
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// The projects added by hand, oldest first.
+    fn hand_projects(&self) -> Result<Vec<HandProject>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT name, root, remote FROM hand_projects ORDER BY added_at, key")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(HandProject {
+                    name: row.get(0)?,
+                    root: row.get(1)?,
+                    remote: row.get(2)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Each root's remote.
+    fn root_remotes(&self) -> Result<HashMap<String, String>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT root, remote FROM projects WHERE remote IS NOT NULL")?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
     /// Every link between sessions as `(session_id, other_id, kind)`.
     fn session_links(&self) -> Result<Vec<(String, String, String)>, StoreError> {
         let mut statement = self.connection.prepare(
@@ -998,6 +1074,49 @@ impl MachineIndex {
         Ok(())
     }
 
+    /// How many transcript files had lines but no turn, and how many lines could not be read.
+    fn unreadable_counts(&self) -> Result<(u64, u64), StoreError> {
+        let (sessions, lines): (i64, i64) = self.connection.query_row(
+            "SELECT count(*) FILTER (WHERE turns = 0 AND unreadable_lines > 0),
+                    coalesce(sum(unreadable_lines), 0)
+             FROM transcript_files",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok((natural(sessions), natural(lines)))
+    }
+
+    /// Joins each project added by hand to the found project it names, giving that one the owner's
+    /// name and the `ByHand` source, and returns the ones no found project is. `projects` is newest
+    /// first, which is the order a match prefers.
+    fn join_hand_projects(
+        &self,
+        projects: &mut [FoundProject],
+    ) -> Result<Vec<HandProject>, StoreError> {
+        let mut by_hand = Vec::new();
+        for hand in self.hand_projects()? {
+            let matched = {
+                let keys: Vec<ProjectKey<'_>> = projects
+                    .iter()
+                    .map(|project| ProjectKey {
+                        root: &project.root,
+                        remote: project.remote.as_deref(),
+                    })
+                    .collect();
+                match_hand_project(hand.root.as_deref(), hand.remote.as_deref(), &keys)
+            };
+            match matched {
+                Some(index) => {
+                    let project = &mut projects[index];
+                    project.name_by_hand.get_or_insert(hand.name);
+                    project.sources.insert(Source::ByHand);
+                }
+                None => by_hand.push(hand),
+            }
+        }
+        Ok(by_hand)
+    }
+
     /// Each session's reply tokens, by model.
     fn reply_tokens(&self) -> Result<HashMap<String, BTreeMap<String, Usage>>, StoreError> {
         let mut tokens: HashMap<String, BTreeMap<String, Usage>> = HashMap::new();
@@ -1052,6 +1171,7 @@ impl MachineIndex {
     pub fn found(&self) -> Result<Found, StoreError> {
         let tokens = self.reply_tokens()?;
         let roots = self.root_flags()?;
+        let remotes = self.root_remotes()?;
         let links = self.session_links()?;
         let copies: BTreeSet<&String> = links
             .iter()
@@ -1108,6 +1228,8 @@ impl MachineIndex {
             let project = projects
                 .entry(root.clone())
                 .or_insert_with(|| FoundProject {
+                    remote: remotes.get(&root).cloned(),
+                    name_by_hand: None,
                     root,
                     is_git,
                     ownership,
@@ -1130,26 +1252,22 @@ impl MachineIndex {
 
         let mut projects: Vec<FoundProject> = projects.into_values().collect();
         projects.sort_by(|a, b| b.last_at.cmp(&a.last_at).then_with(|| a.root.cmp(&b.root)));
+        let by_hand = self.join_hand_projects(&mut projects)?;
         let mut gone: Vec<GoneFolder> = gone.into_values().collect();
         gone.sort_by(|a, b| {
             b.last_at
                 .cmp(&a.last_at)
                 .then_with(|| a.folder.cmp(&b.folder))
         });
-        let (unreadable_sessions, unreadable_lines): (i64, i64) = self.connection.query_row(
-            "SELECT count(*) FILTER (WHERE turns = 0 AND unreadable_lines > 0),
-                    coalesce(sum(unreadable_lines), 0)
-             FROM transcript_files",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
+        let (unreadable_sessions, unreadable_lines) = self.unreadable_counts()?;
         Ok(Found {
             projects,
             gone,
             not_a_project,
-            unreadable_sessions: natural(unreadable_sessions),
-            unreadable_lines: natural(unreadable_lines),
+            unreadable_sessions,
+            unreadable_lines,
             maybe_same_sessions: maybe_same.len() as u64,
+            by_hand,
             claude_ai: self.claude_ai()?,
         })
     }
@@ -1436,13 +1554,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5]
+            vec![1, 2, 3, 4, 5, 6]
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5]
+            vec![1, 2, 3, 4, 5, 6]
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -1461,6 +1579,7 @@ mod tests {
                 "claude_exports",
                 "claude_projects",
                 "configured_servers",
+                "hand_projects",
                 "jobs",
                 "projects",
                 "replies",
