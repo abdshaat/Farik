@@ -114,7 +114,7 @@ Tests (`shell/TeamSwitcher.test.tsx`):
   - Choosing bakery sends `teams.current { slug: "bakery" }` and goes to bakery's same page, or its Today from `/t/shop/tasks/CTV-3`.
   - The menu has `role="menu"` and closes on Escape.
 
-- [ ] `feat(web): switch teams from the rail`
+- [x] `feat(web): switch teams from the rail`
 
 ### Task 3: All teams and This computer
 

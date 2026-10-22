@@ -106,3 +106,15 @@ export function redirectTarget(
 					: null;
 	return pick === null ? "/teams" : teamPath(pick, address);
 }
+
+/**
+ * The page of another team that matches `page`: the same page, except that an id of the old team
+ * (a task, a request, a file, an agent, a chat) means nothing in the new one.
+ */
+export function samePage(page: string): string {
+	if (/^\/(tasks|requests|files|marketing)\//.test(page)) return "/";
+	if (/^\/team\/[^/]+/.test(page)) return "/team";
+	if (/^\/channel\/[^/]+/.test(page)) return "/channel";
+	if (/^\/(teams|computer)/.test(page)) return "/";
+	return page;
+}
