@@ -66,7 +66,7 @@ Files: the two schemas, `team.rs`, `describe.rs`, `permissions.rs`.
 
 - `a_local_team_keeps_everything_on_this_computer` (core) — asserts that a team wire with `integration: local` reads back as `Integration::Local` and writes `"local"`; that with `push: true` and a Developer's own grant of `git_remote`, no agent's `tiers()` holds `git_remote`; that the exec git check refuses `git push origin x` and `git send-pack` with `kept_local` under local even when `git_subcommands` lists `push`, and runs `git push` listed so when not local; and that `describe` says the local line on the change.
 
-- [ ] `feat(core): a team may keep everything on this computer`
+- [x] `feat(core): a team may keep everything on this computer`
 
 ### Task 2: accepted work lands here
 

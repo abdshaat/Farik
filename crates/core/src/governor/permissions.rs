@@ -483,6 +483,8 @@ pub enum CommandRefusal {
     },
     /// The command runs `git`, which is a Catervas tool of its own (ADR 0004).
     GitViaExec,
+    /// The command pushes, and the team keeps everything on this computer (ADR 0085).
+    KeptLocal,
     /// A forbidden pattern is not a valid regular expression; nothing was checked.
     InvalidPattern {
         /// The pattern as written.
@@ -525,6 +527,9 @@ pub fn evaluate_command(command: &str, rules: &TeamRules) -> Result<(), CommandR
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
         .collect();
+    if rules.keeps_local && segments.iter().copied().any(pushes) {
+        return Err(CommandRefusal::KeptLocal);
+    }
     if segments
         .iter()
         .copied()
@@ -574,6 +579,30 @@ pub const READ_ONLY_GIT: [&str; 8] = [
 /// Options of the read-only subcommands that write a file or run a program, so the command is a
 /// git call to refuse after all.
 const GIT_OPTIONS_THAT_ACT: [&str; 2] = ["--output", "--open-files-in-pager"];
+
+/// Git subcommands that send work to another repository (ADR 0085).
+const PUSHING_GIT: [&str; 2] = ["push", "send-pack"];
+
+/// Whether the segment runs git with a pushing subcommand, found as `runs_git` finds git.
+fn pushes(segment: &str) -> bool {
+    let words: Vec<&str> = segment.split_whitespace().filter_map(bare_word).collect();
+    let Some((first, rest)) = words.split_first() else {
+        return false;
+    };
+    let at = if *first == "git" {
+        0
+    } else if is_assignment(first) || WRAPPERS.contains(first) {
+        match rest.iter().position(|word| *word == "git") {
+            Some(at) => at + 1,
+            None => return false,
+        }
+    } else {
+        return false;
+    };
+    words
+        .get(at + 1)
+        .is_some_and(|subcommand| PUSHING_GIT.contains(subcommand))
+}
 
 /// Whether the segment runs git other than by a read-only subcommand: its first git call, whose
 /// next bare word is the subcommand, is neither one of `READ_ONLY_GIT` nor one the owner allowed,

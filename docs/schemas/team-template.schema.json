@@ -227,9 +227,10 @@
       "enum": [
         "manual",
         "auto_merge",
-        "pull_request"
+        "pull_request",
+        "local"
       ],
-      "description": "What happens to a task's branch after it is accepted (spec 5.14)."
+      "description": "What happens to a task's branch after it is accepted (spec 5.14). `local` keeps everything on this computer: Catervas merges accepted work into the checked-out integration branch and nothing goes online (ADR 0085)."
     }
   }
 }

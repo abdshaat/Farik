@@ -1566,7 +1566,6 @@ fn model_label(id: &str, newest: &[(String, String)]) -> String {
 /// before its own grants and revokes.
 fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let newest = newest(deps)?;
-    let permissions = team.permissions();
     let agents = team
         .agents
         .iter()
@@ -1579,8 +1578,8 @@ fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             Ok(json!({
                 "id": agent.id,
                 "model": { "id": model, "label": model_label(&model, &newest), "effort": effort },
-                "tiers": agent.tiers(&permissions),
-                "base_tiers": bare.tiers(&permissions),
+                "tiers": team.tiers_of(agent),
+                "base_tiers": team.tiers_of(&bare),
             }))
         })
         .collect::<Result<Vec<_>, Failure>>()?;

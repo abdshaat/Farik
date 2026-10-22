@@ -1256,11 +1256,12 @@ fn working_role(ask: &SessionAsk<'_>) -> Role {
 /// task of a role that changes code and the team lets builders push, as that role's agents may.
 fn held_tiers(ask: &SessionAsk<'_>, team: &Team) -> Vec<PermissionTier> {
     let permissions = team.permissions();
-    let mut tiers = ask.agent.tiers(&permissions);
+    let mut tiers = team.tiers_of(ask.agent);
     let working = working_role(ask);
     if working != Role::from(ask.agent.role)
         && changes_code(working)
         && permissions.push
+        && !team.keeps_local()
         && !tiers.contains(&PermissionTier::GitRemote)
     {
         tiers.push(PermissionTier::GitRemote);
