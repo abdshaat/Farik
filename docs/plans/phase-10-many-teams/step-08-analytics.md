@@ -7,6 +7,8 @@ Depends on: steps 02 to 07 (committed)
 Mockups: `ManyAnalytics` frames 1 and 2, approved with step 01
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-22 (ADR 0065)
 
+Executed 2026-10-22. Where the code differed, it won: agents' usage is `cost.recorded`'s `cost_usd` (`session.ended` carries none); pull requests are `pull_request.opened`; done means `accepted`, and cycle time runs from the first `in_progress` to `accepted`.
+
 ## Goal
 
 **Analytics** on All teams shows every team side by side, for this week or this month, in three parts:
