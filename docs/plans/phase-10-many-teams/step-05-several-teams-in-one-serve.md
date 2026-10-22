@@ -235,7 +235,7 @@ Tests (`crates/cli/tests/serving.rs`, ignored like their neighbours):
 
 The existing tests `takes_on_the_chosen_project_on_the_same_port`, `leaves_the_project_for_the_wizard_on_the_same_port`, `stays_on_the_project_it_left` and `changes_project_from_the_browser` keep passing: one team behaves as today.
 
-- [ ] `feat(cli): serve drives every team on this computer`
+- [x] `feat(cli): serve drives every team on this computer`
 
 ### Task 6: The shared limits in sessions
 

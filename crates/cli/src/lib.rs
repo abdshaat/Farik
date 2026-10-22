@@ -191,6 +191,9 @@ pub struct CliIo<'a> {
     /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
     /// test replaces with a fixture kit whose server is its own.
     pub kits: catervas_runtime::KitSource,
+    /// How long `catervas serve` waits before it tries again a team whose project another process
+    /// drives (ADR 0059): a minute here and in `main`, which a test shortens.
+    pub elsewhere_retry: std::time::Duration,
     /// The apps Catervas has registered with a service (ADR 0035), which `catervas connect` signs in with:
     /// `REGISTERED_APPS` here and in `main`, which a test replaces with a table of its fixture's
     /// addresses.
@@ -257,6 +260,7 @@ impl<'a> CliIo<'a> {
             #[cfg(unix)]
             kept_key_removed: false,
             kits: Arc::new(catervas_roles::load_kit),
+            elsewhere_retry: std::time::Duration::from_secs(60),
             registered_apps: catervas_runtime::registered_apps::REGISTERED_APPS,
             own_program: None,
             #[cfg(unix)]
@@ -265,6 +269,50 @@ impl<'a> CliIo<'a> {
             admit_local_preview: false,
             #[cfg(feature = "e2e")]
             sandbox_image: None,
+        }
+    }
+}
+
+impl CliIo<'_> {
+    /// A harness for one more team of the same serve (ADR 0059): the same machine, clock, engine,
+    /// environment and keys, writing to `stdout` and `stderr` and hearing `interrupts`.
+    pub(crate) fn fork(
+        &self,
+        stdout: Box<dyn Write>,
+        stderr: Box<dyn Write>,
+        interrupts: tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) -> CliIo<'static> {
+        CliIo {
+            stdin: Box::new(std::io::empty()),
+            stdin_is_terminal: false,
+            stdout,
+            stderr,
+            cwd: self.cwd.clone(),
+            clock: Arc::clone(&self.clock),
+            env: self.env.clone(),
+            #[cfg(unix)]
+            engine: match &self.engine {
+                Engine::Claude => Engine::Claude,
+                Engine::Given(factory) => Engine::Given(Arc::clone(factory)),
+            },
+            interrupts: Interrupts::Channel(interrupts),
+            session_ids: Arc::clone(&self.session_ids),
+            sleeper: self.sleeper.clone(),
+            open_url: Arc::clone(&self.open_url),
+            #[cfg(unix)]
+            forget_keychain: self.forget_keychain,
+            #[cfg(unix)]
+            kept_key_removed: self.kept_key_removed,
+            kits: Arc::clone(&self.kits),
+            elsewhere_retry: self.elsewhere_retry,
+            registered_apps: self.registered_apps,
+            #[cfg(unix)]
+            connector_secrets: Arc::clone(&self.connector_secrets),
+            own_program: self.own_program.clone(),
+            #[cfg(feature = "e2e")]
+            admit_local_preview: self.admit_local_preview,
+            #[cfg(feature = "e2e")]
+            sandbox_image: self.sandbox_image.clone(),
         }
     }
 }

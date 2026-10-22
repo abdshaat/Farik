@@ -30,11 +30,18 @@ pub fn open(project: &Project) -> Result<Report, String> {
     let answer = exchange(&daemon_file, "/connect/code", "{}", TIMEOUT)
         // A file a stopped process left behind names nothing that listens.
         .map_err(|error| format!("{NOT_RUNNING} ({error})"))?;
-    let code = serde_json::from_str::<Value>(&answer)
-        .ok()
+    let answered = serde_json::from_str::<Value>(&answer).ok();
+    let code = answered
+        .as_ref()
         .and_then(|value| value["code"].as_str().map(str::to_string))
         .ok_or_else(|| format!("the driver answered no code: {answer}"))?;
-    let link = format!("http://127.0.0.1:{}/connect#{code}", address.port);
+    // The page is on the port the driver says, which is the hub's when a serve drives several teams.
+    let port = answered
+        .as_ref()
+        .and_then(|value| value["port"].as_u64())
+        .and_then(|port| u16::try_from(port).ok())
+        .unwrap_or(address.port);
+    let link = format!("http://127.0.0.1:{port}/connect#{code}");
     Ok(Report {
         lines: vec![format!("open {link} in your browser")],
         json: json!({ "link": link }),

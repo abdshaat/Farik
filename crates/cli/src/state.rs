@@ -201,13 +201,6 @@ pub(crate) fn remember(directory: &Path, root: &Path) -> Result<(), String> {
 /// # Errors
 ///
 /// A sentence saying what could not be written.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "serve forgets a team it removes, from the next task on"
-    )
-)]
 pub(crate) fn forget(directory: &Path, root: &Path) -> Result<(), String> {
     let mut state = read_state(directory);
     let root = canonical(root);
@@ -216,11 +209,6 @@ pub(crate) fn forget(directory: &Path, root: &Path) -> Result<(), String> {
         state.last_project = state.projects.last().cloned();
     }
     write_state(directory, &state)
-}
-
-/// The project `state.json` in `directory` remembers, when it says one.
-pub(crate) fn last_project(directory: &Path) -> Option<PathBuf> {
-    read_state(directory).last_project
 }
 
 #[cfg(test)]

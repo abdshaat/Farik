@@ -373,7 +373,9 @@ pub(super) async fn connect_code(State(state): State<Arc<DaemonState>>) -> Respo
         return StatusCode::NOT_FOUND.into_response();
     };
     match web.codes.issue() {
-        Ok(code) => Json(serde_json::json!({ "code": code })).into_response(),
+        // The port a browser opens the link on: the daemon's own, or the hub's when a serve
+        // drives several teams (ADR 0059).
+        Ok(code) => Json(serde_json::json!({ "code": code, "port": web.port })).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
 }

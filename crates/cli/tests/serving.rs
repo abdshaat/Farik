@@ -993,9 +993,14 @@ fn a_runtime() -> tokio::runtime::Runtime {
 /// The browser's socket on `port`, with the session `cookie`; retried for 30 s, since across a
 /// take-on the daemon is briefly not there.
 async fn socket(port: u16, cookie: &str) -> Socket {
+    socket_at(port, "/rpc", cookie).await
+}
+
+/// `socket`, to the page `path` of the hub: `/rpc`, `/hub/rpc` or `/t/<team>/rpc`.
+async fn socket_at(port: u16, path: &str, cookie: &str) -> Socket {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        match try_socket(port, cookie).await {
+        match try_socket_at(port, path, cookie).await {
             Ok(socket) => return socket,
             Err(error) => assert!(Instant::now() < deadline, "the socket opens: {error}"),
         }
@@ -1006,9 +1011,14 @@ async fn socket(port: u16, cookie: &str) -> Socket {
 /// The browser's socket on `port`, with the session `cookie`, tried once. The handshake is given
 /// up after 5 s: a port that is held but never served takes the connection and never answers.
 async fn try_socket(port: u16, cookie: &str) -> Result<Socket, String> {
+    try_socket_at(port, "/rpc", cookie).await
+}
+
+/// `try_socket`, to the page `path`.
+async fn try_socket_at(port: u16, path: &str, cookie: &str) -> Result<Socket, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
-    let mut request = format!("ws://127.0.0.1:{port}/rpc")
+    let mut request = format!("ws://127.0.0.1:{port}{path}")
         .into_client_request()
         .expect("a request");
     let headers = request.headers_mut();
@@ -1084,6 +1094,24 @@ fn serve_status_across_a_restart(port: u16, cookie: &str) -> Option<Value> {
     })
 }
 
+/// `serve.status` of the page `path`, tried once: `None` when nothing answers there now.
+fn status_at(port: u16, path: &str, cookie: &str) -> Option<Value> {
+    a_runtime().block_on(async {
+        let mut socket = try_socket_at(port, path, cookie).await.ok()?;
+        let status = json!({ "name": "serve.status", "params": {} });
+        let answer = try_ask(&mut socket, 1, "query", status).await.ok()?;
+        Some(answer["result"].clone())
+    })
+}
+
+/// `method` on the page `path`, answering the reply.
+fn call_at(port: u16, path: &str, cookie: &str, method: &str, params: Value) -> Value {
+    a_runtime().block_on(async {
+        let mut socket = socket_at(port, path, cookie).await;
+        ask(&mut socket, 1, method, params).await
+    })
+}
+
 /// `method` on a socket of its own, answering the reply.
 fn call(port: u16, cookie: &str, method: &str, params: Value) -> Value {
     a_runtime().block_on(async {
@@ -1154,6 +1182,16 @@ fn serving_in(
     env: std::collections::BTreeMap<String, String>,
     recorded_engine: bool,
 ) -> Serving {
+    serving_in_with(cwd, env, recorded_engine, None)
+}
+
+/// `serving_in`, trying a team driven elsewhere again after `retry` when it is given.
+fn serving_in_with(
+    cwd: &Path,
+    env: std::collections::BTreeMap<String, String>,
+    recorded_engine: bool,
+    retry: Option<Duration>,
+) -> Serving {
     let (out, err) = (SharedOut::default(), SharedOut::default());
     let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
     let (cwd, port) = (cwd.to_path_buf(), free_port());
@@ -1164,6 +1202,9 @@ fn serving_in(
                 io.engine = recorded(Vec::new());
             }
             io.env = env;
+            if let Some(retry) = retry {
+                io.elsewhere_retry = retry;
+            }
             io.stdout = Box::new(shared_out);
             io.stderr = Box::new(shared_err);
             io.interrupts = catervas::Interrupts::Channel(interrupts);
@@ -2113,4 +2154,255 @@ fn prints_a_new_link_from_the_running_driver() {
     assert_eq!(printed.len(), 1, "{}", ran.out);
     assert_eq!(printed[0].0, port);
     assert_ne!(printed[0].1, first);
+}
+
+/// The team id the log of `repository` says its events belong to.
+fn team_id_of(repository: &TempRepo) -> String {
+    let log = catervas_store::open_event_log(
+        &repository.path.join(".catervas/local/catervas.db"),
+        project::at(),
+    )
+    .expect("the log opens");
+    log.read(&catervas_store::EventQuery {
+        limit: Some(1),
+        ..catervas_store::EventQuery::default()
+    })
+    .expect("the log reads")
+    .first()
+    .expect("the log has an event")
+    .envelope
+    .ids
+    .team_id
+    .clone()
+}
+
+/// The slugs the hub gives `repositories`' teams, in order.
+fn slugs_of(repositories: &[&TempRepo]) -> Vec<String> {
+    let ids: Vec<String> = repositories.iter().map(|each| team_id_of(each)).collect();
+    catervas_runtime::daemon::hub::slugs_for(&ids)
+        .iter()
+        .map(|slug| slug.as_str().to_string())
+        .collect()
+}
+
+/// Whether another process holds the run lock of `repository`.
+fn run_lock_is_held(repository: &TempRepo) -> bool {
+    let file = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(repository.path.join(".catervas/local/run.lock"))
+        .expect("the lock file opens");
+    matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+}
+
+/// `catervas serve` outside any project, with `state.json` listing `repositories`, under a home
+/// that holds them.
+fn serving_teams(name: &str, repositories: &[&TempRepo]) -> (Serving, std::path::PathBuf) {
+    let (cwd, state) = setup_folders(name);
+    std::fs::create_dir_all(state.join("catervas")).expect("the state folder");
+    let projects: Vec<String> = repositories
+        .iter()
+        .map(|each| {
+            each.path
+                .canonicalize()
+                .expect("a root")
+                .display()
+                .to_string()
+        })
+        .collect();
+    std::fs::write(
+        state.join("catervas/state.json"),
+        json!({ "last_project": projects[0], "projects": projects }).to_string(),
+    )
+    .expect("state.json");
+    let mut env = setup_env(&std::env::temp_dir(), &state);
+    signed_in(&mut env, &format!("serving-teams-{name}"));
+    (serving_in(&cwd, env, true), state)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn drives_two_teams_at_once() {
+    let (first, second) = (a_team("serve-two-a"), a_team("serve-two-b"));
+    let (serving, _state) = serving_teams("serve-two", &[&first, &second]);
+    until("both teams are driven", || {
+        daemon_file(&first).exists() && daemon_file(&second).exists()
+    });
+    assert!(run_lock_is_held(&first) && run_lock_is_held(&second));
+
+    let slugs = slugs_of(&[&first, &second]);
+    for (slug, repository) in slugs.iter().zip([&first, &second]) {
+        let status = status_at(serving.port, &format!("/t/{slug}/rpc"), &serving.cookie)
+            .expect("the team answers");
+        let root = repository.path.canonicalize().expect("the root");
+        assert_eq!(status["project_root"], json!(root.display().to_string()));
+        assert_eq!(status["port"], serving.port, "{status}");
+    }
+    // Stopping one team leaves the other driven, and serve running.
+    let stopped = run(&first.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    the_run_lock_frees(&first);
+    assert!(run_lock_is_held(&second));
+    assert!(
+        status_at(
+            serving.port,
+            &format!("/t/{}/rpc", slugs[1]),
+            &serving.cookie
+        )
+        .is_some(),
+        "the other team answers"
+    );
+    assert!(!serving.thread.is_finished());
+    let stopped = run(&second.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn adds_a_team_from_the_wizard_beside_the_running_one() {
+    let (repository, serving, state) = serving_a_team_under_home("serve-adds");
+    let target = TempRepo::new("serve-adds-target");
+    let root = target.path.canonicalize().expect("the root");
+
+    let opened = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&target.path), "no_sandbox": false }),
+    );
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    until("the new team is driven", || {
+        daemon_file(&target).exists() && run_lock_is_held(&target)
+    });
+    assert!(run_lock_is_held(&repository), "the first team goes on");
+    let mut written = Value::Null;
+    until("both teams are listed", || {
+        written = std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        written["projects"]
+            .as_array()
+            .is_some_and(|all| all.len() == 2)
+    });
+    assert_eq!(written["last_project"], json!(root.display().to_string()));
+
+    let again = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&target.path), "no_sandbox": false }),
+    );
+    let said = again["error"]["message"].as_str().unwrap_or_default();
+    assert!(said.contains("team_already_here"), "{again}");
+    assert!(said.contains("already one of your teams"), "{again}");
+
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    the_run_lock_frees(&target);
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn leaves_one_team_and_keeps_the_other() {
+    let (first, second) = (a_team("serve-leave-a"), a_team("serve-leave-b"));
+    let (serving, state) = serving_teams("serve-leave", &[&first, &second]);
+    until("both teams are driven", || {
+        daemon_file(&first).exists() && daemon_file(&second).exists()
+    });
+    let slugs = slugs_of(&[&first, &second]);
+
+    let (left, closed) = a_runtime().block_on(async {
+        use futures_util::StreamExt as _;
+        let mut socket = socket_at(
+            serving.port,
+            &format!("/t/{}/rpc", slugs[0]),
+            &serving.cookie,
+        )
+        .await;
+        let left = ask(&mut socket, 1, "project.leave", json!({})).await;
+        let closed = tokio::time::timeout(Duration::from_secs(30), async {
+            while let Some(Ok(_)) = socket.next().await {}
+        })
+        .await
+        .is_ok();
+        (left, closed)
+    });
+    assert_eq!(left["result"], json!({}), "{left}");
+    assert!(closed, "the team's daemon closes the socket");
+    the_run_lock_frees(&first);
+    assert!(run_lock_is_held(&second));
+    let root = second.path.canonicalize().expect("the root");
+    until("the other team still answers", || {
+        status_at(
+            serving.port,
+            &format!("/t/{}/rpc", slugs[1]),
+            &serving.cookie,
+        )
+        .is_some_and(|status| status["project_root"] == json!(root.display().to_string()))
+    });
+    let written: Value = serde_json::from_str(
+        &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
+    )
+    .expect("JSON");
+    assert_eq!(written["projects"], json!([root.display().to_string()]));
+
+    let stopped = run(&second.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn skips_a_team_driven_elsewhere() {
+    let (held, free) = (a_team("serve-else-a"), a_team("serve-else-b"));
+    let lock = hold_the_run_lock(&held);
+    let (cwd, state) = setup_folders("serve-else");
+    std::fs::create_dir_all(state.join("catervas")).expect("the state folder");
+    let projects: Vec<String> = [&held, &free]
+        .iter()
+        .map(|each| {
+            each.path
+                .canonicalize()
+                .expect("a root")
+                .display()
+                .to_string()
+        })
+        .collect();
+    std::fs::write(
+        state.join("catervas/state.json"),
+        json!({ "last_project": projects[1], "projects": projects }).to_string(),
+    )
+    .expect("state.json");
+    let mut env = setup_env(&std::env::temp_dir(), &state);
+    signed_in(&mut env, "serving-teams-serve-else");
+    let serving = serving_in_with(&cwd, env, true, Some(Duration::from_millis(200)));
+
+    until("the free team is driven", || daemon_file(&free).exists());
+    assert!(!daemon_file(&held).exists(), "the held team is not driven");
+
+    drop(lock);
+    until("the team is driven once its lock is free", || {
+        daemon_file(&held).exists()
+    });
+    for repository in [&held, &free] {
+        let stopped = run(&repository.path, &["stop"]);
+        assert_eq!(stopped.code, 0, "{}", stopped.err);
+    }
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
 }

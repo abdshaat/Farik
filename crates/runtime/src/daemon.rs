@@ -263,6 +263,8 @@ pub struct DaemonState {
     image_build: crate::computer::ImageBuild,
     /// The teams `catervas serve` drives, on the hub's own state alone (ADR 0059).
     hub: OnceLock<Arc<hub::Hub>>,
+    /// Cancelled when this state's daemon shuts down, which ends the sockets of its pages.
+    closing: OnceLock<CancellationToken>,
 }
 
 /// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
@@ -361,6 +363,7 @@ impl DaemonState {
             campaign_made: tokio::sync::Notify::new(),
             image_build: crate::computer::ImageBuild::default(),
             hub: OnceLock::new(),
+            closing: OnceLock::new(),
         }
     }
 
@@ -395,6 +398,7 @@ impl DaemonState {
             campaign_made: tokio::sync::Notify::new(),
             image_build: crate::computer::ImageBuild::default(),
             hub: OnceLock::new(),
+            closing: OnceLock::new(),
         }
     }
 
@@ -402,6 +406,12 @@ impl DaemonState {
     /// Answers `true`, or `false` when it was a hub already.
     pub fn set_hub(&self, hub: Arc<hub::Hub>) -> bool {
         self.hub.set(hub).is_ok()
+    }
+
+    /// What ends the sockets of this state's pages: cancelled when its daemon shuts down, once it
+    /// is served.
+    pub(crate) fn closing(&self) -> Option<&CancellationToken> {
+        self.closing.get()
     }
 
     /// The teams this state is the hub of, when it is.
@@ -1090,6 +1100,7 @@ async fn serve_on(
         pid: std::process::id(),
     };
     let cancel = CancellationToken::new();
+    let _ = state.closing.set(cancel.clone());
     let app = router(state, &info.token, cancel.clone());
     let (stop, stopped) = oneshot::channel::<()>();
     let server = tokio::spawn(async move {

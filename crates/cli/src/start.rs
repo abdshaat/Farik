@@ -14,9 +14,7 @@ use catervas_protocol::command::{Command, command_to_value, reply_from_value};
 use catervas_runtime::account::{AccountPort, ClaudeAccount};
 use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, credential_variable};
 use catervas_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
-use catervas_runtime::daemon::{
-    DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve, serve_held,
-};
+use catervas_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
 use catervas_runtime::forge::Forge;
 use catervas_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, OrchestratorError, RecoveryReport,
@@ -359,15 +357,31 @@ const SESSION_ENV: [&str; 9] = [
     "CLAUDE_CODE_OAUTH_TOKEN",
 ];
 
+/// What a start calls with the daemon's state once it listens.
+pub(crate) type Listening<'l> = &'l dyn Fn(&Arc<DaemonState>);
+
 /// What a start is told besides the project: how the process differs from `run`'s.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct StartOptions<'l> {
-    /// The socket `catervas serve` holds for all its daemons, which the daemon listens on; without
-    /// one, it listens on a port the system picks.
-    pub(crate) listener: Option<&'l std::net::TcpListener>,
-    /// Whether the daemon answers the browser routes (`catervas serve` alone), with a first connect
-    /// code for the link it prints.
-    pub(crate) web: bool,
+    /// What `catervas serve` shares among the teams it drives (ADR 0059). With it the daemon
+    /// answers the browser routes, over the hub's sessions and port; without it, as `run`'s,
+    /// it answers none.
+    pub(crate) shared: Option<&'l Shared>,
+    /// Called with the daemon's state as soon as it listens and has its browser routes, so that
+    /// the hub routes the team's pages to it from then on.
+    pub(crate) listening: Option<Listening<'l>>,
+}
+
+/// What every team of one `catervas serve` shares (ADR 0059): the hub's port and the browser
+/// sessions and connect codes it issues, so that a browser connects once for all the teams.
+#[derive(Clone)]
+pub(crate) struct Shared {
+    /// The browsers that traded a code.
+    pub(crate) sessions: BrowserSessions,
+    /// The live connect code.
+    pub(crate) codes: ConnectCodes,
+    /// The hub's port, which every page's `Origin` and `Host` name.
+    pub(crate) port: u16,
 }
 
 /// The AI account a start found Claude Code signed in with.
@@ -397,8 +411,6 @@ pub(crate) struct Driver {
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
     pub(crate) recovered: RecoveryReport,
-    /// The first connect code, when the browser routes are on.
-    pub(crate) connect_code: Option<String>,
     handle: DaemonHandle,
     /// The watch on the marketing plans' Google Ads spend, which runs beside the ticks.
     watch: tokio::task::JoinHandle<Result<(), OrchestratorError>>,
@@ -419,11 +431,6 @@ fn watch_failure(
 }
 
 impl Driver {
-    /// The port the daemon listens on.
-    pub(crate) fn port(&self) -> u16 {
-        self.handle.info.port
-    }
-
     /// Shuts the daemon down, removing `daemon.json`, then gives the lock back.
     ///
     /// # Errors
@@ -549,24 +556,23 @@ async fn start_listening(
     tools.transitions.set_sandbox(settings.sandbox);
     let (sandboxes, previews) = told_factories(&tools, settings.sandbox, sandbox_image(io)).await?;
     let daemon = connected_daemon(&tools, io);
-    let web = options.web.then(|| web(&project.root, io)).transpose()?;
-    let daemon_file = Some(project.root.join(DAEMON_FILE));
-    let handle = if let Some(listener) = options.listener {
-        serve_held(listener, daemon_file, Arc::clone(&daemon)).await
-    } else {
-        let config = DaemonConfig {
-            port: PortChoice::Any,
-            daemon_file,
-        };
-        serve(config, Arc::clone(&daemon)).await
-    }
-    .map_err(|error| error.to_string())?;
-    // The port is known once the daemon listens, and the routes read the state on each request.
-    let connect_code = web.map(|(mut web, code)| {
-        web.port = handle.info.port;
+    let web = options
+        .shared
+        .map(|shared| web_sharing(&project.root, io, shared));
+    let config = DaemonConfig {
+        port: PortChoice::Any,
+        daemon_file: Some(project.root.join(DAEMON_FILE)),
+    };
+    let handle = serve(config, Arc::clone(&daemon))
+        .await
+        .map_err(|error| error.to_string())?;
+    // The routes read the state on each request, and the hub's port is what a page names.
+    if let Some(web) = web {
         daemon.set_web(web);
-        code
-    });
+    }
+    if let Some(listening) = options.listening {
+        listening(&daemon);
+    }
     let adapter = match adapter(project, io, claude, &daemon, &handle) {
         Ok(adapter) => adapter,
         Err(error) => {
@@ -607,7 +613,6 @@ async fn start_listening(
         account,
         sandbox: settings.sandbox,
         recovered,
-        connect_code,
         handle,
         _lock: lock,
     })
@@ -703,29 +708,34 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
     }
 }
 
-/// What the browser routes need but the port, and the first connect code, issued. `in_use` is the
-/// credential the sessions start with, shared so that connecting the account again replaces it.
-/// The sessions are kept in the state folder, made here when it is not there yet, or in memory
-/// when there is none.
-pub(crate) fn web(root: &Path, io: &CliIo<'_>) -> Result<(WebState, String), String> {
-    let state = state_dir(&io.env);
-    let file = match &state {
+/// The sessions and codes a serve shares among its teams, behind the hub's `port`. The sessions
+/// are kept in the state folder, made here when it is not there yet, or in memory when there is
+/// none.
+pub(crate) fn shared_web(io: &CliIo<'_>, port: u16) -> Result<Shared, String> {
+    let file = match state_dir(&io.env) {
         Some(directory) => {
-            make_state_dir(directory)?;
+            make_state_dir(&directory)?;
             Some(directory.join("browser-sessions.json"))
         }
         None => None,
     };
-    let sessions = BrowserSessions::open(file).map_err(|error| error.to_string())?;
-    let codes = ConnectCodes::default();
-    let code = codes.issue().map_err(|error| error.to_string())?;
-    let web = WebState {
-        codes,
-        sessions,
+    Ok(Shared {
+        sessions: BrowserSessions::open(file).map_err(|error| error.to_string())?,
+        codes: ConnectCodes::default(),
+        port,
+    })
+}
+
+/// `web`'s state for the project at `root`, over `shared`'s sessions, codes and port.
+pub(crate) fn web_sharing(root: &Path, io: &CliIo<'_>, shared: &Shared) -> WebState {
+    let state = state_dir(&io.env);
+    WebState {
+        codes: shared.codes.clone(),
+        sessions: shared.sessions.clone(),
         project_root: root.to_path_buf(),
         account: account(io),
         kept_key_removed: io.kept_key_removed,
-        port: 0,
+        port: shared.port,
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
         leaving: std::sync::Mutex::default(),
@@ -733,8 +743,7 @@ pub(crate) fn web(root: &Path, io: &CliIo<'_>) -> Result<(WebState, String), Str
         templates: state.map(|directory| Templates::new(directory.join("templates"))),
         #[cfg(feature = "e2e")]
         admit_local_preview: io.admit_local_preview,
-    };
-    Ok((web, code))
+    }
 }
 
 /// What the browser routes ask of Claude Code's account (ADR 0084): the `claude` found on `PATH`,

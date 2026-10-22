@@ -40,6 +40,8 @@ const NOT_A_NAME: &str =
     "a project's name is lowercase letters, digits, and -, up to 64 characters";
 /// What `open` refuses a folder outside home with.
 const OUTSIDE_HOME: &str = "that folder is outside your home folder";
+/// What `open` refuses a project that is one of the teams already with.
+const TEAM_ALREADY_HERE: &str = "team_already_here: that project is already one of your teams";
 /// What `open` refuses home itself with: Catervas's settings folder, `~/.config/catervas`, would be in
 /// the project, where a commit could write it (re-review 2 m1).
 const HOME_ITSELF: &str = "your home folder itself cannot be a project; choose a folder inside it";
@@ -60,6 +62,8 @@ pub(crate) struct CliHost {
     pub(crate) leaving: Option<PathBuf>,
     /// Where the connector keys are kept, for the team taken to another project.
     pub(crate) secrets: Arc<dyn ConnectorSecrets>,
+    /// The project of every team this serve has (ADR 0059): a team is added once.
+    pub(crate) teams: Arc<std::sync::Mutex<std::collections::BTreeSet<PathBuf>>>,
 }
 
 impl CliHost {
@@ -269,6 +273,14 @@ impl SetupHost for CliHost {
         }
         if std::fs::canonicalize(&self.home).is_ok_and(|home| home == root) {
             return Err(refused(HOME_ITSELF));
+        }
+        if self
+            .teams
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&root)
+        {
+            return Err(refused(TEAM_ALREADY_HERE));
         }
         // Checked before anything is changed; the lock is given back for the driver to take.
         match try_lock(&root).map_err(failed)? {
@@ -573,6 +585,7 @@ mod tests {
                 waiting: None,
                 leaving: leaving.map(Path::to_path_buf),
                 secrets: self.secrets.clone(),
+                teams: Arc::default(),
             }
         }
 

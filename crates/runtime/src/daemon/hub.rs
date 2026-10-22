@@ -20,6 +20,12 @@ use super::{DaemonState, documents, web};
 pub struct TeamSlug(String);
 
 impl TeamSlug {
+    /// The slug `slug`.
+    #[must_use]
+    pub fn new(slug: &str) -> Self {
+        TeamSlug(slug.to_string())
+    }
+
     /// The slug as it is written in an address.
     #[must_use]
     pub fn as_str(&self) -> &str {
@@ -130,12 +136,17 @@ impl Hub {
 pub(super) async fn team_rpc(
     State(hub): State<Arc<DaemonState>>,
     Path(team): Path<String>,
-    cancel: Extension<CancellationToken>,
+    Extension(hub_cancel): Extension<CancellationToken>,
     headers: HeaderMap,
     upgrade: Result<WebSocketUpgrade, WebSocketUpgradeRejection>,
 ) -> Response {
     match hub.hub().and_then(|hub| hub.team(&team)) {
-        Some(state) => web::rpc(State(state), cancel, headers, upgrade).await,
+        Some(state) => {
+            // The page of a team ends with that team's daemon, not with the hub, which is served
+            // again each time a team is added.
+            let cancel = state.closing().cloned().unwrap_or(hub_cancel);
+            web::rpc(State(state), Extension(cancel), headers, upgrade).await
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
