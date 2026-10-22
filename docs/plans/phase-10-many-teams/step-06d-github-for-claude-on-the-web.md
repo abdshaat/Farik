@@ -84,7 +84,7 @@ Tests (`github.rs`, against a fake server on localhost that answers recorded Git
   - A 403 with no remaining rate is `RateLimited` with its reset.
   - A 401 is `Refused`.
 
-- [ ] `feat(runtime): read the owner's repositories and claude's work from github`
+- [x] `feat(runtime): read the owner's repositories and claude's work from github`
 
 ### Task 2: GitHub in the index
 

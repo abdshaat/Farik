@@ -49,6 +49,12 @@ pub mod exec;
 pub mod forge;
 /// Catervas's own server over the central banks' exchange rates (ADR 0038).
 pub mod fx;
+/// The owner's GitHub: their repositories, and the branches and pull requests Claude on the web made.
+pub mod github;
+/// A stand-in for GitHub's API, for the tests of the GitHub client.
+#[cfg(test)]
+#[path = "../tests/support/github_fixture.rs"]
+mod github_fixture;
 /// The owner's goal: its book, its planner and reader, and the owner's commands (ADR 0075).
 pub mod goals;
 /// Catervas's own Google Ads connector: the client for Google's API and what each tool sends (ADR
