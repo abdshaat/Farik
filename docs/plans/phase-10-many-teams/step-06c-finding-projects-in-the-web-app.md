@@ -162,7 +162,7 @@ The test (`e2e/finding.spec.ts`), "a new owner finds their projects":
 
 `docs/SPEC.md` revision 0.147 (2026-10-22), "records phase 10 step 06c, finding projects in the web app". It covers 4.1 (the offer in the computer check, `/setup/where`) and 4.4 (the `/find/*` pages, All teams' offer and new-found line, This computer's finding section, and `finding.catalog`). Then the project plan's row 06c: "planned and executed 2026-10-22".
 
-- [ ] `docs(spec): finding projects in the web app, revision 0.147`
+- [x] `docs(spec): finding projects in the web app, revision 0.147`
 
 ## Verification
 
