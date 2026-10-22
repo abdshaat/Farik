@@ -214,6 +214,7 @@ impl CliFinder {
             chosen: tokio::sync::watch::channel(None).0,
             waiting: None,
             leaving: None,
+            unready: Arc::default(),
             secrets: Arc::clone(&self.secrets),
             teams: Arc::default(),
         }

@@ -36,7 +36,7 @@ use super::{analytics, board, documents, finding, gates, hub, reminders, repos, 
 use catervas_core::claude_account::AccountStatus;
 
 use crate::account::AccountPort;
-use crate::computer::{check_computer, pull_browser_image};
+use crate::computer::{ItemState, check_computer, pull_browser_image};
 use crate::locked;
 
 /// What the browser routes need, which only `catervas serve` gives the daemon (`DaemonState::set_web`).
@@ -1076,8 +1076,12 @@ fn wizard_query(
         "computer.check" => {
             let mut checked = check_computer(&host.env(), true);
             checked.sandbox_image = state.image_build().over(checked.sandbox_image);
-            serde_json::to_value(checked)
-                .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))
+            // A project that stopped on the sandbox is taken on again once its image is ready.
+            let taking_on = checked.sandbox_image.state == ItemState::Ready && host.sandbox_ready();
+            let mut answer = serde_json::to_value(checked)
+                .map_err(|error| Failure::new(INTERNAL_ERROR, error.to_string()))?;
+            answer["taking_on"] = json!(taking_on);
+            Ok(answer)
         }
         _ => Err(Failure::new(
             INTERNAL_ERROR,

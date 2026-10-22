@@ -156,6 +156,14 @@ for _ in $(seq 1 60); do
   fi
   link="$(grep -o 'http://[^ ]*/connect#[^ ]*' "$log_file" | head -n 1 || true)"
   if [[ -n "$link" ]]; then
+    # The link is printed before the first tick: give a start that fails on it time to show.
+    sleep 2
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$pid_file"
+      say "Catervas stopped right after starting, so its link does not work. Its log:" >&2
+      tail -n 20 "$log_file" >&2
+      exit 1
+    fi
     say "Catervas is running (process $pid)."
     say "Open: $link"
     say "Its log: $log_file"

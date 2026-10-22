@@ -859,6 +859,175 @@ fn answers_the_setup_page_while_docker_info_hangs() {
 }
 
 #[cfg(feature = "e2e")]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn waits_in_the_wizard_for_a_missing_sandbox_image() {
+    use std::io::{BufRead as _, BufReader};
+    use std::process::{Command, Stdio};
+
+    // A `docker` that answers, whose sandbox image is there only once `built` is.
+    let directory = scratch("serve-image-missing-bin");
+    let built = directory.join("built");
+    let source = directory.join("docker.txt");
+    std::fs::write(
+        &source,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n  version|rm|run) exit 0 ;;\n  image) [ -f '{}' ] ;;\n  \
+             *) exit 1 ;;\nesac\n",
+            built.display()
+        ),
+    )
+    .expect("written");
+    // Copied rather than written in place, as `a_claude_saying` says.
+    let program = directory.join("docker");
+    let copied = Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    // A task in progress in a sandboxed project: the first tick makes its sandbox.
+    let repository = a_team("serve-image-missing");
+    std::fs::write(
+        repository.path.join(".catervas/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+    let request = repository.path.join("request.yaml");
+    std::fs::write(&request, project::a_request("Write done.txt")).expect("written");
+    let filed = run(
+        &repository.path,
+        &["task", "create", request.to_str().expect("a path")],
+    );
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    std::fs::remove_file(&request).expect("removed");
+    project::record(
+        &repository,
+        "CTV-1",
+        "request.triaged",
+        &json!({ "size": "small", "reason": "One file.", "triaged_by": "human" }),
+    );
+    let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+    for (from, to) in [
+        ("draft", "refining"),
+        ("refining", "ready"),
+        ("ready", "assigned"),
+        ("assigned", "in_progress"),
+    ] {
+        project::moved(&repository, "CTV-1", from, to, &people);
+    }
+
+    let (home, state) = (
+        scratch("serve-image-missing-home"),
+        scratch("serve-image-missing-state"),
+    );
+    let errors = state.join("stderr.txt");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
+        .args([
+            "--port",
+            &free_port(),
+            "--no-keychain",
+            "--sandbox-image",
+            "catervas-sandbox-unused",
+        ])
+        .env("PATH", path)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &state)
+        .current_dir(&repository.path)
+        .stdout(Stdio::piped())
+        .stderr(std::fs::File::create(&errors).expect("the error file"))
+        .spawn()
+        .expect("the binary starts");
+    let out = Arc::new(Mutex::new(String::new()));
+    let kept = Arc::clone(&out);
+    let (linked, link) = channel();
+    let stdout = child.stdout.take().expect("stdout");
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(found) = link_of(&line) {
+                let _ = linked.send(found);
+            }
+            let mut out = kept.lock().expect("the output");
+            out.push_str(&line);
+            out.push('\n');
+        }
+    });
+    let (port, code) = link
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the link is printed");
+    let cookie = connected(port, &code);
+
+    // The sandbox cannot be made: serve goes back to the wizard, waiting on the project, on the
+    // same port, so the owner can prepare the image there.
+    let mut status = Value::Null;
+    let mut exited = None;
+    until("serve is back in setup mode", || {
+        exited = child.try_wait().expect("the binary is asked");
+        status = serve_status_across_a_restart(port, &cookie).unwrap_or_default();
+        exited.is_some() || status.is_object() && status["project_root"].is_null()
+    });
+    if let Some(exited) = exited {
+        joined(reader, "the output");
+        let said = std::fs::read_to_string(&errors).unwrap_or_default();
+        panic!(
+            "serve ended ({exited}):\n{}{said}",
+            out.lock().expect("the output")
+        );
+    }
+    let check = |cookie: &str| {
+        call(
+            port,
+            cookie,
+            "query",
+            json!({ "name": "computer.check", "params": {} }),
+        )
+    };
+    let missing = check(&cookie);
+    assert_eq!(
+        missing["result"]["sandbox_image"]["state"], "missing",
+        "{missing}"
+    );
+    assert_eq!(missing["result"]["taking_on"], false, "{missing}");
+
+    // Once the image is there, the check takes the project on again.
+    std::fs::write(&built, "").expect("written");
+    let ready = check(&cookie);
+    assert_eq!(ready["result"]["taking_on"], true, "{ready}");
+    until("the project is driven again", || {
+        status = serve_status_across_a_restart(port, &cookie).unwrap_or_default();
+        status["project_root"].is_string()
+    });
+    // Its task's session waits until it is aborted, which the second Ctrl-C does.
+    let interrupt = || {
+        let sent = Command::new("kill")
+            .args(["-INT", &child.id().to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(sent.success());
+    };
+    interrupt();
+    std::thread::sleep(Duration::from_millis(500));
+    interrupt();
+    let ended = child.wait().expect("the binary ends");
+    joined(reader, "the output");
+    let out = out.lock().expect("the output").clone();
+    assert_eq!(ended.code(), Some(130), "{out}");
+    assert!(
+        out.contains(&format!(
+            "the sandbox is not ready: prepare it in the browser, on 127.0.0.1:{port}"
+        )),
+        "{out}"
+    );
+    assert_eq!(links(&out).len(), 1, "{out}");
+}
+
+#[cfg(feature = "e2e")]
 /// The raw answer to `GET <path>` sent to the daemon on `port` with `Host: <host>`, and `cookie`
 /// when there is one.
 fn get_as(port: u16, host: &str, path: &str, cookie: Option<&str>) -> String {

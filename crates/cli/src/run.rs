@@ -2,7 +2,10 @@
 //! nothing needs doing, a stop, or Ctrl-C, and then says what waits on the human.
 
 use catervas_core::claude_account::AccountKind;
-use catervas_runtime::orchestrator::{Progress, TickReport, TickRules, TickScope};
+use catervas_runtime::SandboxError;
+use catervas_runtime::orchestrator::{
+    OrchestratorError, Progress, TickReport, TickRules, TickScope,
+};
 use catervas_store::files::Sandbox;
 use serde_json::{Value, json};
 
@@ -66,6 +69,9 @@ pub(crate) enum Ended {
     Stopped,
     /// A tick failed, in these words.
     Failed(String),
+    /// A tick failed, in these words, because this computer's sandbox is not ready: Docker does
+    /// not answer or the sandbox image is missing, which setup's computer check prepares.
+    Unready(String),
 }
 
 /// `catervas run` (every rule) or `catervas plan` (the planning rules): start, tick until done, say
@@ -195,7 +201,12 @@ pub(crate) async fn ticks(
                 return Ended::Stopped;
             }
             Some(Err(error)) => {
-                return drain(driver, printer, presses, scope, error.to_string()).await;
+                let unready = unready(&error);
+                let error = error.to_string();
+                return match drain(driver, printer, presses, scope, error).await {
+                    Ended::Failed(error) if unready => Ended::Unready(error),
+                    ended => ended,
+                };
             }
             Some(Ok(Progress::Started {
                 agent_id,
@@ -332,6 +343,16 @@ async fn drain(
     }
 }
 
+/// Whether `error` is the sandbox not being ready on this computer (`Ended::Unready`).
+fn unready(error: &OrchestratorError) -> bool {
+    matches!(
+        error,
+        OrchestratorError::Sandbox(
+            SandboxError::DockerUnavailable | SandboxError::ImageMissing { .. }
+        )
+    )
+}
+
 /// Waits for `wait`, hearing Ctrl-C meanwhile.
 async fn wait_out(
     driver: &mut Driver,
@@ -380,7 +401,7 @@ pub(crate) async fn finish(
     presses: u32,
 ) -> i32 {
     let mut code = match &ended {
-        Ended::Failed(error) => {
+        Ended::Failed(error) | Ended::Unready(error) => {
             report_error(printer, error);
             1
         }

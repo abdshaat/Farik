@@ -85,6 +85,11 @@ pub trait SetupHost: Send + Sync {
         let _ = (agents_at_once, daily_cap_usd);
         Ok(())
     }
+    /// The sandbox image is ready: takes on the projects that waited on the sandbox, if any did,
+    /// and answers whether it did.
+    fn sandbox_ready(&self) -> bool {
+        false
+    }
     /// The user's home folder, which the folder browser stays inside.
     fn home(&self) -> PathBuf;
     /// The environment the computer's programs are looked for and run in.

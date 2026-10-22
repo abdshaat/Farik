@@ -2,9 +2,9 @@
 //! 4.1): the CLI's side of runtime's `SetupHost`, which opens or makes the project, keeps the
 //! credential, and says on a watch which project the wizard chose.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use catervas_core::repos::{MAX_REPOS, MemberRefusal, Repo, Repos, check_member, validate_repos};
 use catervas_protocol::clock::Clock;
@@ -58,6 +58,9 @@ pub(crate) struct CliHost {
     pub(crate) chosen: watch::Sender<Option<PathBuf>>,
     /// A project already chosen, which waits on an AI account: `take_on_waiting` takes it on.
     pub(crate) waiting: Option<PathBuf>,
+    /// The projects whose drive stopped because this computer's sandbox is not ready, which
+    /// `sandbox_ready` takes on again.
+    pub(crate) unready: Arc<Mutex<BTreeSet<PathBuf>>>,
     /// The root the team just left from the browser: opening it again stays on it as it is.
     pub(crate) leaving: Option<PathBuf>,
     /// Where the connector keys are kept, for the team taken to another project.
@@ -486,6 +489,20 @@ impl SetupHost for CliHost {
         write_state(&directory, &state).map_err(failed)
     }
 
+    fn sandbox_ready(&self) -> bool {
+        // The serve loop takes on the project chosen, and with it every other that waits.
+        let first = self
+            .unready
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first()
+            .cloned();
+        if let Some(root) = &first {
+            self.choose(root.clone());
+        }
+        first.is_some()
+    }
+
     fn home(&self) -> PathBuf {
         self.home.clone()
     }
@@ -604,6 +621,7 @@ mod tests {
                 clock: Arc::new(FixedClock::new(Utc::now())),
                 chosen: tokio::sync::watch::channel(None).0,
                 waiting: None,
+                unready: Arc::default(),
                 leaving: leaving.map(Path::to_path_buf),
                 secrets: self.secrets.clone(),
                 teams: Arc::default(),

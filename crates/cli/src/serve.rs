@@ -25,7 +25,7 @@ use tokio::sync::{mpsc, watch};
 
 use crate::finding::CliFinder;
 use crate::project::{open_project, repository_root};
-use crate::run::{INTERRUPTED, OnIdle, Printer, finish, started, ticks};
+use crate::run::{Ended, INTERRUPTED, OnIdle, Printer, finish, started, ticks};
 use crate::setup::CliHost;
 use crate::start::{
     RunLock, Shared, StartOptions, driven_elsewhere, listen, runtime, shared_web, start_holding,
@@ -43,6 +43,9 @@ enum Driven {
     Ended(i32),
     /// The project at this root was left from the browser: it is no longer one of the teams.
     Left(PathBuf),
+    /// The project at this root stopped because this computer's sandbox is not ready: it is out of
+    /// the hub but stays one of the teams, and is taken on again once the sandbox is ready.
+    Unready(PathBuf),
 }
 
 /// What a drive tells the loop besides its end.
@@ -108,6 +111,8 @@ struct WizardContext {
     waiting: Option<PathBuf>,
     /// The root a drive just left through `project.leave`.
     leaving: Option<PathBuf>,
+    /// Whether the wizard waits on the sandbox, which the computer check prepares.
+    sandbox: bool,
 }
 
 /// The wizard and the hub on the held port, until it is shut down.
@@ -136,6 +141,9 @@ struct Serving<'s, 'io> {
     elsewhere: BTreeSet<PathBuf>,
     /// The projects waiting on the AI account.
     pending: Vec<PathBuf>,
+    /// The projects whose drive stopped on a sandbox that is not ready, which the wizard's
+    /// computer check takes on again.
+    unready: Arc<Mutex<BTreeSet<PathBuf>>>,
     /// The projects with no team any more.
     missing: BTreeSet<PathBuf>,
     /// The projects whose drive ended with an error, and the error.
@@ -266,6 +274,7 @@ async fn run<'io>(
         slugs: BTreeMap::new(),
         elsewhere: BTreeSet::new(),
         pending: Vec::new(),
+        unready: Arc::default(),
         missing: BTreeSet::new(),
         failed: BTreeMap::new(),
         removing: BTreeSet::new(),
@@ -443,7 +452,9 @@ impl<'s, 'io> Serving<'s, 'io> {
             );
             self.say(false, &message);
         }
-        let lacks = if self.context.waiting.is_some() {
+        let lacks = if self.context.sandbox {
+            "the sandbox is not ready: prepare it in the browser"
+        } else if self.context.waiting.is_some() {
             "no AI account yet: connect one in the browser"
         } else {
             "no project yet: catervas is set up in the browser"
@@ -463,6 +474,7 @@ impl<'s, 'io> Serving<'s, 'io> {
             chosen,
             waiting: self.context.waiting.clone(),
             leaving: self.context.leaving.clone(),
+            unready: Arc::clone(&self.unready),
             secrets: Arc::clone(&self.io.connector_secrets),
             teams: Arc::clone(&self.teams),
         });
@@ -607,18 +619,40 @@ impl<'s, 'io> Serving<'s, 'io> {
         self.restore = self.context.clone();
         let waiting = self.context.waiting.take();
         self.context.leaving = None;
+        self.context.sandbox = false;
+        // The sandbox is ready: this project and every other that waited on it are taken on.
+        let unready = std::mem::take(
+            &mut *self
+                .unready
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let was_unready = unready.contains(root);
         self.teams
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(root.to_path_buf());
-        if let Some(error) = self.launch(root.to_path_buf(), true, true, true) {
+        if let Some(error) = self.launch(root.to_path_buf(), !was_unready, true, !was_unready) {
             self.say(
                 true,
                 &format!("catervas: the project could not be taken on: {error}"),
             );
-            self.forget_team(root);
+            if was_unready {
+                // It stays one of the teams, waiting on the sandbox as it did.
+                self.unready
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(root.to_path_buf());
+            } else {
+                self.forget_team(root);
+            }
             self.context = self.restore.clone();
             return Some(error);
+        }
+        for other in unready {
+            if other != root {
+                self.launch(other, false, false, false);
+            }
         }
         if waiting.as_deref() == Some(root) {
             for other in std::mem::take(&mut self.pending) {
@@ -747,6 +781,29 @@ impl<'s, 'io> Serving<'s, 'io> {
                 self.context = WizardContext {
                     waiting: None,
                     leaving: Some(left),
+                    sandbox: false,
+                };
+                Some(Back::Left)
+            }
+            Ok(Driven::Unready(unready)) => {
+                // Out of the hub, as a leave is, but still one of the teams; the others keep
+                // running, and with none left the wizard is served, waiting on the sandbox.
+                self.unready
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(unready.clone());
+                self.failed.insert(
+                    unready,
+                    "the sandbox is not ready: prepare it in the browser".to_string(),
+                );
+                self.publish_idle();
+                if !self.drives.is_empty() {
+                    return None;
+                }
+                self.context = WizardContext {
+                    waiting: None,
+                    leaving: None,
+                    sandbox: true,
                 };
                 Some(Back::Left)
             }
@@ -889,8 +946,12 @@ async fn run_team(
     )
     .await;
     let left = driver.daemon.left();
+    let unready = matches!(ended, Ended::Unready(_));
     hub.remove(&slug);
     let code = finish(&project, driver, &mut printer, ended, presses).await;
+    if unready && left.is_none() && code == 1 {
+        return Ok(Driven::Unready(project.root));
+    }
     Ok(driven(left, code))
 }
 
