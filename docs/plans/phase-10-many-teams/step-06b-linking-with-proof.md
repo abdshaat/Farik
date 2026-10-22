@@ -173,7 +173,7 @@ Tests (`crates/runtime/src/daemon/finding.rs` with the fake host):
   - `linking.groups` reflects the Yes answers.
   - Every method's schema holds.
 
-- [ ] `feat(runtime): ask about links from the hub`
+- [x] `feat(runtime): ask about links from the hub`
 
 ### Task 5: The screens
 

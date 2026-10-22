@@ -18,9 +18,14 @@ use futures_util::StreamExt as _;
 use catervas_core::claude_history::{ProjectKey, fold_by_remote, normalise_remote};
 use catervas_core::claude_services::catalog::CATALOG;
 use catervas_core::finding::{Candidate, Choice, Section, section_of, suggest};
+use catervas_core::linking::{ClaudeAiProjectText, Proof};
 use catervas_store::claude_export::{ExportError, ExportLimits, import_claude_export};
 use catervas_store::claude_history::{HistoryError, add_project_by_hand, place_sessions};
 use catervas_store::git::Git;
+use catervas_store::linking::{
+    Answer, LinkProject, LinkingError, answer_pair, asked_pairs, confirmed_groups, evaluate,
+    maybe_pairs,
+};
 use catervas_store::machine::{
     ClaudeWork, GithubProject, MACHINE_DB, MachineIndex, Ownership, WorkKind, forget_machine_index,
     open_machine_index,
@@ -113,6 +118,11 @@ pub trait FindingHost: Send + Sync {
     fn secrets(&self) -> Arc<dyn ConnectorSecrets>;
     /// Where GitHub is and how a repository is cloned from it.
     fn github(&self) -> GithubPlaces;
+    /// The committed files of the repository at `root` that proofs of linking are read from, as
+    /// `(path, text)`; none when they cannot be read.
+    fn committed_files(&self, root: &str) -> Vec<(String, String)> {
+        catervas_store::linking::read_from_git(root)
+    }
 }
 
 /// Where a scan is.
@@ -219,7 +229,7 @@ impl Finding {
 }
 
 /// The methods the hub answers for finding (docs/schemas/rpc.schema.json).
-pub(super) const METHODS: [&str; 22] = [
+pub(super) const METHODS: [&str; 26] = [
     "finding.offer",
     "finding.catalog",
     "finding.start",
@@ -242,6 +252,10 @@ pub(super) const METHODS: [&str; 22] = [
     "github.status",
     "github.disconnect",
     "github.copy",
+    "linking.pairs",
+    "linking.maybe",
+    "linking.groups",
+    "linking.answer",
 ];
 
 /// A refusal: its code, then its sentence.
@@ -313,6 +327,10 @@ pub(super) fn call(hub: &Hub, method: &str, params: &Value) -> Result<Value, Fai
         "github.status" => Ok(github_status(host.as_ref())),
         "github.disconnect" => github_disconnect(host.as_ref()),
         "github.copy" => github_copy(hub, host.as_ref(), params),
+        "linking.pairs" => linking_pairs(hub, host.as_ref()),
+        "linking.maybe" => linking_maybe(hub, host.as_ref()),
+        "linking.groups" => linking_groups(hub, host.as_ref()),
+        "linking.answer" => linking_answer(hub, host.as_ref(), params),
         _ => forget(hub, host.as_ref(), params),
     }
 }
@@ -621,6 +639,8 @@ struct Row {
     section: Section,
     claude_work: Vec<ClaudeWork>,
     github: Option<GithubProject>,
+    /// The repository's normalised remote, when the project has one.
+    remote: Option<String>,
 }
 
 /// A piece of Claude's work on GitHub, as the page reads it.
@@ -809,6 +829,7 @@ fn build_listing(
             gone,
             claude_work: Vec::new(),
             github: None,
+            remote: None,
         }
     };
 
@@ -876,6 +897,7 @@ fn build_listing(
             .find(|project| !project.claude_work.is_empty())
             .map(|project| project.claude_work.clone())
             .unwrap_or_default();
+        row.remote.clone_from(&first.remote);
         rows.push(row);
     }
     for repo in &found.github {
@@ -891,6 +913,7 @@ fn build_listing(
         );
         row.claude_work.clone_from(&repo.claude_work);
         row.github = Some(repo.clone());
+        row.remote = Some(repo.remote_key.clone());
         rows.push(row);
     }
     for hand in &found.by_hand {
@@ -899,7 +922,7 @@ fn build_listing(
             .clone()
             .or_else(|| hand.remote.clone())
             .unwrap_or_else(|| hand.name.clone());
-        rows.push(make(
+        let mut row = make(
             key,
             hand.name.clone(),
             "hand",
@@ -908,7 +931,9 @@ fn build_listing(
             Candidate::ByHand,
             Vec::new(),
             false,
-        ));
+        );
+        row.remote.clone_from(&hand.remote);
+        rows.push(row);
     }
     for formed in &services.formed {
         rows.push(make(
@@ -1006,6 +1031,270 @@ fn build_listing(
             .map(|formed| formed.name.clone())
             .collect(),
     })
+}
+
+/// What the linking methods work on: the projects the owner means to make teams of, with the
+/// claude.ai Projects among them, as `catervas_store::linking` reads them.
+struct LinkScope {
+    projects: Vec<LinkProject>,
+    claude_ai: Vec<ClaudeAiProjectText>,
+}
+
+/// The projects chosen as teams (the choice made, else the suggestion the page showed), and the
+/// teams already driven, apart from a folder that is gone.
+fn link_scope(
+    hub: &Hub,
+    host: &dyn FindingHost,
+    index: &MachineIndex,
+) -> Result<LinkScope, Failure> {
+    let listing = build_listing(hub, host, index).map_err(|e| internal(&e))?;
+    let activity = index.link_activity().map_err(|e| internal(&e))?;
+    let found = index.found().map_err(|e| internal(&e))?;
+    let mut scope = LinkScope {
+        projects: Vec::new(),
+        claude_ai: Vec::new(),
+    };
+    for row in &listing.rows {
+        let wanted =
+            row.choice.or(row.suggested) == Some(Choice::Team) || row.already_team.is_some();
+        if !wanted || row.gone || row.kind == "job" {
+            continue;
+        }
+        let mut active_days = std::collections::BTreeSet::new();
+        let mut written_in = std::collections::BTreeSet::new();
+        for folder in &row.folders {
+            active_days.extend(
+                activity
+                    .days_by_root
+                    .get(folder)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            );
+            written_in.extend(
+                activity
+                    .written_by_root
+                    .get(folder)
+                    .into_iter()
+                    .flatten()
+                    .cloned(),
+            );
+        }
+        let folder = row.folders.first().cloned();
+        scope.projects.push(LinkProject {
+            key: row.key.clone(),
+            name: row.name.clone(),
+            last_at: row.last_at,
+            remote_key: row.remote.clone(),
+            root: matches!(row.kind, "folder" | "hand")
+                .then(|| folder.clone())
+                .flatten(),
+            folder,
+            active_days,
+            written_in,
+        });
+        if let Some(project) = found
+            .claude_ai
+            .projects
+            .iter()
+            .find(|project| project.uuid == row.key)
+        {
+            scope.claude_ai.push(ClaudeAiProjectText {
+                uuid: project.uuid.clone(),
+                name: row.name.clone(),
+                description: project.description.clone(),
+                file_names: project.doc_names.clone(),
+            });
+        }
+    }
+    Ok(scope)
+}
+
+/// A project of the scope as the page shows it: its name, when it was last worked on, and its
+/// folder with the home folder written `~`.
+fn link_project_json(host: &dyn FindingHost, project: &LinkProject) -> Value {
+    let home = host.home();
+    let folder = project.folder.as_deref().map(|folder| {
+        Path::new(folder).strip_prefix(&home).map_or_else(
+            |_| folder.to_string(),
+            |rest| format!("~/{}", rest.to_string_lossy()),
+        )
+    });
+    json!({
+        "key": project.key,
+        "name": project.name,
+        "last_at": project.last_at.map(moment),
+        "folder": folder,
+    })
+}
+
+fn link_project<'a>(scope: &'a LinkScope, key: &str) -> Option<&'a LinkProject> {
+    scope.projects.iter().find(|project| project.key == key)
+}
+
+/// A proof as the page reads it: each end names its project.
+fn proof_json(scope: &LinkScope, proof: &Proof) -> Value {
+    let mut shown = proof.to_json();
+    if let Some(ends) = shown["ends"].as_array_mut() {
+        for end in ends {
+            let name = end["project"]
+                .as_str()
+                .and_then(|key| link_project(scope, key))
+                .map(|project| project.name.clone())
+                .unwrap_or_default();
+            end["name"] = json!(name);
+        }
+    }
+    shown
+}
+
+fn link_failure(error: &LinkingError) -> Failure {
+    match error {
+        LinkingError::ProofNoLongerHolds => refusal(
+            "proof_no_longer_holds",
+            "the files that proved they work together no longer say so",
+        ),
+        LinkingError::UnknownProject => unknown_project(),
+        LinkingError::Store(_) => internal(error),
+    }
+}
+
+/// Opens the index and the scope the linking methods read, or the empty scope when there is no
+/// index yet.
+fn with_scope<T>(
+    hub: &Hub,
+    host: &dyn FindingHost,
+    then: impl FnOnce(&mut MachineIndex, &LinkScope) -> Result<T, Failure>,
+    empty: T,
+) -> Result<T, Failure> {
+    if !host.state_dir().join(MACHINE_DB).exists() {
+        return Ok(empty);
+    }
+    let mut index = open_index(host)?;
+    let scope = link_scope(hub, host, &index)?;
+    then(&mut index, &scope)
+}
+
+fn read_of(host: &dyn FindingHost) -> impl Fn(&str) -> Vec<(String, String)> + '_ {
+    move |root| host.committed_files(root)
+}
+
+/// `linking.pairs`: the pairs with a proof the owner is to be asked about, read from the files
+/// as they are now.
+fn linking_pairs(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
+    with_scope(
+        hub,
+        host,
+        |index, scope| {
+            let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+            let pairs =
+                asked_pairs(index, &scope.projects, &evaluation).map_err(|e| internal(&e))?;
+            let shown = pairs
+                .iter()
+                .filter_map(|pair| {
+                    let (a, b) = (
+                        link_project(scope, &pair.proof.a)?,
+                        link_project(scope, &pair.proof.b)?,
+                    );
+                    Some(json!({
+                        "a": link_project_json(host, a),
+                        "b": link_project_json(host, b),
+                        "proof": proof_json(scope, &pair.proof),
+                        "also": pair.also,
+                        "hints": pair.hints.iter().map(|hint| hint.as_wire()).collect::<Vec<_>>(),
+                    }))
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({ "pairs": shown }))
+        },
+        json!({ "pairs": [] }),
+    )
+}
+
+/// `linking.maybe`: the pairs with only hints and no answer.
+fn linking_maybe(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
+    with_scope(
+        hub,
+        host,
+        |index, scope| {
+            let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+            let maybe = maybe_pairs(index, &evaluation).map_err(|e| internal(&e))?;
+            let shown = maybe
+                .iter()
+                .filter_map(|hint| {
+                    Some(json!({
+                        "a": link_project_json(host, link_project(scope, &hint.a)?),
+                        "b": link_project_json(host, link_project(scope, &hint.b)?),
+                        "hints": hint.kinds.iter().map(|kind| kind.as_wire()).collect::<Vec<_>>(),
+                    }))
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({ "maybe": shown }))
+        },
+        json!({ "maybe": [] }),
+    )
+}
+
+/// `linking.groups`: the groups the owner's Yes answers form.
+fn linking_groups(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
+    with_scope(
+        hub,
+        host,
+        |index, scope| {
+            let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+            let groups =
+                confirmed_groups(index, &scope.projects, &evaluation).map_err(|e| internal(&e))?;
+            let shown = groups
+                .iter()
+                .map(|group| {
+                    json!({
+                        "projects": group.projects,
+                        "names": group
+                            .projects
+                            .iter()
+                            .map(|key| link_project(scope, key).map_or_else(|| key.clone(), |project| project.name.clone()))
+                            .collect::<Vec<_>>(),
+                        "why": group.why,
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(json!({ "groups": shown }))
+        },
+        json!({ "groups": [] }),
+    )
+}
+
+/// `linking.answer`: the owner's answer about a pair.
+fn linking_answer(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Failure> {
+    let wanted = (
+        params["a"].as_str().unwrap_or_default(),
+        params["b"].as_str().unwrap_or_default(),
+    );
+    let answer = Answer::from_wire(params["answer"].as_str().unwrap_or_default())
+        .ok_or_else(|| refusal("bad_answer", "the answer is yes or no"))?;
+    let from_maybe = params["from_maybe"].as_bool().unwrap_or(false);
+    if !host.state_dir().join(MACHINE_DB).exists() {
+        return Err(unknown_project());
+    }
+    with_scope(
+        hub,
+        host,
+        |index, scope| {
+            answer_pair(
+                index,
+                &scope.projects,
+                &scope.claude_ai,
+                &read_of(host),
+                wanted,
+                answer,
+                from_maybe,
+                host.now(),
+            )
+            .map_err(|error| link_failure(&error))?;
+            Ok(json!({}))
+        },
+        json!({}),
+    )
 }
 
 /// `finding.choose`.
@@ -1490,6 +1779,8 @@ mod tests {
         scans: AtomicU64,
         secrets: Arc<MemoryConnectorSecrets>,
         api: Mutex<String>,
+        /// The committed files of each folder, by its path.
+        files: Mutex<std::collections::BTreeMap<String, Vec<(String, String)>>>,
     }
 
     impl Fake {
@@ -1506,6 +1797,7 @@ mod tests {
                 scans: AtomicU64::new(0),
                 secrets: Arc::new(MemoryConnectorSecrets::default()),
                 api: Mutex::new(String::new()),
+                files: Mutex::new(std::collections::BTreeMap::new()),
             })
         }
 
@@ -1580,6 +1872,14 @@ mod tests {
                 api: self.api.lock().expect("api").clone(),
                 ..GithubPlaces::default()
             }
+        }
+        fn committed_files(&self, root: &str) -> Vec<(String, String)> {
+            self.files
+                .lock()
+                .expect("files")
+                .get(root)
+                .cloned()
+                .unwrap_or_default()
         }
     }
 
@@ -1699,6 +1999,183 @@ mod tests {
             json!({ "connected": false })
         );
         drop(runtime);
+    }
+
+    /// Fails unless `value` is what `definition` of the RPC schema says.
+    fn conforms(value: &Value, definition: &str) {
+        let schema: Value =
+            serde_json::from_str(catervas_protocol::rpc::SCHEMA_JSON).expect("the schema is JSON");
+        let root = json!({
+            "$schema": schema["$schema"],
+            "$ref": format!("#/$defs/{definition}"),
+            "$defs": schema["$defs"],
+        });
+        let validator = jsonschema::options()
+            .build(&root)
+            .expect("the definition compiles");
+        let errors: Vec<String> = validator
+            .iter_errors(value)
+            .map(|e| e.to_string())
+            .collect();
+        assert!(errors.is_empty(), "{definition}: {errors:?} in {value}");
+    }
+
+    /// Asks `method` as a frame the schema must accept, and checks the answer against `result`.
+    fn linked(hub: &Hub, method: &str, params: &Value, result: &str) -> Value {
+        let frame = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params });
+        catervas_protocol::rpc::rpc_request_from_value(&frame)
+            .unwrap_or_else(|errors| panic!("{method}: {errors:?}"));
+        let answer = asked(hub, method, params);
+        conforms(&answer, result);
+        answer
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one scenario of the four methods, told in the order the owner meets them"
+    )]
+    fn links_through_the_hub() {
+        let fake = Fake::new("links");
+        let hub = Hub::default();
+        hub.set_finder(fake.clone());
+        // Three projects the owner added; "Shop" uses "Api" through a local path, and "Shop Admin"
+        // only has a word in its name in common with "Shop".
+        for folder in ["shop", "api", "shop-admin"] {
+            std::fs::create_dir_all(fake.dir.join("home").join(folder)).expect("a folder");
+        }
+        let mut index =
+            open_machine_index(&fake.state_dir().join(MACHINE_DB), now()).expect("an index");
+        for (name, folder) in [
+            ("Shop", "shop"),
+            ("Api", "api"),
+            ("Shop Admin", "shop-admin"),
+        ] {
+            add_project_by_hand(
+                &mut index,
+                name,
+                Some(&fake.dir.join("home").join(folder)),
+                None,
+                &[],
+                now(),
+            )
+            .expect("a project");
+        }
+        drop(index);
+        let root = |folder: &str| {
+            fake.dir
+                .join("home")
+                .join(folder)
+                .canonicalize()
+                .expect("a root")
+                .to_string_lossy()
+                .into_owned()
+        };
+        fake.files.lock().expect("files").insert(
+            root("shop"),
+            vec![(
+                "package.json".to_string(),
+                "{\n  \"dependencies\": {\n    \"api\": \"file:../api\"\n  }\n}\n".to_string(),
+            )],
+        );
+
+        // The pair with a proof is asked, and only it.
+        let asked_pairs = linked(&hub, "linking.pairs", &json!({}), "linkingPairsResult");
+        let pairs = asked_pairs["pairs"].as_array().expect("pairs");
+        assert_eq!(pairs.len(), 1, "{asked_pairs}");
+        let pair = &pairs[0];
+        assert_eq!(pair["a"]["name"], "Shop", "{pair}");
+        assert_eq!(pair["b"]["name"], "Api", "{pair}");
+        assert_eq!(pair["proof"]["kind"], "path_dependency", "{pair}");
+        assert_eq!(pair["proof"]["sentence"], "Shop uses Api's code.", "{pair}");
+        assert_eq!(pair["proof"]["ends"][0]["file"], "package.json", "{pair}");
+        assert_eq!(pair["proof"]["ends"][0]["line"], 3, "{pair}");
+        assert_eq!(pair["proof"]["ends"][0]["name"], "Shop", "{pair}");
+        let (a, b) = (
+            pair["a"]["key"].as_str().expect("a key").to_string(),
+            pair["b"]["key"].as_str().expect("a key").to_string(),
+        );
+
+        // The pair with only a hint is listed apart.
+        let maybe = linked(&hub, "linking.maybe", &json!({}), "linkingMaybeResult");
+        assert_eq!(
+            maybe["maybe"].as_array().expect("maybe").len(),
+            1,
+            "{maybe}"
+        );
+        assert_eq!(
+            maybe["maybe"][0]["hints"],
+            json!(["similar_names"]),
+            "{maybe}"
+        );
+        let (c, d) = (
+            maybe["maybe"][0]["a"]["key"]
+                .as_str()
+                .expect("a key")
+                .to_string(),
+            maybe["maybe"][0]["b"]["key"]
+                .as_str()
+                .expect("a key")
+                .to_string(),
+        );
+
+        // Nothing is a group until the owner says yes, and a hint joins nothing.
+        let none = linked(&hub, "linking.groups", &json!({}), "linkingGroupsResult");
+        assert_eq!(none["groups"], json!([]), "{none}");
+        linked(
+            &hub,
+            "linking.answer",
+            &json!({ "a": a, "b": b, "answer": "yes" }),
+            "emptyResult",
+        );
+        let groups = linked(&hub, "linking.groups", &json!({}), "linkingGroupsResult");
+        assert_eq!(
+            groups["groups"].as_array().expect("groups").len(),
+            1,
+            "{groups}"
+        );
+        let mut members: Vec<String> = groups["groups"][0]["projects"]
+            .as_array()
+            .expect("projects")
+            .iter()
+            .map(|key| key.as_str().expect("a key").to_string())
+            .collect();
+        members.sort();
+        let mut expected = vec![a.clone(), b.clone()];
+        expected.sort();
+        assert_eq!(members, expected, "{groups}");
+        assert_eq!(
+            groups["groups"][0]["why"],
+            json!(["Shop uses Api's code."]),
+            "{groups}"
+        );
+        let rest = linked(&hub, "linking.pairs", &json!({}), "linkingPairsResult");
+        assert_eq!(rest["pairs"], json!([]), "{rest}");
+
+        // A hint pair answered Separate is not listed again, and a Yes to one nobody proved needs
+        // the owner's own choice from the list.
+        let message = refused(
+            &hub,
+            "linking.answer",
+            &json!({ "a": c, "b": d, "answer": "yes" }),
+        );
+        assert!(message.starts_with("proof_no_longer_holds: "), "{message}");
+        linked(
+            &hub,
+            "linking.answer",
+            &json!({ "a": c, "b": d, "answer": "no" }),
+            "emptyResult",
+        );
+        let after = linked(&hub, "linking.maybe", &json!({}), "linkingMaybeResult");
+        assert_eq!(after["maybe"], json!([]), "{after}");
+        assert!(
+            refused(
+                &hub,
+                "linking.answer",
+                &json!({ "a": a, "b": "nobody", "answer": "no" })
+            )
+            .starts_with("unknown_project: ")
+        );
     }
 
     #[test]

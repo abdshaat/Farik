@@ -639,6 +639,18 @@
           "$ref": "#/$defs/githubCopyRequest"
         },
         {
+          "$ref": "#/$defs/linkingPairsRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingMaybeRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingGroupsRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingAnswerRequest"
+        },
+        {
           "$ref": "#/$defs/repoAddRequest"
         },
         {
@@ -3938,6 +3950,68 @@
         }
       }
     },
+    "linkingPairsRequest": {
+      "title": "Linking Pairs Request",
+      "description": "The pairs of projects chosen as teams that have a proof they work together, one to ask the owner about at a time, read again from their committed files at HEAD as it is asked (docs/SPEC.md 4.4, 8.4; ADR 0059). A pair already answered Yes, or whose projects are one group through other Yes answers, is not listed; one answered No is listed again only for a proof of a kind it was not shown with. Answers linkingPairsResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.pairs" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "linkingMaybeRequest": {
+      "title": "Linking Maybe Request",
+      "description": "The pairs of projects chosen as teams that have only hints, no proof, and no answer: listed as Maybe related, and counted as separate unless the owner opens one (docs/SPEC.md 4.4; ADR 0059). Answers linkingMaybeResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.maybe" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "linkingGroupsRequest": {
+      "title": "Linking Groups Request",
+      "description": "The groups of projects the owner's Yes answers form, and no others: a hint joins nothing, and a Yes whose proof no longer holds joins nothing (docs/SPEC.md 4.4; ADR 0059). Answers linkingGroupsResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.groups" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "linkingAnswerRequest": {
+      "title": "Linking Answer Request",
+      "description": "The owner's answer about the pair a and b, in either order (docs/SPEC.md 4.4, 8.4; ADR 0059). A Yes needs a proof that holds now, found again from the files, else -32005 and proof_no_longer_holds; from_maybe says the owner chose it from the list of pairs with hints only, and then a Yes is kept with no proof. Refused with -32005 and unknown_project when a key is not one of the projects chosen as teams. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.answer" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["a", "b", "answer"],
+          "properties": {
+            "a": { "type": "string" },
+            "b": { "type": "string" },
+            "answer": { "enum": ["yes", "no"] },
+            "from_maybe": { "type": "boolean" }
+          }
+        }
+      }
+    },
     "findingRow": {
       "type": "object",
       "additionalProperties": false,
@@ -4436,6 +4510,121 @@
       "additionalProperties": false,
       "required": ["folder"],
       "properties": { "folder": { "type": "string" } }
+    },
+    "linkingProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "last_at", "folder"],
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "last_at": { "type": ["string", "null"] },
+        "folder": { "type": ["string", "null"] }
+      }
+    },
+    "linkingProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "a", "b", "sentence", "ends"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "path_dependency",
+            "submodule",
+            "declared_package",
+            "deploys",
+            "workflow",
+            "domain",
+            "claude_ai_names"
+          ]
+        },
+        "a": { "type": "string" },
+        "b": { "type": "string" },
+        "sentence": { "type": "string" },
+        "ends": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["project", "name", "file", "line", "text"],
+            "properties": {
+              "project": { "type": "string" },
+              "name": { "type": "string" },
+              "file": { "type": "string" },
+              "line": { "type": "integer", "minimum": 1 },
+              "text": { "type": "string", "maxLength": 160 }
+            }
+          }
+        }
+      }
+    },
+    "linkingHints": {
+      "type": "array",
+      "items": { "enum": ["same_owner", "same_days", "similar_names", "wrote_both"] }
+    },
+    "linkingPairsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairs"],
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["a", "b", "proof", "also", "hints"],
+            "properties": {
+              "a": { "$ref": "#/$defs/linkingProject" },
+              "b": { "$ref": "#/$defs/linkingProject" },
+              "proof": { "$ref": "#/$defs/linkingProof" },
+              "also": { "type": "array", "items": { "type": "string" } },
+              "hints": { "$ref": "#/$defs/linkingHints" }
+            }
+          }
+        }
+      }
+    },
+    "linkingMaybeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maybe"],
+      "properties": {
+        "maybe": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["a", "b", "hints"],
+            "properties": {
+              "a": { "$ref": "#/$defs/linkingProject" },
+              "b": { "$ref": "#/$defs/linkingProject" },
+              "hints": { "$ref": "#/$defs/linkingHints" }
+            }
+          }
+        }
+      }
+    },
+    "linkingGroupsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["groups"],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["projects", "names", "why"],
+            "properties": {
+              "projects": { "type": "array", "items": { "type": "string" } },
+              "names": { "type": "array", "items": { "type": "string" } },
+              "why": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
     },
     "repoAddRequest": {
       "title": "Repo Add Request",

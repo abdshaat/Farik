@@ -266,6 +266,58 @@ impl MachineIndex {
     }
 }
 
+/// What the sessions say of each root, for the hints.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LinkActivity {
+    /// The days (UTC) with a session that started or last did something in the root.
+    pub days_by_root: BTreeMap<String, BTreeSet<NaiveDate>>,
+    /// The sessions that wrote a file under the root.
+    pub written_by_root: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl MachineIndex {
+    /// The days with sessions and the sessions that wrote, by root.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn link_activity(&self) -> Result<LinkActivity, StoreError> {
+        let mut activity = LinkActivity::default();
+        let mut statement = self.connection.prepare(
+            "SELECT project_root, first_at, last_at FROM sessions WHERE project_root IS NOT NULL",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let root: String = row.get(0)?;
+            for column in [1, 2] {
+                let moment: Option<String> = row.get(column)?;
+                if let Some(day) = moment
+                    .and_then(|text| DateTime::parse_from_rfc3339(&text).ok())
+                    .map(|moment| moment.with_timezone(&Utc).date_naive())
+                {
+                    activity
+                        .days_by_root
+                        .entry(root.clone())
+                        .or_default()
+                        .insert(day);
+                }
+            }
+        }
+        let mut statement = self
+            .connection
+            .prepare("SELECT session_id, root FROM session_roots_written")?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            activity
+                .written_by_root
+                .entry(row.get(1)?)
+                .or_default()
+                .insert(row.get(0)?);
+        }
+        Ok(activity)
+    }
+}
+
 /// A pair with a proof the owner is to be asked about.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AskedPair {
