@@ -1,0 +1,7 @@
+{
+  "name": "ledger-app",
+  "version": "2.0.0",
+  "dependencies": {
+    "@ledgerlab/money": "^1.2.0"
+  }
+}

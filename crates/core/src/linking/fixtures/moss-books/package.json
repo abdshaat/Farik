@@ -1,0 +1,6 @@
+{
+  "name": "moss-books",
+  "dependencies": {
+    "stripe": "^16.0.0"
+  }
+}

@@ -1,0 +1,5 @@
+services:
+  api:
+    image: pixel-api:dev
+    environment:
+      CORS_ORIGIN: https://garden.example.org

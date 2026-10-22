@@ -35,6 +35,8 @@ pub mod goal;
 pub mod governor;
 /// The owner's recurring jobs, read from files, schedulers' answers and Claude Code's records.
 pub mod jobs;
+/// The proof that two found projects work together, and the hints that only suggest it.
+pub mod linking;
 /// The marketing plan the owner approves: its checks and which approved plan is active.
 pub mod marketing;
 /// A purchase order's lines and total.

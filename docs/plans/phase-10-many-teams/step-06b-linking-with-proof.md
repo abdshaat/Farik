@@ -137,7 +137,7 @@ Tests (`crates/core/src/linking.rs`):
 - `finds_each_proof_s_ends`: asserts that the `path_dependency` pair's proof has both ends, `web/package.json` line 14 with its text and `api/client/package.json` line 2, and the sentence "tidepool-web uses tidepool-api's code.".
 - `hints_without_proof`: asserts that `same_days`, `same_owner` and `similar_names` are found on their fixtures, and that a proof pair gives no hint.
 
-- [ ] `feat(core): prove two projects work together from their files`
+- [x] `feat(core): prove two projects work together from their files`
 
 ### Task 2: Reading the files, and the roots a session wrote
 
