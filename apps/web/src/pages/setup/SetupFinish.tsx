@@ -48,8 +48,15 @@ export function SetupFinish() {
 	const [advanced, setAdvanced] = useState(false);
 	// Whether finished work can open a pull request depends on the project having an origin.
 	const { data: team } = useQuery<{ online?: boolean }>("team.get", {});
+	const kept = draft.team.policy.integration === "local";
 	const said = team
-		? t(team.online ? "finishLead" : "finishLeadLocal")
+		? t(
+				kept
+					? "finishLeadKept"
+					: team.online
+						? "finishLead"
+						: "finishLeadLocal",
+			)
 		: undefined;
 
 	return (

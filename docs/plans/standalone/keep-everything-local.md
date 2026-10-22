@@ -99,7 +99,7 @@ Strings:
 
 - `the push question keeps everything local` (web, `team.test.tsx`) — on Allowed actions, choosing the third answer saves `permissions.push: false` and `integration: "local"`, shows `finishLeadKept` and no merge switch; choosing "No" afterwards saves `integration: "pull_request"`.
 
-- [ ] `feat(web): the push question can keep everything local`
+- [x] `feat(web): the push question can keep everything local`
 
 ### Task 5: spec
 

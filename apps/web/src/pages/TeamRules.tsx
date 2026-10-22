@@ -203,11 +203,21 @@ export function Part({
 export function May(part: Part) {
 	const { saved, defaults } = part;
 	const [mine, setMine] = useState<Team["policy"]["permissions"]>();
+	// Where finished work goes, which the push question's third answer sets (ADR 0085).
+	const [integration, setIntegration] = useState<string>();
 	// A team file without the answers runs on the defaults (SPEC 5.6).
 	const now = mine ?? saved.policy.permissions ?? defaults?.policy.permissions;
-	const next = mine
-		? { ...saved, policy: { ...saved.policy, permissions: mine } }
-		: saved;
+	const next =
+		mine || integration
+			? {
+					...saved,
+					policy: {
+						...saved.policy,
+						...(mine && { permissions: mine }),
+						...(integration && { integration }),
+					},
+				}
+			: saved;
 	const { foot } = useChange(part, next);
 	const developers = saved.agents.filter(
 		(a) => a.role === "software_developer" && a.status !== "retired",
@@ -217,20 +227,31 @@ export function May(part: Part) {
 			<PermissionChoices
 				commands={now?.runCommands}
 				push={now?.push}
+				local={(integration ?? saved.policy.integration) === "local"}
 				developers={developers}
 				solo={
 					saved.policy.solo
 						? saved.agents.find((a) => a.status !== "retired")?.displayName
 						: undefined
 				}
-				onAnswer={({ commands, push }) =>
+				onAnswer={({ commands, push, local }) => {
 					setMine({
 						...now,
 						...(commands !== undefined && { runCommands: commands }),
 						...(push !== undefined && { push }),
+					});
+					if (local !== undefined)
+						setIntegration(local ? "local" : "pull_request");
+				}}
+				putBack={
+					defaults &&
+					(() => {
+						setMine(defaults.policy.permissions);
+						// Only a team that kept everything local gets its pull requests back.
+						if ((integration ?? saved.policy.integration) === "local")
+							setIntegration("pull_request");
 					})
 				}
-				putBack={defaults && (() => setMine(defaults.policy.permissions))}
 			/>
 			{foot}
 		</Part>
@@ -277,6 +298,8 @@ export function Finish({ saved, online, mergingAllowed, done }: Part) {
 			setAsking(false);
 		}
 	};
+	// Nothing goes online and nothing waits for a merge, so there is no switch (ADR 0085).
+	const kept = saved.policy.integration === "local";
 	const alone = saved.policy.solo
 		? saved.agents.find((a) => a.status !== "retired")?.displayName
 		: undefined;
@@ -288,16 +311,22 @@ export function Finish({ saved, online, mergingAllowed, done }: Part) {
 	].join("\n");
 	return (
 		<Part id="rules-finish" title={t("rulesFinish")}>
-			<p>{t(online ? "finishLead" : "finishLeadLocal")}</p>
-			<Switch
-				id="catervas-merges"
-				label={t("mergingSwitch")}
-				info={<Bullets text={t("mergingSwitchNote")} />}
-				checked={Boolean(mergingAllowed)}
-				disabled={!online || busy}
-				onChange={(on) => (on ? setAsking(true) : set({ on: false }))}
-			/>
-			{!online && <p className={styles.muted}>{t("mergingOffline")}</p>}
+			<p>
+				{t(kept ? "finishLeadKept" : online ? "finishLead" : "finishLeadLocal")}
+			</p>
+			{!kept && (
+				<Switch
+					id="catervas-merges"
+					label={t("mergingSwitch")}
+					info={<Bullets text={t("mergingSwitchNote")} />}
+					checked={Boolean(mergingAllowed)}
+					disabled={!online || busy}
+					onChange={(on) => (on ? setAsking(true) : set({ on: false }))}
+				/>
+			)}
+			{!online && !kept && (
+				<p className={styles.muted}>{t("mergingOffline")}</p>
+			)}
 			{refused && (
 				<p role="alert" className={styles.alert}>
 					{refused}

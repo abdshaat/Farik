@@ -315,20 +315,23 @@ export const en = {
 		"Catervas still runs every check itself; the agents cannot run commands.",
 	mayPush: "May the Developer send its work in progress online?",
 	mayPushNoteOne:
-		"Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
+		'Only {name}, the Developer, sends code, and only to its own branches.\nNothing reaches your main branch without you.\nWith "No", Catervas still opens a pull request for finished work. Choose "Keep everything on this computer" for nothing to go online.',
 	mayPushNoteMany:
-		"Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
+		'Only the Developers send code, and only to their own branches.\nNothing reaches your main branch without you.\nWith "No", Catervas still opens a pull request for finished work. Choose "Keep everything on this computer" for nothing to go online.',
 	mayPushYes: "Yes, to its own branches",
 	mayPushYesNote: "Useful if you follow work on GitHub as it happens.",
 	mayPushNo: "No, keep work in progress on this computer",
-	mayPushNoNote: "The safer choice.",
+	mayPushNoNote: "Finished work still opens a pull request on GitHub.",
+	mayPushLocal: "No, keep everything on this computer",
+	mayPushLocalNote:
+		"Nothing goes online. Catervas adds finished work to your project folder itself.",
 	mayTitleSolo: "What may {name} do on its own?",
 	mayCommandsSolo: "May {name} run commands on this computer?",
 	mayCommandsYesSolo: "Yes, {name} may",
 	mayCommandsNoNoteSolo: "{name} cannot test anything.",
 	mayPushSolo: "May {name} send its work in progress online?",
 	mayPushNoteSolo:
-		"Only to its own branches.\nNothing reaches your main branch without you.\nEither way, Catervas itself opens a pull request for finished work when your project is online.",
+		'Only to its own branches.\nNothing reaches your main branch without you.\nWith "No", Catervas still opens a pull request for finished work. Choose "Keep everything on this computer" for nothing to go online.',
 	mayAlready: "What each agent may do already",
 	mayAlreadyShow: "Show what each agent may do",
 	mayAlreadyHide: "Hide what each agent may do",
@@ -356,6 +359,8 @@ export const en = {
 	finishLead: "Finished work opens a pull request on GitHub for you to merge.",
 	finishLeadLocal:
 		"Your project isn\u2019t online, so finished work stays on this computer for you to merge yourself.",
+	finishLeadKept:
+		"Everything stays on this computer. Catervas adds finished work to your project folder itself.",
 	mergingSwitch: "Let Catervas merge finished work",
 	mergingSwitchNote:
 		"Catervas merges a pull request once its checks pass, or once its own checks pass when your repository has none.\nIt uses a merge method your repository allows, and never skips a rule of the branch.\nIt asks only on this computer. Anyone else who clones the project turns it on for themselves.",

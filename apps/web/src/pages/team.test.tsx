@@ -1065,6 +1065,50 @@ describe("team page", () => {
 		expect((await saved(s2)).budgets).toEqual({ daily_usd: 15 });
 	});
 
+	it("the push question keeps everything local", async () => {
+		const { s, part } = await settings(TEAM, "/settings/allowed-actions");
+		const may = part(en.rulesMay);
+		fireEvent.click(
+			within(may).getByRole("radio", { name: /^No, keep everything/ }),
+		);
+		const draft = await validated(s, []);
+		expect(draft.policy.permissions).toEqual({
+			run_commands: false,
+			push: false,
+		});
+		expect(draft.policy.integration).toBe("local");
+		fireEvent.click(within(may).getByRole("button", { name: en.agentSave }));
+		const local = await saved(s);
+		expect(local.policy.integration).toBe("local");
+		cleanup();
+
+		// Local, the finish line says so and there is no merge switch to offer.
+		const kept = { ...TEAM, policy: { ...TEAM.policy, integration: "local" } };
+		const work = await settings(kept, "/settings/work", { online: false });
+		const finish = work.part(en.rulesFinish);
+		expect(within(finish).getByText(en.finishLeadKept)).toBeTruthy();
+		expect(within(finish).queryByLabelText(en.mergingSwitch)).toBeNull();
+		cleanup();
+
+		// Choosing "No" afterwards gives the pull requests back.
+		const back = await settings(kept, "/settings/allowed-actions");
+		const again = back.part(en.rulesMay);
+		expect(
+			picked(
+				within(again).getByRole("radio", { name: /^No, keep everything/ }),
+			),
+		).toBe(true);
+		fireEvent.click(
+			within(again).getByRole("radio", { name: /^No, keep work in progress/ }),
+		);
+		const online = await validated(back.s, []);
+		expect(online.policy.integration).toBe("pull_request");
+		expect(online.policy.permissions).toEqual({
+			run_commands: false,
+			push: false,
+		});
+	});
+
 	it("says_finished_work_opens_a_pull_request_from_settings", async () => {
 		const { part } = await settings(TEAM, "/settings/work", { online: true });
 

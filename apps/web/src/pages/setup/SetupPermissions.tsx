@@ -18,7 +18,7 @@ import {
 } from "./TeamSetup.tsx";
 import { Wizard } from "./Wizard.tsx";
 
-type Answer = "" | "yes" | "no";
+type Answer = "" | "yes" | "no" | "local";
 const word = (on: boolean | undefined): Answer =>
 	on === undefined ? "" : on ? "yes" : "no";
 
@@ -47,6 +47,7 @@ export function mayOf(tiers: Tier[]): string {
 export function PermissionChoices({
 	commands,
 	push,
+	local,
 	developers,
 	solo,
 	onAnswer,
@@ -54,10 +55,12 @@ export function PermissionChoices({
 }: {
 	commands: boolean | undefined;
 	push: boolean | undefined;
+	/** The team keeps everything on this computer: `policy.integration` is `local` (ADR 0085). */
+	local: boolean;
 	developers: Agent[];
 	/** The one agent's name, when it works alone (ADR 0071): the questions name it, not a team. */
 	solo?: string | undefined;
-	onAnswer: (next: Draft["answers"]) => void;
+	onAnswer: (next: Draft["answers"] & { local?: boolean }) => void;
 	putBack: (() => void) | undefined;
 }) {
 	return (
@@ -110,8 +113,10 @@ export function PermissionChoices({
 							}
 						/>
 					}
-					value={word(push)}
-					onChange={(v) => onAnswer({ push: v === "yes" })}
+					value={local ? "local" : word(push)}
+					onChange={(v) =>
+						onAnswer({ push: v === "yes", local: v === "local" })
+					}
 					options={[
 						{
 							value: "yes",
@@ -122,6 +127,11 @@ export function PermissionChoices({
 							value: "no",
 							label: t("mayPushNo"),
 							description: t("mayPushNoNote"),
+						},
+						{
+							value: "local",
+							label: t("mayPushLocal"),
+							description: t("mayPushLocalNote"),
 						},
 					]}
 				/>
@@ -149,16 +159,30 @@ export function SetupPermissions() {
 	const tiersOf = (id: string) =>
 		checked?.agents?.find((a) => a.id === id)?.tiers;
 
-	const answer = (next: Draft["answers"]) => {
+	const answer = ({
+		local,
+		...next
+	}: Draft["answers"] & { local?: boolean }) => {
 		const answers = { ...draft.answers, ...next };
 		const permissions = { ...draft.team.policy.permissions };
 		if (answers.commands !== undefined)
 			permissions.runCommands = answers.commands;
 		if (answers.push !== undefined) permissions.push = answers.push;
+		// "Keep everything on this computer" and its two neighbours each say where finished work
+		// goes, so choosing any of them writes the policy (ADR 0085).
+		const integration =
+			local === undefined
+				? draft.team.policy.integration
+				: local
+					? "local"
+					: "pull_request";
 		change({
 			...draft,
 			answers,
-			team: { ...draft.team, policy: { ...draft.team.policy, permissions } },
+			team: {
+				...draft.team,
+				policy: { ...draft.team.policy, permissions, integration },
+			},
 		});
 	};
 
@@ -181,6 +205,7 @@ export function SetupPermissions() {
 			<PermissionChoices
 				commands={commands}
 				push={push}
+				local={team.policy.integration === "local"}
 				developers={developers}
 				solo={solo}
 				onAnswer={answer}
@@ -190,6 +215,8 @@ export function SetupPermissions() {
 						answer({
 							commands: defaults.runCommands,
 							push: defaults.push,
+							// Only a team that kept everything local gets its pull requests back.
+							...(team.policy.integration === "local" && { local: false }),
 						}))
 				}
 			/>
