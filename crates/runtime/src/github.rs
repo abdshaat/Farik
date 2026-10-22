@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use catervas_store::machine::{ClaudeWork, GithubSeen, MachineIndex, WorkKind};
+use catervas_store::reminders::{Deployment, WorkflowRun};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
@@ -297,6 +298,156 @@ impl GithubClient {
     }
 }
 
+/// A scheduled workflow of a repository, as GitHub lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Workflow {
+    /// The workflow's file name.
+    pub file: String,
+    /// Its state, such as `active` or `disabled_inactivity`.
+    pub state: String,
+}
+
+/// The last scheduled run of a workflow.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScheduledRun {
+    /// How it ended, when it has.
+    pub conclusion: Option<String>,
+    /// When it started.
+    pub started_at: Option<DateTime<Utc>>,
+}
+
+/// `file` when it is a workflow's file name in the characters GitHub allows, so that it is safe in
+/// a path.
+fn valid_workflow_file(file: &str) -> Option<&str> {
+    (!file.is_empty()
+        && file.len() <= 100
+        && !file.starts_with('.')
+        && file
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+    .then_some(file)
+}
+
+/// A time as GitHub writes it.
+fn github_time(text: &str) -> Option<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|at| at.with_timezone(&Utc))
+}
+
+impl GithubClient {
+    /// The workflows of `repo` with their state (`GET /repos/{full}/actions/workflows`).
+    ///
+    /// # Errors
+    ///
+    /// [`GithubError`].
+    pub async fn workflows(
+        &self,
+        token: &Secret,
+        repo: &str,
+    ) -> Result<Vec<Workflow>, GithubError> {
+        let repo = valid_full_name(repo).ok_or_else(|| failed("that is not a repository"))?;
+        let answer = self
+            .get(
+                token,
+                &format!("/repos/{repo}/actions/workflows?per_page=100"),
+            )
+            .await?;
+        Ok(answer["workflows"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|row| {
+                let file = row["path"].as_str()?.rsplit('/').next()?;
+                Some(Workflow {
+                    file: valid_workflow_file(file)?.to_string(),
+                    state: row["state"].as_str()?.chars().take(40).collect(),
+                })
+            })
+            .collect())
+    }
+
+    /// The last scheduled run of the workflow `file` of `repo`, when it has had one
+    /// (`GET /repos/{full}/actions/workflows/{file}/runs?event=schedule&per_page=1`).
+    ///
+    /// # Errors
+    ///
+    /// [`GithubError`].
+    pub async fn last_scheduled_run(
+        &self,
+        token: &Secret,
+        repo: &str,
+        file: &str,
+    ) -> Result<Option<ScheduledRun>, GithubError> {
+        let repo = valid_full_name(repo).ok_or_else(|| failed("that is not a repository"))?;
+        let file = valid_workflow_file(file).ok_or_else(|| failed("that is not a workflow"))?;
+        let answer = self
+            .get(
+                token,
+                &format!("/repos/{repo}/actions/workflows/{file}/runs?event=schedule&per_page=1"),
+            )
+            .await?;
+        Ok(answer["workflow_runs"]
+            .as_array()
+            .and_then(|runs| runs.first())
+            .map(|run| ScheduledRun {
+                conclusion: run["conclusion"]
+                    .as_str()
+                    .map(|conclusion| conclusion.chars().take(40).collect()),
+                started_at: run["run_started_at"].as_str().and_then(github_time),
+            }))
+    }
+
+    /// The latest deployment of `repo` with the latest state it reported
+    /// (`GET /repos/{full}/deployments?per_page=1` and that deployment's `statuses?per_page=1`).
+    /// Vercel, Netlify and Render report theirs there. A deployment with no status has none.
+    ///
+    /// # Errors
+    ///
+    /// [`GithubError`].
+    pub async fn latest_deployment(
+        &self,
+        token: &Secret,
+        repo: &str,
+    ) -> Result<Option<Deployment>, GithubError> {
+        let repo = valid_full_name(repo).ok_or_else(|| failed("that is not a repository"))?;
+        let listed = self
+            .get(token, &format!("/repos/{repo}/deployments?per_page=1"))
+            .await?;
+        let Some(deployment) = listed.as_array().and_then(|rows| rows.first()) else {
+            return Ok(None);
+        };
+        let (Some(id), Some(created_at)) = (
+            deployment["id"].as_u64(),
+            deployment["created_at"].as_str().and_then(github_time),
+        ) else {
+            return Ok(None);
+        };
+        let environment = deployment["environment"]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .take(60)
+            .collect();
+        let statuses = self
+            .get(
+                token,
+                &format!("/repos/{repo}/deployments/{id}/statuses?per_page=1"),
+            )
+            .await?;
+        Ok(statuses
+            .as_array()
+            .and_then(|rows| rows.first())
+            .and_then(|status| status["state"].as_str())
+            .map(|state| Deployment {
+                environment,
+                state: state.chars().take(40).collect(),
+                created_at,
+            }))
+    }
+}
+
 /// How long one call to GitHub may take.
 const TIMEOUT: Duration = Duration::from_secs(15);
 /// The most of an answer Catervas reads.
@@ -478,6 +629,64 @@ pub fn read_into_index(
         .replace_github(&seen, now)
         .map_err(|_| failed("the list of repositories could not be kept"))?;
     Ok(seen.len())
+}
+
+/// The most repositories whose runs and deployments one read asks for.
+const MOST_RUN_REPOSITORIES: usize = 50;
+
+/// Reads the scheduled workflows' state and last runs and the latest deployment of the owner's
+/// repositories that have a scheduled workflow (at most 50), and keeps what it read in `index`.
+/// Stops between two repositories once `stop` is set, or once GitHub says no, and keeps what it had.
+///
+/// # Errors
+///
+/// [`GithubError`] when the index refused or the runtime could not be made.
+pub fn read_runs_into_index(
+    api: &str,
+    token: &Secret,
+    index: &mut MachineIndex,
+    stop: &AtomicBool,
+) -> Result<usize, GithubError> {
+    let client = GithubClient::new_at(api)?;
+    let wanted = index
+        .scheduled_workflows(MOST_RUN_REPOSITORIES)
+        .map_err(|_| failed("the list of workflows could not be read"))?;
+    let mut read = 0;
+    for (full_name, files) in wanted {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        let answered = block_on(async {
+            let workflows = client.workflows(token, &full_name).await?;
+            let mut runs = Vec::new();
+            for workflow in workflows
+                .iter()
+                .filter(|workflow| files.contains(&workflow.file))
+            {
+                let run = client
+                    .last_scheduled_run(token, &full_name, &workflow.file)
+                    .await?;
+                runs.push(WorkflowRun {
+                    workflow: workflow.file.clone(),
+                    state: Some(workflow.state.clone()),
+                    last_conclusion: run.as_ref().and_then(|run| run.conclusion.clone()),
+                    last_run_at: run.and_then(|run| run.started_at),
+                });
+            }
+            let deployment = client.latest_deployment(token, &full_name).await?;
+            Ok::<_, GithubError>((runs, deployment))
+        })
+        .map_err(|why| failed(&why))?;
+        // GitHub saying no part way (a limit, a repository it will not show) keeps what was read.
+        let Ok((runs, deployment)) = answered else {
+            break;
+        };
+        index
+            .replace_github_state(&full_name, &runs, deployment.as_ref())
+            .map_err(|_| failed("the runs could not be kept"))?;
+        read += 1;
+    }
+    Ok(read)
 }
 
 /// One run of `git clone`: its arguments, and the environment it is given beside the process's own.
@@ -669,5 +878,82 @@ mod tests {
             client.repositories(&token, now()).await,
             Err(GithubError::Failed(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn reads_scheduled_runs_and_deployments() {
+        let fixture = Fixture::start("ghp_invented", now()).await;
+        let client = GithubClient::new_at(&fixture.address).expect("a client");
+        let token = Secret::new("ghp_invented".to_string());
+
+        let workflows = client
+            .workflows(&token, "octo/price-watch")
+            .await
+            .expect("workflows");
+        assert_eq!(
+            workflows,
+            vec![
+                Workflow {
+                    file: "price.yml".to_string(),
+                    state: "active".to_string()
+                },
+                Workflow {
+                    file: "backup.yml".to_string(),
+                    state: "disabled_inactivity".to_string()
+                },
+            ],
+            "a workflow GitHub turned off is read as disabled"
+        );
+        let run = client
+            .last_scheduled_run(&token, "octo/price-watch", "price.yml")
+            .await
+            .expect("a run");
+        assert_eq!(
+            run,
+            Some(ScheduledRun {
+                conclusion: Some("failure".to_string()),
+                started_at: DateTime::parse_from_rfc3339("2026-10-22T07:00:00Z")
+                    .ok()
+                    .map(|at| at.with_timezone(&Utc)),
+            })
+        );
+        assert_eq!(
+            client
+                .last_scheduled_run(&token, "octo/price-watch", "backup.yml")
+                .await
+                .expect("no run"),
+            None
+        );
+        let deployment = client
+            .latest_deployment(&token, "octo/price-watch")
+            .await
+            .expect("a deployment");
+        assert_eq!(
+            deployment,
+            Some(Deployment {
+                environment: "Production".to_string(),
+                state: "failure".to_string(),
+                created_at: DateTime::parse_from_rfc3339("2026-10-21T18:40:00Z")
+                    .expect("a time")
+                    .with_timezone(&Utc),
+            }),
+            "the deployment's last status is its state"
+        );
+
+        // Each answer is read for the fields above alone.
+        let said = format!("{workflows:?} {run:?} {deployment:?}");
+        assert!(!said.contains("NEVER-READ"), "{said}");
+        let paths: Vec<String> = fixture.requests().into_iter().map(|r| r.path).collect();
+        for wanted in [
+            "/repos/octo/price-watch/actions/workflows?per_page=100",
+            "/repos/octo/price-watch/actions/workflows/price.yml/runs?event=schedule&per_page=1",
+            "/repos/octo/price-watch/deployments?per_page=1",
+            "/repos/octo/price-watch/deployments/77/statuses?per_page=1",
+        ] {
+            assert!(
+                paths.iter().any(|path| path == wanted),
+                "{wanted} in {paths:?}"
+            );
+        }
     }
 }

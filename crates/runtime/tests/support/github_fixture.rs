@@ -65,6 +65,40 @@ pub fn pulls() -> Value {
     ])
 }
 
+/// The workflows of an invented repository: one that is active, one GitHub turned off for lack of
+/// changes. The extra fields are what GitHub also says, which Catervas does not read.
+pub fn workflows() -> Value {
+    json!({"total_count": 2, "workflows": [
+        {"id": 1, "name": "Hourly price check", "path": ".github/workflows/price.yml",
+         "state": "active", "badge_url": "https://example.invalid/NEVER-READ-badge"},
+        {"id": 2, "name": "Weekly database backup", "path": ".github/workflows/backup.yml",
+         "state": "disabled_inactivity", "html_url": "https://example.invalid/NEVER-READ-html"}
+    ]})
+}
+
+/// The last scheduled run of a workflow: failed. `head_commit` is what Catervas does not read.
+pub fn scheduled_run(file: &str) -> Value {
+    if file == "backup.yml" {
+        return json!({"total_count": 0, "workflow_runs": []});
+    }
+    json!({"total_count": 1, "workflow_runs": [{
+        "id": 901, "status": "completed", "conclusion": "failure", "event": "schedule",
+        "run_started_at": "2026-10-22T07:00:00Z",
+        "head_commit": {"message": "NEVER-READ-commit-message",
+                        "author": {"email": "never-read@example.invalid"}}
+    }]})
+}
+
+pub fn deployments() -> Value {
+    json!([{"id": 77, "environment": "Production", "created_at": "2026-10-21T18:40:00Z",
+            "creator": {"login": "never-read"}, "payload": {"secret": "NEVER-READ-payload"}}])
+}
+
+pub fn deployment_statuses() -> Value {
+    json!([{"id": 5, "state": "failure", "created_at": "2026-10-21T18:41:00Z",
+            "description": "NEVER-READ-description", "environment": "Production"}])
+}
+
 fn answer(status: u16, headers: &[(&str, String)], body: &Value) -> Response<axum::body::Body> {
     let mut builder = Response::builder()
         .status(StatusCode::from_u16(status).expect("a status"))
@@ -132,6 +166,18 @@ impl Fixture {
                     "/user/repos" => repositories(now),
                     r if r.ends_with("/branches") => branches(),
                     r if r.ends_with("/pulls") => pulls(),
+                    r if r.ends_with("/actions/workflows") => workflows(),
+                    r if r.contains("/actions/workflows/") && r.ends_with("/runs") => {
+                        let file = r
+                            .rsplit_once("/runs")
+                            .and_then(|(front, _)| front.rsplit('/').next())
+                            .unwrap_or_default();
+                        scheduled_run(file)
+                    }
+                    r if r.ends_with("/deployments") => deployments(),
+                    r if r.contains("/deployments/") && r.ends_with("/statuses") => {
+                        deployment_statuses()
+                    }
                     _ => return answer(404, &[], &json!({"message": "Not Found"})),
                 };
                 answer(200, &[("x-ratelimit-remaining", "4000".to_string())], &body)

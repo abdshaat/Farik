@@ -162,7 +162,7 @@ Tests (`github.rs` against the fake server):
   - The latest deployment's last status `failure` is read.
   - Each response is parsed for those fields alone.
 
-- [ ] `feat(runtime): read scheduled runs and deployments from github`
+- [x] `feat(runtime): read scheduled runs and deployments from github`
 
 ### Task 4: Notifications from the computer
 
