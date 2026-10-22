@@ -92,6 +92,8 @@ pub struct Hub {
     slots: OnceLock<Arc<Slots>>,
     /// Where `teams.remove` says which team to stop and forget.
     removals: OnceLock<tokio::sync::mpsc::UnboundedSender<TeamSlug>>,
+    /// What finding projects keeps (`finding.*`).
+    pub(super) finding: Arc<super::finding::Finding>,
 }
 
 impl Hub {
@@ -119,6 +121,34 @@ impl Hub {
     /// Gives the hub where `teams.remove` sends the team to stop.
     pub fn set_removals(&self, removals: tokio::sync::mpsc::UnboundedSender<TeamSlug>) {
         let _ = self.removals.set(removals);
+    }
+
+    /// Gives the hub the host that scans the computer's Claude history.
+    pub fn set_finder(&self, host: Arc<dyn super::finding::FindingHost>) {
+        self.finding.set_host(host);
+    }
+
+    /// Stops the scan that runs, as serve ends.
+    pub fn stop_finding(&self) {
+        self.finding.stop();
+    }
+
+    /// Every team with the folder of its project: those this serve drives, then those it does not.
+    pub(super) fn team_roots(&self) -> Vec<(String, PathBuf)> {
+        let mut roots: Vec<(String, PathBuf)> = self
+            .driven()
+            .into_iter()
+            .filter_map(|(slug, state)| {
+                let root = state.web()?.project_root.clone();
+                Some((slug.as_str().to_string(), root))
+            })
+            .collect();
+        roots.extend(
+            self.idle()
+                .into_iter()
+                .map(|idle| (idle.slug.as_str().to_string(), idle.root)),
+        );
+        roots
     }
 
     /// Drives `state` as the team `slug`; the first team is the current one.
@@ -220,7 +250,7 @@ impl Hub {
 pub(super) const METHODS: [&str; 3] = ["teams.current", "teams.remove", "computer.set"];
 
 /// The hub of `state`, or the refusal of a call a team's own daemon cannot answer.
-fn hub_of(state: &DaemonState) -> Result<&Arc<Hub>, Failure> {
+pub(super) fn hub_of(state: &DaemonState) -> Result<&Arc<Hub>, Failure> {
     state.hub().ok_or_else(|| {
         Failure::new(
             REFUSED,

@@ -8,15 +8,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use catervas_protocol::clock::Clock;
 use catervas_runtime::computer::program_output;
+use catervas_runtime::daemon::{FindingHost, FindingProgress};
 use catervas_store::claude_history::{
     ReadProgress, ReadSummary, find_copies, place_sessions, read_transcripts_while,
 };
 use catervas_store::claude_services::read_service_settings;
 use catervas_store::jobs::{JobPlaces, find_jobs};
-use catervas_store::machine::{Found, MachineIndex};
+use catervas_store::machine::{Found, MACHINE_DB, MachineIndex, open_machine_index};
 
 use crate::CliIo;
 use crate::discover::{JobsFound, ServicesView, not_projects, settings_paths};
+use crate::state::{make_state_dir, read_state, write_state};
 
 /// Where a scan looks, and the clock it stamps what it writes with.
 pub(crate) struct ScanPlaces {
@@ -149,6 +151,91 @@ pub(crate) fn scan(
         jobs,
         services,
     })
+}
+
+/// What the hub's finding asks of the command line: the scan of this computer, and the state
+/// `state.json` keeps for it.
+pub(crate) struct CliFinder {
+    /// The environment `catervas serve` was given.
+    pub env: BTreeMap<String, String>,
+    /// The time a scan is stamped with.
+    pub clock: Arc<dyn Clock + Send + Sync>,
+    /// Catervas's state folder.
+    pub state: PathBuf,
+    /// Claude Code's folder.
+    pub claude: PathBuf,
+    /// Home.
+    pub home: PathBuf,
+}
+
+impl CliFinder {
+    /// Keeps a change to what `state.json` holds for finding.
+    fn keep(&self, change: impl FnOnce(&mut crate::state::ServeState)) -> Result<(), String> {
+        let mut state = read_state(&self.state);
+        change(&mut state);
+        write_state(&self.state, &state)
+    }
+}
+
+impl FindingHost for CliFinder {
+    fn scan(&self, stop: &AtomicBool, report: &dyn Fn(FindingProgress)) -> Result<(), String> {
+        make_state_dir(&self.state)?;
+        let mut index = open_machine_index(&self.state.join(MACHINE_DB), self.clock.now())
+            .map_err(|e| e.to_string())?;
+        let places = ScanPlaces {
+            env: self.env.clone(),
+            clock: Arc::clone(&self.clock),
+            claude: self.claude.clone(),
+        };
+        scan(&places, &mut index, stop, &|progress| {
+            report(FindingProgress {
+                files_total: progress.files_total,
+                files_read: progress.files_read,
+                sessions: progress.sessions,
+                projects: progress.projects,
+                jobs: progress.jobs,
+                reading: progress.reading,
+                unreadable: progress.unreadable,
+            });
+        })
+        .map(|_| ())
+    }
+
+    fn state_dir(&self) -> PathBuf {
+        self.state.clone()
+    }
+
+    fn claude_dir(&self) -> PathBuf {
+        self.claude.clone()
+    }
+
+    fn home(&self) -> PathBuf {
+        self.home.clone()
+    }
+
+    fn now(&self) -> chrono::DateTime<chrono::Utc> {
+        self.clock.now()
+    }
+
+    fn not_projects(&self) -> Vec<PathBuf> {
+        not_projects(&self.env)
+    }
+
+    fn paused(&self) -> bool {
+        read_state(&self.state).finding_paused
+    }
+
+    fn set_paused(&self, paused: bool) -> Result<(), String> {
+        self.keep(|state| state.finding_paused = paused)
+    }
+
+    fn export_dismissed(&self) -> bool {
+        read_state(&self.state).export_dismissed
+    }
+
+    fn set_export_dismissed(&self, dismissed: bool) -> Result<(), String> {
+        self.keep(|state| state.export_dismissed = dismissed)
+    }
 }
 
 #[cfg(test)]

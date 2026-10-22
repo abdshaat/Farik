@@ -573,6 +573,57 @@
           "$ref": "#/$defs/computerSetRequest"
         },
         {
+          "$ref": "#/$defs/findingOfferRequest"
+        },
+        {
+          "$ref": "#/$defs/findingStartRequest"
+        },
+        {
+          "$ref": "#/$defs/findingStopRequest"
+        },
+        {
+          "$ref": "#/$defs/findingStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/findingListRequest"
+        },
+        {
+          "$ref": "#/$defs/findingIgnoredRequest"
+        },
+        {
+          "$ref": "#/$defs/findingChooseRequest"
+        },
+        {
+          "$ref": "#/$defs/findingSeparateRequest"
+        },
+        {
+          "$ref": "#/$defs/findingLocateRequest"
+        },
+        {
+          "$ref": "#/$defs/findingDeclareServicesRequest"
+        },
+        {
+          "$ref": "#/$defs/findingAddProjectRequest"
+        },
+        {
+          "$ref": "#/$defs/findingAddRoutineRequest"
+        },
+        {
+          "$ref": "#/$defs/findingRetentionRequest"
+        },
+        {
+          "$ref": "#/$defs/findingKeepLongerRequest"
+        },
+        {
+          "$ref": "#/$defs/findingPauseRequest"
+        },
+        {
+          "$ref": "#/$defs/findingExportDismissedRequest"
+        },
+        {
+          "$ref": "#/$defs/findingForgetRequest"
+        },
+        {
           "$ref": "#/$defs/repoAddRequest"
         },
         {
@@ -3192,6 +3243,1001 @@
             "agents_at_once": { "type": ["integer", "null"] },
             "daily_cap_usd": { "type": ["number", "null"] }
           }
+        }
+      }
+    },
+    "findingOfferRequest": {
+      "title": "Finding Offer Request",
+      "description": "Whether there is Claude Code history on this computer to look through (docs/SPEC.md 4.1, 4.4; ADR 0059). Reads no transcript: it counts the .jsonl files under the history's projects folder. Answers findingOfferResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.offer"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingStartRequest": {
+      "title": "Finding Start Request",
+      "description": "Starts the scan of the Claude Code history in the background, the owner's consent (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingStartResult; started is false, with nothing else done, while a scan runs. Refused with -32005 and finding_paused while finding is paused.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.start"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingStopRequest": {
+      "title": "Finding Stop Request",
+      "description": "Ends a running scan between two transcript files (docs/SPEC.md 4.1, 4.4; ADR 0059). What it read stays in the index and the next scan goes on from there. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.stop"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingStatusRequest": {
+      "title": "Finding Status Request",
+      "description": "Where the scan is: its phase, live counts, how long it has left once 20 files are read, and the settings around it (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingStatusResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingListRequest": {
+      "title": "Finding List Request",
+      "description": "The found list in sections: main (newest first), explored, gone, home, computer_jobs, and the ignored rows (docs/SPEC.md 4.1, 4.4; ADR 0059). Every row has the Team, Watch or Ignore Catervas suggests and the owner's choice, if any. Answers findingListResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingIgnoredRequest": {
+      "title": "Finding Ignored Request",
+      "description": "The rows the owner chose Ignore for (docs/SPEC.md 4.1, 4.4; ADR 0059). Choosing Team or Watch for one brings it back to the list. Answers findingIgnoredResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.ignored"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingChooseRequest": {
+      "title": "Finding Choose Request",
+      "description": "Keeps the owner's choice for the project key (docs/SPEC.md 4.1, 4.4; ADR 0059). Nothing is made of it here. An unknown key is refused with -32005 and unknown_project. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.choose"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "choice"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "choice": {
+              "enum": [
+                "team",
+                "watch",
+                "ignore"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "findingSeparateRequest": {
+      "title": "Finding Separate Request",
+      "description": "'These are different': folder stops being folded with the other folders of the project key, which share a repository (docs/SPEC.md 4.1, 4.4; ADR 0059). Refused with -32005 and unknown_project when the key or the folder is not one of a project with several folders. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.separate"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "folder"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "findingLocateRequest": {
+      "title": "Finding Locate Request",
+      "description": "Locate: the gone folder key is at path now, a repository's top folder inside home (relative to home, or absolute), and its sessions follow (docs/SPEC.md 4.1, 4.4; ADR 0059). Refused with -32005 and unknown_project, not_gone, the member path refusals (not_there, outside_home, home_itself, not_a_repository, not_the_top), or not_the_same_repository. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.locate"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "path"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        }
+      }
+    },
+    "findingDeclareServicesRequest": {
+      "title": "Finding Declare Services Request",
+      "description": "The services the owner says they use with Claude: catalog ids, and other, a name with no catalog id, which forms nothing (docs/SPEC.md 4.1, 4.4; ADR 0059). Replaces the declared set. A declared bookkeeping service with no connector project forms one. An id the catalog lacks is refused with -32005 and unknown_service. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.declare_services"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ids"
+          ],
+          "properties": {
+            "ids": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "other": {
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        }
+      }
+    },
+    "findingAddProjectRequest": {
+      "title": "Finding Add Project Request",
+      "description": "Adds a project by hand, in a folder under home (relative to home), a repository's address, or both (docs/SPEC.md 4.1, 4.4; ADR 0059). Refused with -32005 and cannot_add, with the reason, for a blank name, no place, an address that is not a repository's, or a folder that is not there or is home. Answers findingAddProjectResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.add_project"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "folder": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "repository": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        }
+      }
+    },
+    "findingAddRoutineRequest": {
+      "title": "Finding Add Routine Request",
+      "description": "Adds a routine typed in, under the project key or, with none, the computer's (docs/SPEC.md 4.1, 4.4; ADR 0059). schedule is free text, such as 'every Monday at 9'. An unknown project_key is refused with -32005 and unknown_project. Answers findingAddRoutineResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.add_routine"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "schedule"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "project_key": {
+              "type": "string"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          }
+        }
+      }
+    },
+    "findingRetentionRequest": {
+      "title": "Finding Retention Request",
+      "description": "How long Claude Code keeps its history, as its settings.json says (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingRetentionResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.retention"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingKeepLongerRequest": {
+      "title": "Finding Keep Longer Request",
+      "description": "Writes cleanupPeriodDays into Claude Code's settings.json, the one write Catervas makes there, only on the owner's press (docs/SPEC.md 4.1, 4.4; ADR 0059). Every other key and the file's mode stay. days other than 90, 365 and 3650 is refused with -32005 and retention_not_offered. Answers findingKeepLongerResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.keep_longer"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "days"
+          ],
+          "properties": {
+            "days": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "findingPauseRequest": {
+      "title": "Finding Pause Request",
+      "description": "Pauses or resumes finding (docs/SPEC.md 4.1, 4.4; ADR 0059); kept in state.json as finding_paused. While paused no scan starts, one that runs ends, and the daily rescan stops. Answers findingPauseResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.pause"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "paused"
+          ],
+          "properties": {
+            "paused": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "findingExportDismissedRequest": {
+      "title": "Finding Export Dismissed Request",
+      "description": "The owner dismissed the card that offers claude.ai's export (docs/SPEC.md 4.1, 4.4; ADR 0059); kept in state.json as export_card dismissed. A drop of an export clears it. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.export_dismissed"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingForgetRequest": {
+      "title": "Finding Forget Request",
+      "description": "Forgets everything Catervas found: deletes machine.db, and clears finding_paused and export_card from state.json (docs/SPEC.md 4.1, 4.4; ADR 0059). A scan that runs is stopped first. Without confirmed true it is refused with -32005 and forget_needs_confirming. Answers findingForgetResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.forget"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "confirmed": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "findingRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "name",
+        "kind",
+        "folders",
+        "last_at",
+        "jobs",
+        "services",
+        "suggested",
+        "choice",
+        "already_team",
+        "gone"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "folder",
+            "connector",
+            "claude_ai",
+            "hand",
+            "job"
+          ]
+        },
+        "folders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "last_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "schedule"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "schedule": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggested": {
+          "enum": [
+            "team",
+            "watch",
+            "ignore",
+            null
+          ]
+        },
+        "choice": {
+          "enum": [
+            "team",
+            "watch",
+            "ignore",
+            null
+          ]
+        },
+        "already_team": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gone": {
+          "type": "boolean"
+        }
+      },
+      "description": "One row of the found list. key is the project's key: its normalised repository address, else its real path, the connector project's name, or the claude.ai uuid. kind is folder, connector, claude_ai, hand, or job (a job or routine on this computer with no project). suggested is the Team, Watch or Ignore Catervas suggests (null for a gone folder), choice the owner's own, already_team the slug of the team whose project folder is one of folders."
+    },
+    "findingOfferResult": {
+      "description": "history is claude_code when the history's projects folder holds a .jsonl file, else none; sessions_dir_exists whether that folder is there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "history",
+        "sessions_dir_exists"
+      ],
+      "properties": {
+        "history": {
+          "enum": [
+            "claude_code",
+            "none"
+          ]
+        },
+        "sessions_dir_exists": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingStartResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started"
+      ],
+      "properties": {
+        "started": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingStatusResult": {
+      "description": "phase is idle, running, stopped or done. The counts are published at most every 250 ms, and version counts the publications. seconds_left is set only after 20 files. error is why a scan ended when it failed. paused, index_exists and export_dismissed are the settings around finding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "files_total",
+        "files_read",
+        "sessions",
+        "projects",
+        "jobs",
+        "reading",
+        "unreadable",
+        "error",
+        "started_at",
+        "ended_at",
+        "seconds_left",
+        "paused",
+        "index_exists",
+        "export_dismissed",
+        "version"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "idle",
+            "running",
+            "stopped",
+            "done"
+          ]
+        },
+        "files_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "jobs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reading": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unreadable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seconds_left": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "index_exists": {
+          "type": "boolean"
+        },
+        "export_dismissed": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "findingListResult": {
+      "description": "main, explored, gone and computer_jobs are the sections, newest first, without the rows the owner ignored; ignored holds those. home is how many sessions ran in the home folder and the connector projects they formed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "main",
+        "explored",
+        "gone",
+        "home",
+        "computer_jobs",
+        "ignored"
+      ],
+      "properties": {
+        "main": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "explored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "gone": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "home": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessions",
+            "formed_into"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "formed_into": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "computer_jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "ignored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        }
+      }
+    },
+    "findingIgnoredResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ignored"
+      ],
+      "properties": {
+        "ignored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        }
+      }
+    },
+    "findingAddProjectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "root",
+        "repository",
+        "same_as"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "same_as": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "findingAddRoutineResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        }
+      }
+    },
+    "findingRetentionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanup_period_days",
+        "default"
+      ],
+      "properties": {
+        "cleanup_period_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "default": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingKeepLongerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanup_period_days"
+      ],
+      "properties": {
+        "cleanup_period_days": {
+          "enum": [
+            90,
+            365,
+            3650
+          ]
+        }
+      }
+    },
+    "findingPauseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paused"
+      ],
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingForgetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forgotten"
+      ],
+      "properties": {
+        "forgotten": {
+          "const": true
         }
       }
     },

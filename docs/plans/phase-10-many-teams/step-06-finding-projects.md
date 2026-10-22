@@ -170,7 +170,7 @@ Tests:
   - `finding.start` runs to `Done` and `finding.list` holds the fixture's project with suggestion `team`.
   - `finding.keep_longer { days: 365 }` writes `"cleanupPeriodDays": 365` into the fixture's `settings.json`, and its other keys are unchanged.
 
-- [ ] `feat(runtime): find projects from the hub`
+- [x] `feat(runtime): find projects from the hub`
 
 ### Task 5: The export dropped onto the page, and the daily rescan
 

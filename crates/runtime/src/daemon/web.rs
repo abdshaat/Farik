@@ -31,7 +31,7 @@ use super::setup::list_folders;
 use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
-use super::{board, documents, gates, hub, repos, team, templates};
+use super::{board, documents, finding, gates, hub, repos, team, templates};
 use catervas_core::claude_account::AccountStatus;
 
 use crate::account::AccountPort;
@@ -625,7 +625,7 @@ async fn push(
 #[derive(Debug)]
 pub(super) struct Failure {
     pub(super) code: i64,
-    message: String,
+    pub(super) message: String,
     pub(super) data: Option<Value>,
 }
 
@@ -711,6 +711,19 @@ async fn log_head(state: &Arc<DaemonState>) -> u64 {
         .unwrap_or(0)
 }
 
+/// Whether `method` is one a socket answers.
+fn known_method(method: &str) -> bool {
+    ["subscribe", "unsubscribe", "command", "query"].contains(&method)
+        || SETUP_METHODS.contains(&method)
+        || gates::METHODS.contains(&method)
+        || team::METHODS.contains(&method)
+        || templates::METHODS.contains(&method)
+        || documents::METHODS.contains(&method)
+        || repos::METHODS.contains(&method)
+        || hub::METHODS.contains(&method)
+        || finding::METHODS.contains(&method)
+}
+
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, or to the head of
 /// the log without one, and an `unsubscribe` clears it.
 pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
@@ -734,15 +747,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
             ),
         );
     };
-    if !["subscribe", "unsubscribe", "command", "query"].contains(&method)
-        && !SETUP_METHODS.contains(&method)
-        && !gates::METHODS.contains(&method)
-        && !team::METHODS.contains(&method)
-        && !templates::METHODS.contains(&method)
-        && !documents::METHODS.contains(&method)
-        && !repos::METHODS.contains(&method)
-        && !hub::METHODS.contains(&method)
-    {
+    if !known_method(method) {
         return failure(
             &id,
             Failure::new(UNKNOWN_METHOD, format!("there is no method {method}")),
@@ -789,6 +794,9 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         }
         method if repos::METHODS.contains(&method) => repos::call(state, method, params).await,
         method if hub::METHODS.contains(&method) => hub::call(state, method, params),
+        method if finding::METHODS.contains(&method) => {
+            finding::call_blocking(state, method, params).await
+        }
         "query" => {
             // Claude Code is asked on the async workers; the store and the files are read off
             // them.

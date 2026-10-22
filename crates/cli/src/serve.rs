@@ -23,6 +23,7 @@ use futures_util::stream::FuturesUnordered;
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
 
+use crate::finding::CliFinder;
 use crate::project::{open_project, repository_root};
 use crate::run::{INTERRUPTED, OnIdle, Printer, finish, started, ticks};
 use crate::setup::CliHost;
@@ -30,7 +31,7 @@ use crate::start::{
     RunLock, Shared, StartOptions, driven_elsewhere, listen, runtime, shared_web, start_holding,
     try_lock, web_sharing,
 };
-use crate::state::{forget, home_of, read_state, remember, state_dir};
+use crate::state::{claude_dir, forget, home_of, read_state, remember, state_dir};
 use crate::{CliIo, Engine, Interrupts, say};
 
 /// The port `serve` asks for when it is not told one.
@@ -224,6 +225,15 @@ async fn run<'io>(
     let (events, mut heard) = mpsc::unbounded_channel();
     let hub = Arc::new(Hub::default());
     hub.set_slots(Arc::clone(&shared.slots));
+    if let (Some(state), Some(claude)) = (state_dir(&io.env), claude_dir(&io.env)) {
+        hub.set_finder(Arc::new(CliFinder {
+            env: io.env.clone(),
+            clock: Arc::clone(&io.clock),
+            state,
+            claude,
+            home: home_of(io),
+        }));
+    }
     let (removals, mut removed) = mpsc::unbounded_channel();
     hub.set_removals(removals);
     let mut serving = Serving {
@@ -297,6 +307,7 @@ async fn run<'io>(
             Some(()) = ctrl_c.recv() => {
                 serving.presses += 1;
                 if serving.drives.is_empty() {
+                    serving.hub.stop_finding();
                     serving.shut_down(hub_run).await;
                     return Ok(INTERRUPTED);
                 }
@@ -344,6 +355,7 @@ async fn run<'io>(
             }
         }
     }
+    serving.hub.stop_finding();
     serving.shut_down(hub_run).await;
     while let Ok(event) = heard.try_recv() {
         serving.heard(event, &code);

@@ -1608,6 +1608,23 @@ impl MachineIndex {
         Ok(choices)
     }
 
+    /// The normalised remote of the project at `root`, kept as it was when the folder went.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn remote_of(&self, root: &str) -> Result<Option<String>, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT remote FROM projects WHERE root = ?1",
+                (root,),
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
+
     /// Records that the folders `a` and `b` are different projects, whichever way round they are given.
     ///
     /// # Errors

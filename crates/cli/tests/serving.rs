@@ -2545,3 +2545,122 @@ fn removes_a_team_and_keeps_its_files() {
     let ran = joined(serving.thread, "the serve");
     assert_eq!(ran.code, 0, "{}", serving.err.text());
 }
+
+/// A home folder with a `shop` folder under it and one session worked in `shop` a while ago, as
+/// Claude Code's history holds it, and a `settings.json` of Claude Code's with two keys.
+fn a_home_with_history(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    use catervas_core::claude_history::fixtures::{a_reply_line, a_turn_line};
+    use catervas_core::pricing::Usage;
+
+    let (home, state) = setup_folders(name);
+    let home = home.canonicalize().expect("a home");
+    std::fs::create_dir_all(home.join("shop")).expect("a project folder");
+    let history = home.join(".claude/projects/-shop");
+    std::fs::create_dir_all(&history).expect("a history folder");
+    let id = "11111111-1111-4111-8111-111111111111";
+    let at = (Utc::now() - chrono::Duration::hours(2))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let cwd = home.join("shop").display().to_string();
+    let usage = Usage {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+    std::fs::write(
+        history.join(format!("{id}.jsonl")),
+        format!(
+            "{}\n{}\n",
+            a_turn_line(id, &cwd, &at),
+            a_reply_line(id, &cwd, &at, "msg_1", "claude-opus-5-5", usage)
+        ),
+    )
+    .expect("a transcript");
+    let settings = home.join(".claude/settings.json");
+    std::fs::write(&settings, r#"{"theme":"dark","model":"opus"}"#).expect("settings");
+    std::fs::set_permissions(&settings, std::fs::Permissions::from_mode(0o600)).expect("a mode");
+    (home, state)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_projects_through_serve() {
+    let (home, state) = a_home_with_history("serve-finding");
+    let serving = serving_setup(&home, &home, &state);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let written = || -> Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
+        )
+        .expect("JSON")
+    };
+
+    assert_eq!(
+        hub("finding.offer", json!({}))["result"],
+        json!({ "history": "claude_code", "sessions_dir_exists": true })
+    );
+    assert_eq!(hub("finding.start", json!({}))["result"]["started"], true);
+    let mut status = Value::Null;
+    until("the scan is done", || {
+        status = hub("finding.status", json!({}))["result"].clone();
+        status["phase"] == "done"
+    });
+    assert_eq!(status["files_read"], 1, "{status}");
+    assert_eq!(status["sessions"], 1, "{status}");
+    let listed = hub("finding.list", json!({}));
+    let row = &listed["result"]["main"][0];
+    assert_eq!(row["name"], "shop", "{listed}");
+    assert_eq!(row["suggested"], "team", "{listed}");
+    assert_eq!(
+        row["folders"],
+        json!([home.join("shop").display().to_string()])
+    );
+
+    // Pausing is kept for the next serve, and stops the next scan from starting.
+    hub("finding.pause", json!({ "paused": true }));
+    assert_eq!(written()["finding_paused"], true);
+    let refused = hub("finding.start", json!({}));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("finding_paused")),
+        "{refused}"
+    );
+    hub("finding.pause", json!({ "paused": false }));
+    assert!(written().get("finding_paused").is_none(), "{}", written());
+    hub("finding.export_dismissed", json!({}));
+    assert_eq!(written()["export_card"], "dismissed");
+
+    // Keeping the history longer is the one write into Claude Code's settings.
+    let settings = home.join(".claude/settings.json");
+    assert_eq!(
+        hub("finding.retention", json!({}))["result"],
+        json!({ "cleanup_period_days": 30, "default": true })
+    );
+    let kept = hub("finding.keep_longer", json!({ "days": 365 }));
+    assert_eq!(kept["result"]["cleanup_period_days"], 365, "{kept}");
+    let text = std::fs::read_to_string(&settings).expect("settings");
+    let after: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        after,
+        json!({ "theme": "dark", "model": "opus", "cleanupPeriodDays": 365 })
+    );
+    let mode = std::fs::metadata(&settings)
+        .expect("settings")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+    let refused = hub("finding.keep_longer", json!({ "days": 30 }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("retention_not_offered")),
+        "{refused}"
+    );
+
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}

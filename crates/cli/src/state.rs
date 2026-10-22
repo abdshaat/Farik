@@ -109,6 +109,11 @@ pub(crate) struct ServeState {
     pub(crate) agents_at_once: Option<usize>,
     /// The most the teams together spend on a UTC day, when it is capped.
     pub(crate) daily_cap_usd: Option<f64>,
+    /// Whether the owner paused finding projects (`finding_paused`).
+    pub(crate) finding_paused: bool,
+    /// Whether the owner dismissed the card that offers claude.ai's export (`export_card` is
+    /// `"dismissed"`).
+    pub(crate) export_dismissed: bool,
 }
 
 /// What `state.json` in `directory` holds; an unreadable or absent file reads as empty. A file
@@ -138,6 +143,8 @@ pub(crate) fn read_state(directory: &Path) -> ServeState {
             .as_u64()
             .and_then(|limit| usize::try_from(limit).ok()),
         daily_cap_usd: state["daily_cap_usd"].as_f64(),
+        finding_paused: state["finding_paused"].as_bool().unwrap_or(false),
+        export_dismissed: state["export_card"].as_str() == Some("dismissed"),
     }
 }
 
@@ -168,6 +175,12 @@ pub(crate) fn write_state(directory: &Path, state: &ServeState) -> Result<(), St
     }
     if let Some(cap) = state.daily_cap_usd {
         text.insert("daily_cap_usd".to_string(), cap.into());
+    }
+    if state.finding_paused {
+        text.insert("finding_paused".to_string(), true.into());
+    }
+    if state.export_dismissed {
+        text.insert("export_card".to_string(), "dismissed".into());
     }
     catervas_runtime::write_private(
         &file,

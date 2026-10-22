@@ -47,6 +47,7 @@ pub(crate) mod ads_calls;
 mod app;
 mod board;
 mod documents;
+pub mod finding;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod gates;
@@ -64,6 +65,7 @@ pub mod web;
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
 
+pub use finding::{Finding, FindingHost, FindingProgress};
 pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
