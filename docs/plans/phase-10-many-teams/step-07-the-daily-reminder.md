@@ -151,7 +151,7 @@ Tests (`crates/store/tests/reminders.rs`, ignored, git):
   - A `mcp-needs-auth-cache.json` naming `zoho-books` gives that service.
   - Marks round-trip, and the migrations list ends at 11.
 
-- [ ] `feat(store): gather what the reminder needs`
+- [x] `feat(store): gather what the reminder needs`
 
 ### Task 3: Runs and deployments through GitHub
 

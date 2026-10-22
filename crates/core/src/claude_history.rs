@@ -90,6 +90,9 @@ pub struct ToolUse {
     /// resolver given to `read_line_with` names it. The path is handed to the resolver and never
     /// kept; `None` for every other call, and when the resolver knows no root for the path.
     pub writes_under: Option<String>,
+    /// For `TodoWrite` alone, how many items of the list it wrote are not completed. Read when the
+    /// line is read; no to-do text is kept.
+    pub open_todos: Option<u32>,
 }
 
 /// Names the root of the project a file path is under, when it is under one.
@@ -162,12 +165,23 @@ fn tool_use_of(block: &Value, root_of: RootOf<'_>) -> Option<ToolUse> {
     } else {
         None
     };
+    let open_todos = (name == "TodoWrite")
+        .then(|| {
+            let todos = block.get("input")?.get("todos")?.as_array()?;
+            let open = todos
+                .iter()
+                .filter(|item| text(item, "status") != Some("completed"))
+                .count();
+            Some(u32::try_from(open).unwrap_or(u32::MAX))
+        })
+        .flatten();
     Some(ToolUse {
         id,
         name,
         cron,
         touches_spreadsheet,
         writes_under,
+        open_todos,
     })
 }
 
@@ -1005,6 +1019,7 @@ mod tests {
                 cron: None,
                 touches_spreadsheet: false,
                 writes_under: None,
+                open_todos: None,
             }]
         );
         assert_eq!(
@@ -1019,6 +1034,7 @@ mod tests {
                 }),
                 touches_spreadsheet: false,
                 writes_under: None,
+                open_todos: None,
             }]
         );
         let call = |recurring, durable| CronCreateLine {

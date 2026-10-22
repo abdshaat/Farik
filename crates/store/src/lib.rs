@@ -55,6 +55,8 @@ pub mod projections;
 pub mod purchase_orders;
 /// Where the files and the log disagree.
 pub mod reconcile;
+/// What the daily reminder reads from the machine index, from git and from Claude Code's folder.
+pub mod reminders;
 /// The renewals Catervas flagged for the owner.
 pub mod renewals;
 /// A project folder's member repositories on the file system.

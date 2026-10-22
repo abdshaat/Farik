@@ -1573,6 +1573,30 @@ fn as_someone<'a>(directory: &Path, arguments: &[&'a str]) -> Vec<&'a str> {
 /// records.
 const COMMON_DIRECTORY: [&str; 3] = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
 
+/// Whether the tree at `directory` has changes that are not committed (`git status --porcelain`).
+/// It takes no optional lock, so that reading a folder the owner works in never writes to it.
+///
+/// # Errors
+///
+/// `CommandFailed` when `directory` is not in a repository, `NotInstalled` when git cannot be run.
+pub fn has_uncommitted(directory: &Path) -> Result<bool, GitError> {
+    Ok(!run_git(directory, &["--no-optional-locks", "status", "--porcelain"])?.is_empty())
+}
+
+/// How many commits of the checked-out branch at `directory` its upstream does not have
+/// (`git rev-list @{u}..HEAD --count`); none when the branch has no upstream.
+///
+/// # Errors
+///
+/// `NotInstalled` when git cannot be run.
+pub fn unpushed_commits(directory: &Path) -> Result<u32, GitError> {
+    match run_git(directory, &["rev-list", "@{u}..HEAD", "--count"]) {
+        Ok(count) => Ok(count.trim().parse().unwrap_or(0)),
+        Err(error @ GitError::NotInstalled { .. }) => Err(error),
+        Err(_) => Ok(0),
+    }
+}
+
 /// Runs git in `directory` and hands back what it said on standard output, with the newline git
 /// ends it with taken off.
 ///

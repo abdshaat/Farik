@@ -125,6 +125,7 @@ pub struct ConfiguredRow {
 
 /// A tool call with a server or on a spreadsheet, as the line that carries it reports it.
 pub(crate) struct ToolCallBatch {
+    pub open_todos: Option<u32>,
     pub tool_use_id: String,
     pub reply_key: String,
     pub tool_name: String,
@@ -500,7 +501,7 @@ fn github_remote_key(full_name: &str) -> String {
     format!("github.com/{}", full_name.to_lowercase())
 }
 
-fn read_time(text: &str) -> Result<DateTime<Utc>, StoreError> {
+pub(crate) fn read_time(text: &str) -> Result<DateTime<Utc>, StoreError> {
     DateTime::parse_from_rfc3339(text)
         .map(|time| time.with_timezone(&Utc))
         .map_err(|error| StoreError::Sqlite {
@@ -518,7 +519,7 @@ fn int(count: u64) -> i64 {
 }
 
 /// A time as the index keeps it: fixed width, so that text order is time order.
-fn stamp(time: DateTime<Utc>) -> String {
+pub(crate) fn stamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
@@ -570,14 +571,15 @@ fn write_crons_and_calls(
     for call in &file.tool_calls {
         // The first row of an id stays: a resumed session repeats the line.
         transaction.execute(
-            "INSERT OR IGNORE INTO tool_calls (tool_use_id, reply_key, tool_name, touches_spreadsheet, at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR IGNORE INTO tool_calls (tool_use_id, reply_key, tool_name, touches_spreadsheet, at, open_todos)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             (
                 &call.tool_use_id,
                 &call.reply_key,
                 &call.tool_name,
                 i64::from(call.touches_spreadsheet),
                 stamp(call.at),
+                call.open_todos,
             ),
         )?;
     }
@@ -2251,13 +2253,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            (1..=11).collect::<Vec<i64>>()
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+            (1..=11).collect::<Vec<i64>>()
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -2279,7 +2281,9 @@ mod tests {
                 "configured_servers",
                 "declared_services",
                 "github_claude_work",
+                "github_deploys",
                 "github_repos",
+                "github_runs",
                 "hand_projects",
                 "hand_routines",
                 "jobs",
@@ -2289,6 +2293,7 @@ mod tests {
                 "moved_out",
                 "projects",
                 "proposal_edits",
+                "reminder_marks",
                 "replies",
                 "reply_copies",
                 "separations",
@@ -2312,7 +2317,7 @@ mod tests {
         let mut index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions").last(),
-            Some(&10)
+            Some(&11)
         );
         index
             .put_edit(
@@ -2839,7 +2844,7 @@ mod tests {
         let mut index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions").last(),
-            Some(&10)
+            Some(&11)
         );
         let c = &index.connection;
         seed_project(c, "/home/me/shop", true);

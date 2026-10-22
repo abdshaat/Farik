@@ -241,9 +241,13 @@ fn read_chunk(bytes: &[u8], mut chunk: Chunk, roots: &[String]) -> Chunk {
                         }
                     }
                     for tool in &reply.tools {
-                        if server_segment(&tool.name).is_some() || tool.touches_spreadsheet {
+                        if server_segment(&tool.name).is_some()
+                            || tool.touches_spreadsheet
+                            || tool.open_todos.is_some()
+                        {
                             chunk.tool_calls.entry(tool.id.clone()).or_insert_with(|| {
                                 ToolCallBatch {
+                                    open_todos: tool.open_todos,
                                     tool_use_id: tool.id.clone(),
                                     reply_key: reply.key.clone(),
                                     tool_name: tool.name.clone(),
