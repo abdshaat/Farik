@@ -25,6 +25,8 @@ type Check = {
 	sandboxImage: Item;
 	/** Only for a team with a UI/UX Designer. */
 	designerBrowser?: Item;
+	/** A project that stopped on the safe box is being taken on: Catervas restarts on it. */
+	takingOn?: boolean;
 };
 type Key = keyof typeof en;
 
@@ -78,9 +80,22 @@ function Row(props: {
 
 /** Setup's first step: the programs Catervas needs, and what to do about each one missing. */
 export function SetupComputer() {
-	const { client } = useConnection();
+	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
 	const { data, again } = useQuery<Check>("computer.check", {});
+	const [opening, setOpening] = useState(false);
+	const takingOn = !!data?.takingOn;
+	const reopenOnce = useRef(reopen);
+	reopenOnce.current = reopen;
+	useEffect(() => {
+		if (!takingOn) return;
+		reopenOnce.current();
+		setOpening(true);
+	}, [takingOn]);
+	// Once the page is connected to the restarted Catervas, it goes home.
+	useEffect(() => {
+		if (opening && status === "open") navigate("/", { replace: true });
+	}, [opening, status, navigate]);
 	const [building, setBuilding] = useState(false);
 	const askAgain = useRef(again);
 	askAgain.current = again;
@@ -131,6 +146,13 @@ export function SetupComputer() {
 			again();
 		}
 	};
+
+	if (opening)
+		return (
+			<Wizard step={0} title={t("computerTitle")} lead={t("computerLead")}>
+				<p role="status">{t("opening")}</p>
+			</Wizard>
+		);
 
 	return (
 		<Wizard step={0} title={t("computerTitle")} lead={t("computerLead")}>

@@ -74,6 +74,11 @@ pub trait SetupHost: Send + Sync {
     ///
     /// `Refused` with the sentence to show, which never quotes the secret.
     fn connect(&self, kind: CredentialKind, secret: &str) -> Result<(Source, bool), SetupError>;
+    /// The sandbox image is ready: takes on the project that waited on the sandbox, if one did,
+    /// and answers whether it did.
+    fn sandbox_ready(&self) -> bool {
+        false
+    }
     /// The user's home folder, which the folder browser stays inside.
     fn home(&self) -> PathBuf;
     /// The environment the computer's programs are looked for and run in.

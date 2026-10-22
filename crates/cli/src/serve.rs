@@ -13,7 +13,7 @@ use serde_json::json;
 use tokio::sync::watch;
 
 use crate::project::{open_project, repository_root};
-use crate::run::{INTERRUPTED, OnIdle, Printer, finish, refuse, started, ticks};
+use crate::run::{Ended, INTERRUPTED, OnIdle, Printer, finish, refuse, started, ticks};
 use crate::setup::CliHost;
 use crate::start::{StartOptions, listen, runtime, start, web};
 use crate::state::{home_of, last_project, remember, state_dir};
@@ -25,10 +25,12 @@ const DEFAULT_PORT: u16 = 7420;
 /// What `serve` does next.
 enum Mode {
     /// Serve the wizard; `waiting` is the project already chosen when it only waits on the
-    /// credential, `leaving` the root a drive just left through `project.leave`.
+    /// credential, or on the sandbox when `sandbox`, `leaving` the root a drive just left through
+    /// `project.leave`.
     Setup {
         waiting: Option<PathBuf>,
         leaving: Option<PathBuf>,
+        sandbox: bool,
     },
     /// Drive this project.
     Drive(PathBuf),
@@ -40,6 +42,9 @@ enum Driven {
     Ended(i32),
     /// The project at this root was left from the browser: serve goes back to the wizard.
     Left(PathBuf),
+    /// The project at this root stopped because this computer's sandbox is not ready: serve goes
+    /// back to the wizard, whose computer check prepares it, and takes the project on again then.
+    Unready(PathBuf),
 }
 
 /// Serves the project found here, else the one served last, else the wizard until it chooses one,
@@ -73,13 +78,17 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
         let mut left_from = None;
         loop {
             mode = match mode {
-                Mode::Setup { waiting, leaving } => {
+                Mode::Setup {
+                    waiting,
+                    leaving,
+                    sandbox,
+                } => {
                     waited_on.clone_from(&waiting);
                     left_from.clone_from(&leaving);
                     let set_up = set_up(
                         io,
                         &held,
-                        waiting,
+                        (waiting, sandbox),
                         leaving,
                         take_on_error.take(),
                         no_open,
@@ -99,7 +108,16 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
                     Ok(Driven::Left(root)) => Mode::Setup {
                         waiting: None,
                         leaving: Some(root),
+                        sandbox: false,
                     },
+                    Ok(Driven::Unready(root)) => {
+                        taking_on = false;
+                        Mode::Setup {
+                            waiting: Some(root),
+                            leaving: None,
+                            sandbox: true,
+                        }
+                    }
                     // A take-on that failed goes back to the wizard, which says why.
                     Err(error) if taking_on => {
                         taking_on = false;
@@ -132,28 +150,33 @@ fn found(io: &CliIo<'_>) -> Mode {
         Some(root) if no_account => Mode::Setup {
             waiting: Some(root),
             leaving: None,
+            sandbox: false,
         },
         Some(root) => Mode::Drive(root),
         None => Mode::Setup {
             waiting: None,
             leaving: None,
+            sandbox: false,
         },
     }
 }
 
 /// Serves the wizard on `held` until it chooses a project, answered with it, or until Ctrl-C,
-/// answered `None`. The link is printed when serve has printed none.
+/// answered `None`; `waiting` is the project it waits on, and whether it waits on the sandbox. The
+/// link is printed when serve has printed none.
 async fn set_up(
     io: &mut CliIo<'_>,
     held: &std::net::TcpListener,
-    waiting: Option<PathBuf>,
+    (waiting, sandbox): (Option<PathBuf>, bool),
     leaving: Option<PathBuf>,
     take_on_error: Option<String>,
     no_open: bool,
     linked: &mut bool,
 ) -> Result<Option<PathBuf>, String> {
     // A project found with no account waits on the account, not on a project.
-    let lacks = if waiting.is_some() {
+    let lacks = if waiting.is_some() && sandbox {
+        "the sandbox is not ready: prepare it in the browser"
+    } else if waiting.is_some() {
         "no AI account yet: connect one in the browser"
     } else {
         "no project yet: catervas is set up in the browser"
@@ -166,6 +189,7 @@ async fn set_up(
         stores: (io.credential_stores)(),
         chosen,
         waiting,
+        sandbox,
         leaving: leaving.clone(),
         secrets: Arc::clone(&io.connector_secrets),
     });
@@ -296,14 +320,18 @@ async fn drive(
     )
     .await;
     let left = driver.daemon.left();
-    if left.is_some() {
-        // The wizard after a leave listens on `io`: give it the receiver Ctrl-C reaches, as
-        // `start_holding` does on a refusal.
+    let unready = matches!(ended, Ended::Unready(_));
+    if left.is_some() || unready {
+        // The wizard after a leave, or after a sandbox that is not ready, listens on `io`: give
+        // it the receiver Ctrl-C reaches, as `start_holding` does on a refusal.
         let dropped = tokio::sync::mpsc::unbounded_channel().1;
         let interrupts = std::mem::replace(&mut driver.interrupts, dropped);
         printer.io.interrupts = Interrupts::Channel(interrupts);
     }
     let code = finish(&project, driver, &mut printer, ended, presses).await;
+    if unready && left.is_none() && code == 1 {
+        return Ok(Driven::Unready(project.root));
+    }
     Ok(driven(left, code))
 }
 
@@ -313,6 +341,7 @@ fn back_in_setup(waited_on: &mut Option<PathBuf>, left_from: &mut Option<PathBuf
     Mode::Setup {
         waiting: waited_on.take(),
         leaving: left_from.take(),
+        sandbox: false,
     }
 }
 
@@ -349,7 +378,7 @@ mod tests {
         );
         assert!(matches!(
             mode,
-            Mode::Setup { waiting: Some(w), leaving: Some(l) }
+            Mode::Setup { waiting: Some(w), leaving: Some(l), .. }
                 if w == Path::new("/w") && l == Path::new("/old")
         ));
     }
