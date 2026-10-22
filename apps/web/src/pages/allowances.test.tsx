@@ -690,7 +690,9 @@ describe("allowances on the screens", () => {
 		const change = within(dialog).getByRole("link", {
 			name: "Change how many",
 		});
-		expect(change.getAttribute("href")).toBe("/team/kai?allowances=higgsfield");
+		expect(change.getAttribute("href")).toBe(
+			"/t/shop/team/kai?allowances=higgsfield",
+		);
 		expect(
 			within(dialog).getByText(
 				/A new number does not allow it; decide it here\.$/,

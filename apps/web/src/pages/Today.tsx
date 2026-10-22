@@ -1,10 +1,10 @@
 import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
-import { Link, useNavigate } from "react-router";
 import { agentLine } from "../app/agentLine.ts";
 import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
+import { Link, useNavigate } from "../app/links.tsx";
 import { type ProductPlanState, projectName } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";

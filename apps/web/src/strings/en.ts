@@ -44,6 +44,8 @@ export const en = {
 	copy: "Copy",
 	brand: "Catervas",
 	navRail: "Main",
+	allTeams: "All teams",
+	teamNotRunning: "This team isn't running on this computer right now.",
 	navBar: "Places",
 	connected: "Connected",
 	connecting: "Connecting",

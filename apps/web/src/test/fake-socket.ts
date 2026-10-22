@@ -8,6 +8,8 @@ export class FakeSocket implements SocketLike {
 	sent: Frame[] = [];
 	private handlers: Record<string, ((e: { data: unknown }) => void)[]> = {};
 	url: string;
+	/** Whether the page closed this socket. */
+	closed = false;
 	constructor(url: string) {
 		this.url = url;
 	}
@@ -15,6 +17,7 @@ export class FakeSocket implements SocketLike {
 		this.sent.push(JSON.parse(data));
 	}
 	close() {
+		this.closed = true;
 		this.emit("close", {});
 	}
 	addEventListener(type: string, fn: (e: { data: unknown }) => void) {

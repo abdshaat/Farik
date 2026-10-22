@@ -56,7 +56,7 @@ describe("Today, messages to sellers", () => {
 		const task = await first.findByRole("link", {
 			name: "CTV-31 Find a supplier for 500 pie boxes",
 		});
-		expect(task.getAttribute("href")).toBe("/tasks/CTV-31");
+		expect(task.getAttribute("href")).toBe("/t/shop/tasks/CTV-31");
 		expect(task.parentElement?.textContent).toBe(
 			"For CTV-31 Find a supplier for 500 pie boxes.",
 		);
@@ -247,7 +247,7 @@ describe("Today, messages to sellers", () => {
 			screen
 				.getByRole("link", { name: en.mailboxConnectLink })
 				.getAttribute("href"),
-		).toBe("/team/ivo/mailbox");
+		).toBe("/t/shop/team/ivo/mailbox");
 		expect(
 			(row.getByRole("button", { name: "Discard" }) as HTMLButtonElement)
 				.disabled,

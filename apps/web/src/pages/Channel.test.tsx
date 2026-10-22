@@ -208,7 +208,7 @@ describe("channel", () => {
 			within(rows[0] as HTMLElement)
 				.getByRole("link", { name: "CTV-1" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-1");
+		).toBe("/t/shop/tasks/CTV-1");
 		expect(list.querySelector("b")).toBeNull();
 	});
 
@@ -294,11 +294,11 @@ describe("channel", () => {
 		);
 		const list = await screen.findByRole("list", { name: en.channelMessages });
 		const link = within(list).getByRole("link", { name: "CTV-2" });
-		expect(link.getAttribute("href")).toBe("/tasks/CTV-2");
+		expect(link.getAttribute("href")).toBe("/t/shop/tasks/CTV-2");
 		expect(link.nextSibling?.textContent).toContain(en.channelWaitingOnYou);
 		expect(
 			within(list).getByRole("link", { name: "CTV-3" }).getAttribute("href"),
-		).toBe("/tasks/CTV-3");
+		).toBe("/t/shop/tasks/CTV-3");
 		expect(within(list).getByText(en.channelAtYou)).toBeTruthy();
 		expect(within(list).getByText("@Mira")).toBeTruthy();
 
@@ -725,7 +725,7 @@ describe("channel", () => {
 			within(preview)
 				.getByRole("link", { name: en.channelOpen })
 				.getAttribute("href"),
-		).toBe("/channel");
+		).toBe("/t/shop/channel");
 		await expectNoAxeViolations(container);
 	});
 });

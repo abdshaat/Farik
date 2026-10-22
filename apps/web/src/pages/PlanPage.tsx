@@ -1,8 +1,9 @@
 import { toSnake } from "@catervas/protocol-client";
 import { Button, Dialog, TextArea, uiStrings } from "@catervas/ui";
 import { useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link, useNavigate } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import {
 	active,

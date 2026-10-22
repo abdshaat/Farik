@@ -103,7 +103,7 @@ Tests:
   - With none, it goes to `/setup/computer`.
 - `keeps_every_team_link_inside_its_team` (`app/links.test.ts`): asserts the rule of the File map.
 
-- [ ] `feat(web): each team's pages under its own address`
+- [x] `feat(web): each team's pages under its own address`
 
 ### Task 2: The switcher
 

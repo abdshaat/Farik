@@ -3,7 +3,7 @@ import { BrowserRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { fakeFetch, socketsMade } from "../test/fake-socket.ts";
-import { answerStatus } from "../test/render-app.tsx";
+import { answerQuery, answerStatus } from "../test/render-app.tsx";
 import { App } from "./App.tsx";
 import { ConnectionProvider, useConnection } from "./connection.tsx";
 
@@ -43,10 +43,33 @@ describe("connection", () => {
 			return s;
 		});
 		act(() => socket.emit("open", {}));
-		// "/" is Today, once Catervas says it has a project and its team.
+		// "/" is the only team's Today, once Catervas says it has a project and its team.
 		await answerStatus(socket, false);
+		await answerQuery(socket, "teams.list", {
+			teams: [
+				{
+					slug: "shop",
+					name: "shop",
+					root: "/home/me/shop",
+					status: "running",
+					working_agents: 0,
+					waiting: 0,
+					today_usd: 0,
+					month_usd: 0,
+				},
+			],
+			current: "shop",
+			account_asleep_until: null,
+		});
+		const team = await waitFor(() => {
+			const s = sockets.find((one) => one.url.endsWith("/t/shop/rpc"));
+			if (!s) throw new Error("no socket to the team");
+			return s;
+		});
+		act(() => team.emit("open", {}));
+		await answerStatus(team, false);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
-		expect(location.pathname).toBe("/");
+		expect(location.pathname).toBe("/t/shop/");
 		expect(fetch).toHaveBeenCalledWith(
 			"/connect",
 			expect.objectContaining({
@@ -172,7 +195,7 @@ describe("connection", () => {
 		await flush();
 		const first = sockets[0];
 		if (!first) throw new Error("no socket was opened");
-		expect(first.url).toBe(`ws://${location.host}/rpc`);
+		expect(first.url).toBe(`ws://${location.host}/hub/rpc`);
 		act(() => first.emit("open", {}));
 		expect(status()).toBe("open");
 		expect(first.calls("subscribe")[0]?.params).toEqual({});

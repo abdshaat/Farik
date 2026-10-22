@@ -1,7 +1,7 @@
 import { AVATAR_URLS, type AvatarKey, Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { refusalsOf, said } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { Bullets } from "../components/Bullets.tsx";

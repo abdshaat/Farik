@@ -15,7 +15,9 @@ import type { FakeSocket } from "../../test/fake-socket.ts";
 import {
 	answerQuery,
 	answerStatus,
+	intoTeam,
 	renderApp,
+	teamList,
 } from "../../test/render-app.tsx";
 import { bodyOf, refusedBy } from "../../test/schema.ts";
 import { joinedNames } from "./SetupReady.tsx";
@@ -422,7 +424,7 @@ describe("setup", () => {
 		await waitFor(() => expect(sockets).toHaveLength(2));
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
-		await answerStatus(next, true);
+		await intoTeam(next, sockets, true);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 
@@ -605,8 +607,8 @@ describe("setup", () => {
 		expect(fetch).toHaveBeenCalledTimes(2);
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
-		// "/" is Today's shell, which shows once Catervas answers.
-		await answerStatus(next, true);
+		// "/" is the new team's Today, which shows once Catervas answers.
+		await intoTeam(next, sockets, true);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(
 			await screen.findByText(en.pausedNothingNew, { exact: false }),
@@ -681,15 +683,17 @@ describe("setup", () => {
 	});
 
 	it("sends_the_user_to_setup_without_a_project", async () => {
-		const first = await renderApp("/");
-		await answerStatus(first.socket as FakeSocket, false, 1, NO_PROJECT);
+		const first = await renderApp("/", undefined, undefined, { raw: true });
+		await answerQuery(first.hub as FakeSocket, "teams.list", teamList());
+		await answerStatus(first.hub as FakeSocket, false, 1, NO_PROJECT);
 		expect(
 			await screen.findByRole("heading", { name: en.computerTitle }),
 		).toBeTruthy();
 		cleanup();
 
-		const second = await renderApp("/");
-		await answerStatus(second.socket as FakeSocket, false, 1, {
+		const second = await renderApp("/", undefined, undefined, { raw: true });
+		await answerQuery(second.hub as FakeSocket, "teams.list", teamList());
+		await answerStatus(second.hub as FakeSocket, false, 1, {
 			...NO_PROJECT,
 			take_on_error: "the team's driver could not start",
 		});
@@ -697,7 +701,7 @@ describe("setup", () => {
 			await screen.findByRole("heading", { name: en.projectTitle }),
 		).toBeTruthy();
 		// The project screen asks for the status too.
-		await answerStatus(second.socket as FakeSocket, false, 1, {
+		await answerStatus(second.hub as FakeSocket, false, 1, {
 			...NO_PROJECT,
 			take_on_error: "the team's driver could not start",
 		});
@@ -800,14 +804,14 @@ describe("setup", () => {
 		});
 		expect(refusedBy("emptyBody", bodyOf(command))).toEqual([]);
 		await first.s.reply(command, { said: "started", events: [9] });
-		await answerStatus(first.s, false);
+		await intoTeam(first.hub as FakeSocket, first.sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		cleanup();
 
 		// Later sends nothing.
 		const second = await theOffer();
 		fireEvent.click(await screen.findByRole("button", { name: "Later" }));
-		await answerStatus(second.s, false);
+		await intoTeam(second.hub as FakeSocket, second.sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(second.s.calls("command")).toHaveLength(0);
 		cleanup();
@@ -843,8 +847,8 @@ describe("setup", () => {
 	});
 
 	it("goes_home_when_nothing_is_offered", async () => {
-		const { s } = await theOffer({ offered: false, roles: [] });
-		await answerStatus(s, false);
+		const { s, hub, sockets } = await theOffer({ offered: false, roles: [] });
+		await intoTeam(hub as FakeSocket, sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(
 			screen.queryByRole("heading", { name: "Your team is ready" }),
@@ -863,7 +867,7 @@ describe("setup", () => {
 			return frame;
 		});
 		await s.fail(asked, -32000, "the offer cannot be read");
-		await answerStatus(s, false);
+		await intoTeam(rendered.hub as FakeSocket, rendered.sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(s.calls("command")).toHaveLength(0);
 	});

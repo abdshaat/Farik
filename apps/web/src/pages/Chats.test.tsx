@@ -177,11 +177,11 @@ describe("chats", () => {
 		const list = await screen.findByRole("navigation", { name: en.chats });
 		const links = within(list).getAllByRole("link");
 		expect(links.map((a) => a.getAttribute("href"))).toEqual([
-			"/channel",
-			"/channel/mira",
-			"/channel/sol",
-			"/channel/theo",
-			"/channel/kai",
+			"/t/shop/channel",
+			"/t/shop/channel/mira",
+			"/t/shop/channel/sol",
+			"/t/shop/channel/theo",
+			"/t/shop/channel/kai",
 		]);
 		// Team first, open; each agent with its avatar, name, role and last line.
 		expect(links[0]?.getAttribute("aria-current")).toBe("page");
@@ -220,7 +220,7 @@ describe("chats", () => {
 		const list = await screen.findByRole("navigation", { name: en.chats });
 		expect(
 			within(list).getByRole("link", { current: "page" }).getAttribute("href"),
-		).toBe("/channel");
+		).toBe("/t/shop/channel");
 		expect(screen.queryByText(en.noPage)).toBeNull();
 		cleanup();
 
@@ -276,11 +276,11 @@ describe("chats", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: en.chatsBack }).getAttribute("href"),
-		).toBe("/channel");
+		).toBe("/t/shop/channel");
 		const list = screen.getByRole("navigation", { name: en.chats });
 		expect(
 			within(list).getByRole("link", { current: "page" }).getAttribute("href"),
-		).toBe("/channel/mira");
+		).toBe("/t/shop/channel/mira");
 
 		const messages = screen.getByRole("list", { name: en.channelMessages });
 		const rows = within(messages).getAllByRole("listitem");
@@ -632,7 +632,7 @@ describe("chats", () => {
 		const link = await screen.findByRole("link", {
 			name: "Given to Mira as CTV-7",
 		});
-		expect(link.getAttribute("href")).toBe("/tasks/CTV-7");
+		expect(link.getAttribute("href")).toBe("/t/shop/tasks/CTV-7");
 		expect(
 			screen.queryByText(en.chatsAnswering.replace("{name}", "Mira")),
 		).toBeNull();
@@ -695,7 +695,7 @@ describe("chats", () => {
 		expect(screen.getByText("Show sold-out items")).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: "Sent as CTV-12" }).getAttribute("href"),
-		).toBe("/requests/CTV-12");
+		).toBe("/t/shop/requests/CTV-12");
 
 		const boxes = screen.getAllByRole("textbox", {
 			name: t("chatsSuggests"),
@@ -731,7 +731,7 @@ describe("chats", () => {
 			(
 				await screen.findByRole("link", { name: "Sent as CTV-13" })
 			).getAttribute("href"),
-		).toBe("/requests/CTV-13");
+		).toBe("/t/shop/requests/CTV-13");
 
 		// Sent from another tab: the event turns its box into the link.
 		live(
@@ -769,7 +769,7 @@ describe("chats", () => {
 			[
 				{ because: "day_spent" },
 				"Today’s spending limit is reached, so Mira will answer tomorrow. Your message is kept. See today’s costs",
-				"/costs",
+				"/t/shop/costs",
 			],
 			[
 				{ because: "asleep", until },
@@ -778,7 +778,7 @@ describe("chats", () => {
 			[
 				{ because: "key_refused" },
 				"Mira cannot answer: your AI account’s key was refused. Sign in again in Settings. Open Settings",
-				"/settings/account",
+				"/t/shop/settings/account",
 			],
 			[{ because: "no_answer" }, "Mira could not answer. Ask again."],
 		];

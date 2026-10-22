@@ -1,7 +1,8 @@
 import { Button, uiStrings } from "@catervas/ui";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import {
 	active,

@@ -69,15 +69,15 @@ describe("settings directory", () => {
 		const links = within(list).getAllByRole("link");
 		// The design's order and addresses, not merely SECTIONS' own.
 		expect(links.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
-			[en.sectionGeneral, "/settings/general"],
-			[en.sectionAllowedActions, "/settings/allowed-actions"],
-			[en.sectionRules, "/settings/rules"],
-			[en.sectionSpending, "/settings/spending"],
-			[en.sectionWork, "/settings/work"],
-			[en.sectionYourApp, "/settings/your-app"],
-			[en.sectionSavedTeams, "/settings/saved-teams"],
-			[en.sectionComputer, "/settings/computer"],
-			[en.sectionAccount, "/settings/account"],
+			[en.sectionGeneral, "/t/shop/settings/general"],
+			[en.sectionAllowedActions, "/t/shop/settings/allowed-actions"],
+			[en.sectionRules, "/t/shop/settings/rules"],
+			[en.sectionSpending, "/t/shop/settings/spending"],
+			[en.sectionWork, "/t/shop/settings/work"],
+			[en.sectionYourApp, "/t/shop/settings/your-app"],
+			[en.sectionSavedTeams, "/t/shop/settings/saved-teams"],
+			[en.sectionComputer, "/t/shop/settings/computer"],
+			[en.sectionAccount, "/t/shop/settings/account"],
 		]);
 		// The team's rules have four sections of their own, not one.
 		expect(links).toHaveLength(9);
@@ -113,7 +113,7 @@ describe("settings directory", () => {
 	it("puts_a_way_back_above_a_section_on_a_phone", async () => {
 		await open("/settings/general", null);
 		const back = await main().findByRole("link", { name: en.settingsBack });
-		expect(back.getAttribute("href")).toBe("/settings");
+		expect(back.getAttribute("href")).toBe("/t/shop/settings");
 		const heading = main().getByRole("heading", { name: en.sectionGeneral });
 		expect(
 			back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING,
@@ -129,7 +129,7 @@ describe("settings directory", () => {
 			expect(await screen.findByText(en.yourAppNone)).toBeTruthy();
 			expect(
 				main().getByRole("link", { name: en.team }).getAttribute("href"),
-			).toBe("/team");
+			).toBe("/t/shop/team");
 			const list = screen.getByRole("navigation", {
 				name: en.settingsSections,
 			});
@@ -373,7 +373,7 @@ describe("settings directory", () => {
 			main()
 				.getByRole("link", { name: en.autopilotNeedsLimitLink })
 				.getAttribute("href"),
-		).toBe("/settings/spending");
+		).toBe("/t/shop/settings/spending");
 		cleanup();
 
 		// 2. With a limit, pressing the switch sends nothing and opens the dialog.
@@ -737,7 +737,7 @@ describe("settings directory", () => {
 				within(none)
 					.getByRole("link", { name: en.sectionAllowedActions })
 					.getAttribute("href"),
-			).toBe("/settings/allowed-actions");
+			).toBe("/t/shop/settings/allowed-actions");
 		});
 
 		it("sets_when_work_stops_and_how_long_a_session_runs", async () => {

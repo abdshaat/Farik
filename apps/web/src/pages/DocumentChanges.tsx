@@ -1,7 +1,7 @@
 import { Button, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
-import { Link } from "react-router";
 import { useCommand } from "../app/command.ts";
+import { Link } from "../app/links.tsx";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentChanges.module.css";

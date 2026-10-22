@@ -2,6 +2,7 @@ import { Button, Dialog } from "@catervas/ui";
 import { type ReactNode, useCallback, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { daemonSaid } from "../app/refusals.ts";
 import { codeOf } from "../app/words.ts";
 import { fileRoute } from "../pages/files.ts";
@@ -269,7 +270,7 @@ export function AttachedChips({
 								</button>
 							</>
 						) : (
-							<a href={fileRoute(one.path)}>{one.name}</a>
+							<Link to={fileRoute(one.path)}>{one.name}</Link>
 						)}
 					</li>
 				);

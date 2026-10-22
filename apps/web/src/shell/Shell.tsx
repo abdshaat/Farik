@@ -1,17 +1,12 @@
 import icon from "@catervas/brand/assets/icons/icon-48.png";
 import { Button } from "@catervas/ui";
 import { useCallback, useSyncExternalStore } from "react";
-import {
-	Link,
-	Navigate,
-	NavLink,
-	Outlet,
-	useLocation,
-	useNavigate,
-} from "react-router";
+import { Outlet, useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
+import { Link, Navigate, NavLink, useNavigate } from "../app/links.tsx";
 import { type ServeStatus, useQuery } from "../app/store.ts";
+import { pageOf } from "../app/teams.ts";
 import { ChangeProject } from "../pages/ChangeProject.tsx";
 import { Opening } from "../pages/Opening.tsx";
 import type { Team } from "../pages/setup/TeamSetup.tsx";
@@ -68,7 +63,7 @@ export function Shell() {
 	const solo = held?.team?.policy?.solo
 		? held.team.agents.find((a) => a.status !== "retired")?.displayName
 		: undefined;
-	const path = useLocation().pathname;
+	const path = pageOf(useLocation().pathname);
 	// The chats fill the window and scroll inside it, so the window itself does not.
 	const filled = path === "/channel" || path.startsWith("/channel/");
 	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.

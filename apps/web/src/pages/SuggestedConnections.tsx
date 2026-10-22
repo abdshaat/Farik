@@ -1,7 +1,7 @@
 import { Button, InfoTip } from "@catervas/ui";
 import { useRef, useState } from "react";
-import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { daemonSaid } from "../app/refusals.ts";
 import { t } from "../strings/t.ts";
 import { ServiceLogo } from "./ServiceLogo.tsx";

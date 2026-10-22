@@ -55,7 +55,7 @@ describe("shell", () => {
 			screen
 				.getByRole("link", { name: en.eventsForTesting })
 				.getAttribute("href"),
-		).toBe("/events");
+		).toBe("/t/shop/events");
 		expect(screen.queryByRole("navigation", { name: en.navBar })).toBeNull();
 		await expectNoAxeViolations(container);
 
@@ -95,13 +95,13 @@ describe("shell", () => {
 				.getAllByRole("link")
 				.map((a) => [a.textContent, a.getAttribute("href")]);
 		expect(words(rail)).toEqual([
-			[en.today, "/"],
-			[en.board, "/board"],
-			[en.chats, "/channel"],
-			[en.files, "/files"],
-			[en.team, "/team"],
-			[en.costs, "/costs"],
-			[en.settings, "/settings"],
+			[en.today, "/t/shop/"],
+			[en.board, "/t/shop/board"],
+			[en.chats, "/t/shop/channel"],
+			[en.files, "/t/shop/files"],
+			[en.team, "/t/shop/team"],
+			[en.costs, "/t/shop/costs"],
+			[en.settings, "/t/shop/settings"],
 		]);
 		await expectNoAxeViolations(container);
 
@@ -109,11 +109,11 @@ describe("shell", () => {
 		act(() => media.set(WIDE, false));
 		const bar = screen.getByRole("navigation", { name: en.navBar });
 		expect(words(bar)).toEqual([
-			[en.today, "/"],
-			[en.board, "/board"],
-			[en.chats, "/channel"],
-			[en.team, "/team"],
-			[en.costs, "/costs"],
+			[en.today, "/t/shop/"],
+			[en.board, "/t/shop/board"],
+			[en.chats, "/t/shop/channel"],
+			[en.team, "/t/shop/team"],
+			[en.costs, "/t/shop/costs"],
 		]);
 		const main = screen.getByRole("main");
 		expect(
@@ -121,8 +121,8 @@ describe("shell", () => {
 				.getAllByRole("link")
 				.map((a) => [a.textContent, a.getAttribute("href")]),
 		).toEqual([
-			[en.files, "/files"],
-			[en.settings, "/settings"],
+			[en.files, "/t/shop/files"],
+			[en.settings, "/t/shop/settings"],
 		]);
 		await expectNoAxeViolations(container);
 	});

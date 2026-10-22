@@ -158,7 +158,7 @@ describe("the procurement mailbox on the Procurement Specialist's page", () => {
 			mailbox
 				.getByRole("link", { name: en.mailboxConnectLink })
 				.getAttribute("href"),
-		).toBe("/team/ivo/mailbox");
+		).toBe("/t/shop/team/ivo/mailbox");
 		expect(mailbox.queryByRole("button", { name: "Check now" })).toBeNull();
 	});
 

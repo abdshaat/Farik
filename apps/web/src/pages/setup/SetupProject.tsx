@@ -4,6 +4,7 @@ import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { daemonSaid } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
+import { ON_CURRENT } from "../../app/teams.ts";
 import {
 	AttachButton,
 	AttachedChips,
@@ -69,7 +70,8 @@ export function SetupProject() {
 
 	// Catervas restarts on the chosen project; once the page is connected to it again, it goes home.
 	useEffect(() => {
-		if (opening && status === "open") navigate("/", { replace: true });
+		if (opening && status === "open")
+			navigate("/", { replace: true, state: ON_CURRENT });
 	}, [opening, status, navigate]);
 
 	const take = async (

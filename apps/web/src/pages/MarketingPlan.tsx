@@ -1,7 +1,8 @@
 import { Avatar, type AvatarKey, Button, Dialog, TextArea } from "@catervas/ui";
 import { Fragment, type ReactNode, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useCommand } from "../app/command.ts";
+import { Link } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import { DocumentFrame } from "../components/DocumentFrame.tsx";
 import { t } from "../strings/t.ts";

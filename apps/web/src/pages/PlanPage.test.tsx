@@ -135,7 +135,7 @@ describe("plan page", () => {
 			screen
 				.getByRole("link", { name: "Edit the plan yourself" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-1/plan/edit");
+		).toBe("/t/shop/tasks/CTV-1/plan/edit");
 		await expectNoAxeViolations(container);
 	});
 

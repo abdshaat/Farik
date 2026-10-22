@@ -202,7 +202,7 @@ describe("team page", () => {
 			within(list)
 				.getByRole("link", { name: "Edit Theo" })
 				.getAttribute("href"),
-		).toBe("/team/theo");
+		).toBe("/t/shop/team/theo");
 		expect(screen.getByText(en.firstDay, { exact: false })).toBeTruthy();
 		expect(screen.getByText("5 agents work on Corner Bakery.")).toBeTruthy();
 		for (const line of en.teamPageRules.split("\n")) onlyInTips(line);
@@ -361,7 +361,7 @@ describe("team page", () => {
 		]);
 		expect(
 			within(cost).getByRole("link", { name: "Costs" }).getAttribute("href"),
-		).toBe("/costs");
+		).toBe("/t/shop/costs");
 		await expectNoAxeViolations(container);
 
 		// Add someone offers the Designer, with a picture nobody on the team has.
@@ -1803,7 +1803,7 @@ describe("team templates", () => {
 			within(line)
 				.getByRole("link", { name: en.settings })
 				.getAttribute("href"),
-		).toBe("/settings/saved-teams");
+		).toBe("/t/shop/settings/saved-teams");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		await expectNoAxeViolations(container);
 	});
@@ -1829,7 +1829,7 @@ describe("team templates", () => {
 			within(dialog)
 				.getByRole("link", { name: en.settings })
 				.getAttribute("href"),
-		).toBe("/settings/saved-teams");
+		).toBe("/t/shop/settings/saved-teams");
 		await expectNoAxeViolations(container);
 		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
 		const asked = await query(s, "template.preview");

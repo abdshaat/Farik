@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { useQuery } from "../../app/store.ts";
+import { ON_CURRENT } from "../../app/teams.ts";
 import { t } from "../../strings/t.ts";
 import {
 	type CheckAnswer,
@@ -81,7 +82,8 @@ export function SetupAccount() {
 
 	// Once the page is connected to the restarted Catervas, it goes home.
 	useEffect(() => {
-		if (opening && status === "open") navigate("/", { replace: true });
+		if (opening && status === "open")
+			navigate("/", { replace: true, state: ON_CURRENT });
 	}, [opening, status, navigate]);
 
 	if (opening)
