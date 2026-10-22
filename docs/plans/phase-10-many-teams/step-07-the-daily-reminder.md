@@ -218,7 +218,7 @@ Tests:
 
 Then the project plan's row 07: "planned and executed 2026-10-22".
 
-- [ ] `docs(spec): the daily reminder, revision 0.151`
+- [x] `docs(spec): the daily reminder, revision 0.151`
 
 ## Verification
 
