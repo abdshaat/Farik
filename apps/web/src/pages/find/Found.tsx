@@ -399,8 +399,7 @@ export function Found() {
 					{t("back")}
 				</Button>
 				{!nothing && (
-					// Step 06b's "Do these work together?" comes next; until it lands, All teams.
-					<Button kind="primary" onClick={() => navigate("/teams")}>
+					<Button kind="primary" onClick={() => navigate("/find/together")}>
 						{t("continue")}
 					</Button>
 				)}

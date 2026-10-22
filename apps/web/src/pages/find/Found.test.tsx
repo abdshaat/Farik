@@ -215,9 +215,9 @@ describe("here's what you work on", () => {
 		expect(job.getByText("Every night at 02:00")).toBeTruthy();
 		expect(job.queryByRole("radio", { name: "Team" })).toBeNull();
 
-		// Continue leads on.
+		// Continue leads on to "Do these work together?".
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-		await waitFor(() => expect(where()).toBe("/teams"));
+		await waitFor(() => expect(where()).toBe("/find/together"));
 	});
 
 	it("offers_a_project_by_hand_when_nothing_is_found", async () => {

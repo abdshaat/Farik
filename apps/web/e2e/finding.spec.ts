@@ -34,6 +34,13 @@ test("a new owner finds their projects", async ({ page }) => {
 		await cards.getByText("Watch", { exact: true }).click();
 		await expect(cards.getByRole("radio", { name: "Watch" })).toBeChecked();
 		await page.getByRole("button", { name: "Continue" }).click();
+
+		// 3. Nothing proves the one project works with another: only the end of the questions.
+		await expect(page).toHaveURL(/\/find\/together$/);
+		await expect(
+			page.getByRole("heading", { name: "That's all we could prove" }),
+		).toBeVisible();
+		await page.getByRole("button", { name: "Continue" }).click();
 		await expect(page).toHaveURL(/\/teams$/);
 
 		// The answer was kept on this computer: the list shows it again.

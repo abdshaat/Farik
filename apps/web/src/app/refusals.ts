@@ -172,6 +172,7 @@ const WORDS: Record<string, keyof typeof en> = {
 	// Finding the owner's projects (SPEC 4.1; ADR 0059).
 	finding_paused: "refuseFindingPaused",
 	unknown_project: "refuseUnknownProject",
+	proof_no_longer_holds: "refuseProofNoLongerHolds",
 	not_gone: "refuseNotGone",
 	not_the_same_repository: "refuseNotSameRepository",
 	unknown_service: "refuseUnknownService",

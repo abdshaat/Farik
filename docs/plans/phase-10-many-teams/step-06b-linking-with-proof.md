@@ -184,7 +184,7 @@ Tests (`pages/find/Together.test.tsx`):
   - **No, keep separate** sends `no`.
   - After the last pair, "That's all we could prove" lists the group, and "Maybe related (1)" opens to **Separate** and **One team**.
 
-- [ ] `feat(web): do these work together?`
+- [x] `feat(web): do these work together?`
 
 ### Task 6: Spec
 
