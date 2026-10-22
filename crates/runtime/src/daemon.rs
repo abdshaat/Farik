@@ -408,6 +408,16 @@ impl DaemonState {
         self.hub.set(hub).is_ok()
     }
 
+    /// Asks the orchestrator to stop, as `catervas stop` does: it waits for a running session's tick
+    /// to end, on a task of its own, and the run ends. Nothing is done on a daemon that takes no
+    /// commands.
+    pub fn request_run_stop(self: &Arc<Self>) {
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            let _ = handled(&state, Command::RunStop).await;
+        });
+    }
+
     /// What ends the sockets of this state's pages: cancelled when its daemon shuts down, once it
     /// is served.
     pub(crate) fn closing(&self) -> Option<&CancellationToken> {

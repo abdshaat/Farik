@@ -74,7 +74,9 @@
         "folder_doc_proposals.list",
         "files.tree",
         "files.read",
-        "repos.list"
+        "repos.list",
+        "teams.list",
+        "computer.get"
       ]
     },
     "subscribeRequest": {
@@ -325,6 +327,12 @@
               "$ref": "#/$defs/reposListQuery"
             },
             {
+              "$ref": "#/$defs/teamsListQuery"
+            },
+            {
+              "$ref": "#/$defs/computerGetQuery"
+            },
+            {
               "$ref": "#/$defs/purchaseOrdersListQuery"
             },
             {
@@ -554,6 +562,15 @@
         },
         {
           "$ref": "#/$defs/documentAttachRequest"
+        },
+        {
+          "$ref": "#/$defs/teamsCurrentRequest"
+        },
+        {
+          "$ref": "#/$defs/teamsRemoveRequest"
+        },
+        {
+          "$ref": "#/$defs/computerSetRequest"
         },
         {
           "$ref": "#/$defs/repoAddRequest"
@@ -3047,6 +3064,133 @@
               "integration_branch": { "type": ["string", "null"] },
               "missing": { "type": "boolean" }
             }
+          }
+        }
+      }
+    },
+    "teamsListQuery": {
+      "title": "Teams List Query",
+      "description": "Every team on this computer, as teamsListResult shapes them (docs/SPEC.md 4.1, 8.1; ADR 0059). Answered by the hub alone, on /hub/rpc and on /rpc while there is no current team.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "teams.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "teamsListResult": {
+      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["teams", "current", "account_asleep_until"],
+      "properties": {
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "name", "root", "status", "working_agents", "waiting", "today_usd", "month_usd"],
+            "properties": {
+              "slug": { "type": "string" },
+              "name": { "type": "string" },
+              "root": { "type": "string" },
+              "status": { "enum": ["running", "paused", "elsewhere", "missing", "failed"] },
+              "failed": { "type": "string" },
+              "working_agents": { "type": "integer", "minimum": 0 },
+              "waiting": { "type": "integer", "minimum": 0 },
+              "today_usd": { "type": "number" },
+              "month_usd": { "type": "number" }
+            }
+          }
+        },
+        "current": { "type": ["string", "null"] },
+        "account_asleep_until": { "type": ["string", "null"] }
+      }
+    },
+    "computerGetQuery": {
+      "title": "Computer Get Query",
+      "description": "The limits this computer's teams share and what they spent today, as computerGetResult shapes them (docs/SPEC.md 5.5; ADR 0059). Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "computer.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "computerGetResult": {
+      "description": "agents_at_once is how many agent sessions run at once across the teams (null: no limit), daily_cap_usd the most the teams together spend on a UTC day (null: no cap), spent_today_usd what they spent on this UTC day.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agents_at_once", "daily_cap_usd", "spent_today_usd"],
+      "properties": {
+        "agents_at_once": { "type": ["integer", "null"] },
+        "daily_cap_usd": { "type": ["number", "null"] },
+        "spent_today_usd": { "type": "number" }
+      }
+    },
+    "teamsCurrentRequest": {
+      "title": "Teams Current Request",
+      "description": "Makes the team slug the one /rpc answers for (docs/SPEC.md 8.1; ADR 0059). Answers emptyResult; an unknown slug is refused with -32005 and team_unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "teams.current" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug"],
+          "properties": { "slug": { "type": "string" } }
+        }
+      }
+    },
+    "teamsRemoveRequest": {
+      "title": "Teams Remove Request",
+      "description": "Stops the team slug's drive and forgets its project (docs/SPEC.md 4.1; ADR 0059). It deletes no file, and it needs confirmed true: without it the call is refused with -32005 and confirmation_needed. A slug no team has is refused with team_unknown. Answers teamsRemoveResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "teams.remove" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug"],
+          "properties": {
+            "slug": { "type": "string" },
+            "confirmed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "teamsRemoveResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["removed"],
+      "properties": { "removed": { "const": true } }
+    },
+    "computerSetRequest": {
+      "title": "Computer Set Request",
+      "description": "Sets the limits this computer's teams share (docs/SPEC.md 5.5; ADR 0059), writes them to state.json and applies them at once; a running session is never stopped. A field that is left out is kept; null clears it. agents_at_once outside 1 to 16 is refused with -32005 and agents_at_once_out_of_range; daily_cap_usd of 0 or less, or over 100000, with daily_cap_out_of_range. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "computer.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "agents_at_once": { "type": ["integer", "null"] },
+            "daily_cap_usd": { "type": ["number", "null"] }
           }
         }
       }

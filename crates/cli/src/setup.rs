@@ -23,7 +23,7 @@ use tokio::sync::watch;
 use crate::carry::carry;
 use crate::project::{Project, open_project, repository_root};
 use crate::start::try_lock;
-use crate::state::state_dir;
+use crate::state::{read_state, state_dir, write_state};
 use crate::{HUMAN, init};
 
 /// What `open` and `create` refuse a project another process drives with.
@@ -463,6 +463,23 @@ impl SetupHost for CliHost {
             self.choose(root.clone());
         }
         Ok(self.waiting.is_some())
+    }
+
+    fn set_limits(
+        &self,
+        agents_at_once: Option<Option<usize>>,
+        daily_cap_usd: Option<Option<f64>>,
+    ) -> Result<(), SetupError> {
+        let directory = state_dir(&self.env)
+            .ok_or_else(|| refused("there is no folder to keep the limits in"))?;
+        let mut state = read_state(&directory);
+        if let Some(limit) = agents_at_once {
+            state.agents_at_once = limit;
+        }
+        if let Some(cap) = daily_cap_usd {
+            state.daily_cap_usd = cap;
+        }
+        write_state(&directory, &state).map_err(failed)
     }
 
     fn home(&self) -> PathBuf {

@@ -208,6 +208,12 @@ impl Slots {
         locked(&self.inner).daily_cap_usd = cap;
     }
 
+    /// How many sessions run at once at most, when that is limited.
+    #[must_use]
+    pub fn limit(&self) -> Option<usize> {
+        locked(&self.inner).limit
+    }
+
     /// The computer's daily cap, when there is one.
     #[must_use]
     pub fn daily_cap(&self) -> Option<f64> {
@@ -260,6 +266,12 @@ impl Slots {
             .filter(|(day, _)| *day == today)
             .map(|(_, usd)| usd)
             .sum()
+    }
+
+    /// What every team together spent on the UTC day it is now.
+    #[must_use]
+    pub fn spent_today_now(&self) -> f64 {
+        self.spent_today(self.clock.now().date_naive())
     }
 
     /// Whether the teams together reached the computer's daily cap on `today`.

@@ -268,7 +268,7 @@ Tests:
   - 17 is `agents_at_once_out_of_range`, and 0 is `daily_cap_out_of_range`.
 - The rpc schema test holds the five methods to the schema.
 
-- [ ] `feat(runtime): list teams and set the computer's limits from the hub`
+- [x] `feat(runtime): list teams and set the computer's limits from the hub`
 
 ### Task 8: Spec and ADR
 

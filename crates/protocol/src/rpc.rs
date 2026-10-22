@@ -331,6 +331,64 @@ mod tests {
     }
 
     #[test]
+    fn reads_the_hub_methods() {
+        let q = |name: &str| request(1, "query", &json!({ "name": name, "params": {} }));
+        for frame in [
+            q("teams.list"),
+            q("computer.get"),
+            request(2, "teams.current", &json!({ "slug": "bakery" })),
+            request(
+                3,
+                "teams.remove",
+                &json!({ "slug": "bakery", "confirmed": true }),
+            ),
+            request(4, "teams.remove", &json!({ "slug": "bakery" })),
+            request(
+                5,
+                "computer.set",
+                &json!({ "agents_at_once": 2, "daily_cap_usd": 25.5 }),
+            ),
+            request(6, "computer.set", &json!({ "agents_at_once": null })),
+            request(7, "computer.set", &json!({})),
+        ] {
+            rpc_request_from_value(&frame).unwrap_or_else(|e| panic!("{frame} refused: {e:?}"));
+        }
+        for refused in [
+            request(1, "teams.current", &json!({})),
+            request(2, "teams.remove", &json!({ "confirmed": true })),
+            request(3, "computer.set", &json!({ "agents_at_once": "two" })),
+            request(4, "computer.set", &json!({ "turbo": true })),
+        ] {
+            assert!(rpc_request_from_value(&refused).is_err(), "{refused}");
+        }
+        let teams = json!({
+            "teams": [{
+                "slug": "bakery", "name": "Bakery", "root": "/h/bakery", "status": "running",
+                "working_agents": 1, "waiting": 0, "today_usd": 0.5, "month_usd": 4.0,
+            }, {
+                "slug": "shop", "name": "Shop", "root": "/h/shop", "status": "failed",
+                "failed": "the log is gone", "working_agents": 0, "waiting": 0,
+                "today_usd": 0, "month_usd": 0,
+            }],
+            "current": "bakery",
+            "account_asleep_until": null,
+        });
+        let computer =
+            json!({ "agents_at_once": null, "daily_cap_usd": 25, "spent_today_usd": 1.5 });
+        for (definition, value) in [
+            ("teamsListResult", teams),
+            ("computerGetResult", computer),
+            ("teamsRemoveResult", json!({ "removed": true })),
+        ] {
+            let errors: Vec<String> = super::validator_for(definition)
+                .iter_errors(&value)
+                .map(|e| e.to_string())
+                .collect();
+            assert!(errors.is_empty(), "{definition}: {errors:?}");
+        }
+    }
+
+    #[test]
     fn the_rpc_copy_of_command_reply_matches_command_schema() {
         // One schema never references another, so the RPC schema repeats the command reply. This
         // is what stops the copy from drifting from the original.

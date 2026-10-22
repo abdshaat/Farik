@@ -31,7 +31,7 @@ use super::setup::list_folders;
 use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
-use super::{board, documents, gates, repos, team, templates};
+use super::{board, documents, gates, hub, repos, team, templates};
 use catervas_core::claude_account::AccountStatus;
 
 use crate::account::AccountPort;
@@ -741,6 +741,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         && !templates::METHODS.contains(&method)
         && !documents::METHODS.contains(&method)
         && !repos::METHODS.contains(&method)
+        && !hub::METHODS.contains(&method)
     {
         return failure(
             &id,
@@ -787,6 +788,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
             documents::call(state, method, params).await
         }
         method if repos::METHODS.contains(&method) => repos::call(state, method, params).await,
+        method if hub::METHODS.contains(&method) => hub::call(state, method, params),
         "query" => {
             // Claude Code is asked on the async workers; the store and the files are read off
             // them.
@@ -861,6 +863,7 @@ fn query(
         "folders.list" | "computer.check" => {
             return wizard_query(state, host_of(state)?, name, params);
         }
+        "teams.list" | "computer.get" => return hub::query(state, name),
         _ => {}
     }
     let Some(deps) = state.deps() else {

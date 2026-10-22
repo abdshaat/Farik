@@ -2394,6 +2394,24 @@ fn skips_a_team_driven_elsewhere() {
 
     until("the free team is driven", || daemon_file(&free).exists());
     assert!(!daemon_file(&held).exists(), "the held team is not driven");
+    let listed = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "query",
+        json!({ "name": "teams.list", "params": {} }),
+    );
+    let held_root = held
+        .path
+        .canonicalize()
+        .expect("the root")
+        .display()
+        .to_string();
+    let row = listed["result"]["teams"]
+        .as_array()
+        .and_then(|teams| teams.iter().find(|team| team["root"] == json!(held_root)))
+        .unwrap_or_else(|| panic!("the held team is listed: {listed}"));
+    assert_eq!(row["status"], "elsewhere", "{listed}");
 
     drop(lock);
     until("the team is driven once its lock is free", || {
@@ -2403,6 +2421,127 @@ fn skips_a_team_driven_elsewhere() {
         let stopped = run(&repository.path, &["stop"]);
         assert_eq!(stopped.code, 0, "{}", stopped.err);
     }
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn sets_the_computer_s_limits() {
+    let (repository, serving, state) = serving_a_team_under_home("serve-limits");
+    let written = || -> Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
+        )
+        .expect("JSON")
+    };
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let query = |name: &str| hub("query", json!({ "name": name, "params": {} }))["result"].clone();
+
+    let set = hub(
+        "computer.set",
+        json!({ "agents_at_once": 2, "daily_cap_usd": 25 }),
+    );
+    assert_eq!(set["result"], json!({}), "{set}");
+    let kept = written();
+    assert_eq!(kept["agents_at_once"], 2, "{kept}");
+    assert_eq!(kept["daily_cap_usd"], 25.0, "{kept}");
+    let computer = query("computer.get");
+    assert_eq!(computer["agents_at_once"], 2, "{computer}");
+    assert_eq!(computer["daily_cap_usd"], 25.0, "{computer}");
+
+    // Out of range values are refused, and change nothing.
+    for (params, said) in [
+        (
+            json!({ "agents_at_once": 17 }),
+            "agents_at_once_out_of_range",
+        ),
+        (
+            json!({ "agents_at_once": 0 }),
+            "agents_at_once_out_of_range",
+        ),
+        (json!({ "daily_cap_usd": 0 }), "daily_cap_out_of_range"),
+        (
+            json!({ "daily_cap_usd": 100_001 }),
+            "daily_cap_out_of_range",
+        ),
+    ] {
+        let refused = hub("computer.set", params);
+        let message = refused["error"]["message"].as_str().unwrap_or_default();
+        assert!(message.contains(said), "{refused}");
+    }
+    assert_eq!(written()["agents_at_once"], 2);
+
+    // A field that is left out is kept, and null clears one.
+    hub("computer.set", json!({ "daily_cap_usd": null }));
+    let kept = written();
+    assert_eq!(kept["agents_at_once"], 2, "{kept}");
+    assert!(kept.get("daily_cap_usd").is_none(), "{kept}");
+    hub("computer.set", json!({ "agents_at_once": null }));
+    let computer = query("computer.get");
+    assert_eq!(computer["agents_at_once"], Value::Null, "{computer}");
+    assert_eq!(computer["daily_cap_usd"], Value::Null, "{computer}");
+
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn removes_a_team_and_keeps_its_files() {
+    let (first, second) = (a_team("serve-remove-a"), a_team("serve-remove-b"));
+    let (serving, state) = serving_teams("serve-remove", &[&first, &second]);
+    until("both teams are driven", || {
+        daemon_file(&first).exists() && daemon_file(&second).exists()
+    });
+    let slugs = slugs_of(&[&first, &second]);
+
+    let asked = |params: Value| {
+        call_at(
+            serving.port,
+            "/hub/rpc",
+            &serving.cookie,
+            "teams.remove",
+            params,
+        )
+    };
+    let refused = asked(json!({ "slug": slugs[0] }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("confirmation_needed")),
+        "{refused}"
+    );
+    assert!(run_lock_is_held(&first), "nothing was stopped");
+    let removed = asked(json!({ "slug": slugs[0], "confirmed": true }));
+    assert_eq!(removed["result"], json!({ "removed": true }), "{removed}");
+    the_run_lock_frees(&first);
+    let root = second.path.canonicalize().expect("the root");
+    until("the team is forgotten", || {
+        std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|written| written["projects"] == json!([root.display().to_string()]))
+    });
+    assert!(
+        first.path.join(".catervas/team.yaml").exists(),
+        "no file is deleted"
+    );
+    assert!(run_lock_is_held(&second));
+    let unknown = asked(json!({ "slug": slugs[0], "confirmed": true }));
+    assert!(
+        unknown["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("team_unknown")),
+        "{unknown}"
+    );
+
+    let stopped = run(&second.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
     let ran = joined(serving.thread, "the serve");
     assert_eq!(ran.code, 0, "{}", serving.err.text());
 }

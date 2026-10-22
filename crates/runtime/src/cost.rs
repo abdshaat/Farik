@@ -235,8 +235,7 @@ pub fn month_spent(projections: &Projections, now: DateTime<Utc>) -> Result<f64,
         .costs(CostScope::Day)?
         .iter()
         .filter(|row| row.key.starts_with(&month) && row.key <= now.date_naive().to_string())
-        .map(|row| row.usd)
-        .sum())
+        .fold(0.0, |total, row| total + row.usd))
 }
 
 /// How many of the task's sessions were the first `refine` session after the owner sent the task

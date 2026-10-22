@@ -71,6 +71,20 @@ pub trait SetupHost: Send + Sync {
     ///
     /// `Failed` when something broke.
     fn take_on_waiting(&self) -> Result<bool, SetupError>;
+    /// Keeps the limits the computer's teams share where the next `catervas serve` reads them
+    /// (ADR 0059): `Some(Some(n))` sets one, `Some(None)` clears it, `None` leaves it as it is.
+    ///
+    /// # Errors
+    ///
+    /// `Failed` when they cannot be written.
+    fn set_limits(
+        &self,
+        agents_at_once: Option<Option<usize>>,
+        daily_cap_usd: Option<Option<f64>>,
+    ) -> Result<(), SetupError> {
+        let _ = (agents_at_once, daily_cap_usd);
+        Ok(())
+    }
     /// The user's home folder, which the folder browser stays inside.
     fn home(&self) -> PathBuf;
     /// The environment the computer's programs are looked for and run in.

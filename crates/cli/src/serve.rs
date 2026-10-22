@@ -10,12 +10,13 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use catervas_runtime::daemon::hub::{Hub, TeamSlug};
+use catervas_runtime::daemon::hub::{Hub, IdleStatus, IdleTeam, TeamSlug};
 use catervas_runtime::daemon::{
     DaemonHandle, DaemonState, PortChoice, SetupHost, candidates, serve_held,
 };
 use catervas_runtime::orchestrator::{TickRules, TickScope};
 use catervas_runtime::slots::Slots;
+use catervas_store::files::ProjectFiles;
 use futures_util::StreamExt as _;
 use futures_util::future::LocalBoxFuture;
 use futures_util::stream::FuturesUnordered;
@@ -134,6 +135,14 @@ struct Serving<'s, 'io> {
     elsewhere: BTreeSet<PathBuf>,
     /// The projects waiting on the AI account.
     pending: Vec<PathBuf>,
+    /// The projects with no team any more.
+    missing: BTreeSet<PathBuf>,
+    /// The projects whose drive ended with an error, and the error.
+    failed: BTreeMap<PathBuf, String>,
+    /// The teams the owner removed, whose drives are stopping.
+    removing: BTreeSet<PathBuf>,
+    /// The name each team that is not driven has in an address.
+    idle_slugs: BTreeMap<TeamSlug, PathBuf>,
     events: mpsc::UnboundedSender<Event>,
     state_dir: Option<PathBuf>,
     no_open: bool,
@@ -213,6 +222,10 @@ async fn run<'io>(
     let shared = shared_web(io, bound, slots)?;
     let code = shared.codes.issue().map_err(|error| error.to_string())?;
     let (events, mut heard) = mpsc::unbounded_channel();
+    let hub = Arc::new(Hub::default());
+    hub.set_slots(Arc::clone(&shared.slots));
+    let (removals, mut removed) = mpsc::unbounded_channel();
+    hub.set_removals(removals);
     let mut serving = Serving {
         state_dir: state_dir(&io.env),
         io,
@@ -220,13 +233,17 @@ async fn run<'io>(
         err,
         held,
         shared,
-        hub: Arc::new(Hub::default()),
+        hub,
         teams: Arc::new(Mutex::new(found.roots.iter().cloned().collect())),
         drives: FuturesUnordered::new(),
         stops: BTreeMap::new(),
         slugs: BTreeMap::new(),
         elsewhere: BTreeSet::new(),
         pending: Vec::new(),
+        missing: BTreeSet::new(),
+        failed: BTreeMap::new(),
+        removing: BTreeSet::new(),
+        idle_slugs: BTreeMap::new(),
         events,
         no_open,
         linked: false,
@@ -249,7 +266,9 @@ async fn run<'io>(
             root.display()
         );
         serving.say(true, &message);
+        serving.missing.insert(root.clone());
     }
+    serving.publish_idle();
     let mut wizard = drivable.is_empty() || found.no_account;
     if found.no_account {
         serving.context.waiting = found.current.clone().or_else(|| drivable.first().cloned());
@@ -287,6 +306,9 @@ async fn run<'io>(
             }
             Some(event) = heard.recv() => {
                 serving.heard(event, &code);
+            }
+            Some(slug) = removed.recv() => {
+                serving.remove(&slug);
             }
             Ok(()) = hub_run.choice.changed() => {
                 let chosen = hub_run.choice.borrow_and_update().clone();
@@ -440,6 +462,8 @@ impl<'s, 'io> Serving<'s, 'io> {
             }
             serving.say(true, &format!("catervas: {}: {error}", root.display()));
             serving.worst = 1;
+            serving.failed.insert(root.clone(), error);
+            serving.publish_idle();
             None
         };
         if !root.join(".catervas/team.yaml").exists() {
@@ -453,12 +477,16 @@ impl<'s, 'io> Serving<'s, 'io> {
                 if self.elsewhere.insert(root.clone()) {
                     let message = driven_elsewhere(&root);
                     self.say(true, &format!("catervas: {}: {message}", root.display()));
+                    self.publish_idle();
                 }
                 return None;
             }
             Err(error) => return failed(self, error),
         };
-        self.elsewhere.remove(&root);
+        let was_idle = self.elsewhere.remove(&root) | self.failed.remove(&root).is_some();
+        if was_idle {
+            self.publish_idle();
+        }
         let (stop, interrupts) = mpsc::unbounded_channel();
         let lines = |stream: &'s Stream<'io>| -> Box<dyn Write + 's> {
             Box::new(Locked {
@@ -552,6 +580,92 @@ impl<'s, 'io> Serving<'s, 'io> {
             .remove(root);
     }
 
+    /// Takes `root` out of the teams, and out of `state.json`.
+    fn forget_everywhere(&mut self, root: &Path) {
+        if let Some(directory) = &self.state_dir
+            && let Err(error) = forget(directory, root)
+        {
+            self.say(true, &format!("warning: {error}"));
+        }
+        self.forget_team(root);
+        self.elsewhere.remove(root);
+        self.missing.remove(root);
+        self.failed.remove(root);
+        self.publish_idle();
+    }
+
+    /// Stops the team `slug` and forgets its project: a driven team's drive is stopped as
+    /// `catervas stop` stops it, and the project is forgotten when it has ended.
+    fn remove(&mut self, slug: &TeamSlug) {
+        let driven = self
+            .slugs
+            .iter()
+            .find(|(_, name)| *name == slug)
+            .map(|(root, _)| root.clone());
+        if let Some(root) = driven {
+            self.removing.insert(root);
+            if let Some(state) = self.hub.team(slug.as_str()) {
+                state.request_run_stop();
+            }
+            return;
+        }
+        if let Some(root) = self.idle_slugs.get(slug).cloned() {
+            self.forget_everywhere(&root);
+        }
+    }
+
+    /// Tells the hub which teams are not driven, and why.
+    fn publish_idle(&mut self) {
+        let mut taken: BTreeSet<String> = self
+            .slugs
+            .values()
+            .map(|slug| slug.as_str().to_string())
+            .collect();
+        let mut idle = Vec::new();
+        let mut slugs = BTreeMap::new();
+        let rows = self
+            .elsewhere
+            .iter()
+            .map(|root| (root, IdleStatus::Elsewhere))
+            .chain(self.missing.iter().map(|root| (root, IdleStatus::Missing)))
+            .chain(
+                self.failed
+                    .iter()
+                    .map(|(root, why)| (root, IdleStatus::Failed(why.clone()))),
+            );
+        for (root, status) in rows {
+            let folder = root.file_name().map_or_else(
+                || "team".to_string(),
+                |name| name.to_string_lossy().to_string(),
+            );
+            let name = ProjectFiles::open(root.clone())
+                .read_team()
+                .map_or_else(|_| folder.clone(), |team| team.name.to_string());
+            let base = folder.to_lowercase();
+            let mut count = 1;
+            let slug = loop {
+                let candidate = if count == 1 {
+                    base.clone()
+                } else {
+                    format!("{base}-{count}")
+                };
+                if taken.insert(candidate.clone()) {
+                    break TeamSlug::new(&candidate);
+                }
+                count += 1;
+            };
+            slugs.insert(slug.clone(), root.clone());
+            idle.push(IdleTeam {
+                slug,
+                name,
+                root: root.clone(),
+                status,
+            });
+        }
+        self.idle_slugs = slugs;
+        self.hub.set_idle(idle);
+    }
+
     /// What follows a drive's end. Answers why the wizard is to be served again, when it is.
     fn ended(&mut self, finished: Finished) -> Option<Back> {
         let Finished {
@@ -579,7 +693,17 @@ impl<'s, 'io> Serving<'s, 'io> {
                 Some(Back::Left)
             }
             Ok(Driven::Ended(code)) => {
-                self.worst = self.worst.max(i32::from(code != 0 && code != INTERRUPTED));
+                if self.removing.remove(&root) {
+                    // The owner removed the team: its project is no longer one of the teams, and
+                    // with the last one gone the wizard is served.
+                    self.forget_everywhere(&root);
+                    if self.drives.is_empty() {
+                        self.context = WizardContext::default();
+                        return Some(Back::Left);
+                    }
+                } else {
+                    self.worst = self.worst.max(i32::from(code != 0 && code != INTERRUPTED));
+                }
                 None
             }
             // A take-on that failed goes back to the wizard, which says why.
