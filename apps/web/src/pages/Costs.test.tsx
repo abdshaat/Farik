@@ -8,7 +8,9 @@ import {
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
+import { MINE } from "../test/analytics.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
+import { answerCalls } from "../test/finding.ts";
 import { answerQuery, answerStatus, renderApp } from "../test/render-app.tsx";
 import { onlyInTips } from "../test/tips.ts";
 import own from "./Costs.module.css";
@@ -188,6 +190,37 @@ describe("costs page", () => {
 		expect(screen.getByText("9 of 9")).toBeTruthy();
 		expect(document.body.textContent).not.toContain(en.metricFirstTryNote);
 		expect(document.body.textContent).not.toMatch(/sprint/i);
+	});
+
+	it("shows_a_team_s_activity", async () => {
+		const { container, s } = await costs();
+		// Spending is today's page, and the first tab.
+		const spending = screen.getByRole("tab", { name: en.analyticsSpending });
+		expect(spending.getAttribute("aria-selected")).toBe("true");
+		expect(screen.getByRole("table", { name: en.costsByAgent })).toBeTruthy();
+		expect(s.calls("analytics.mine")).toHaveLength(0);
+
+		// Activity asks for the week, and shows the usage split and the team's rhythm.
+		answerCalls(s, { "analytics.mine": MINE });
+		fireEvent.click(screen.getByRole("tab", { name: en.analyticsActivity }));
+		await screen.findByText("1.6 days");
+		expect(s.calls("analytics.mine")[0]?.params).toEqual({ period: "week" });
+		const tile = (label: string) =>
+			screen.getByText(label).closest("div")?.textContent;
+		expect(tile("a task, start to done")).toBe(
+			"1.6 days a task, start to done",
+		);
+		expect(tile("tasks done")).toBe("9 tasks done");
+		expect(tile("commits: you · team")).toBe("14 · 12 commits: you · team");
+		expect(tile("waiting on you")).toBe("1 waiting on you");
+		expect(screen.getByText("$41.20 + $18.60")).toBeTruthy();
+		expect(screen.getByText(en.analyticsApiNote)).toBeTruthy();
+		expect(screen.queryByRole("table", { name: en.costsByAgent })).toBeNull();
+		await expectNoAxeViolations(container);
+
+		// Back to Spending is today's page again.
+		fireEvent.click(screen.getByRole("tab", { name: en.analyticsSpending }));
+		expect(screen.getByRole("table", { name: en.costsByAgent })).toBeTruthy();
 	});
 
 	it("sets_a_daily_limit", async () => {

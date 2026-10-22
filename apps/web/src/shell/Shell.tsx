@@ -51,6 +51,7 @@ export function useWide(): boolean {
 /** The places off a team: every team, and this computer's own settings. */
 const COMPUTER_PLACES = [
 	["/teams", "allTeams"],
+	["/analytics", "analytics"],
 	["/computer", "computerPlace"],
 ] as const;
 

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
 import { AllTeams } from "../pages/AllTeams.tsx";
+import { Analytics } from "../pages/Analytics.tsx";
 import { Board } from "../pages/Board.tsx";
 import { Chats } from "../pages/Chats.tsx";
 import { ChatsAlias } from "../pages/ChatsAlias.tsx";
@@ -110,6 +111,7 @@ export function App() {
 				<Route path="/teams" element={<AllTeams />} />
 				<Route path="/computer" element={<ThisComputer />} />
 				<Route path="/needs-you" element={<NeedsYou />} />
+				<Route path="/analytics" element={<Analytics />} />
 			</Route>
 			{/* Each team's pages are under its own address (ADR 0059). */}
 			<Route path="/t/:team" element={<TeamScope />}>

@@ -129,7 +129,7 @@ Tests:
   - The workflow numbers and blockers show with the mockup's words.
 - `shows_a_team_s_activity` (`pages/Costs.test.tsx`): asserts that the Activity tab shows "1.6 days a task, start to done" and "9 tasks done", and that Spending is today's page.
 
-- [ ] `feat(web): analytics on all teams and in each team`
+- [x] `feat(web): analytics on all teams and in each team`
 
 ### Task 5: Spec
 

@@ -1,5 +1,6 @@
 export { Avatar } from "./Avatar.tsx";
 export { AVATAR_URLS, type AvatarKey } from "./avatars.ts";
+export { BarChart, type BarRow, type BarSeries } from "./BarChart.tsx";
 export { Button } from "./Button.tsx";
 export { ChatList } from "./ChatList.tsx";
 export { Choice } from "./Choice.tsx";

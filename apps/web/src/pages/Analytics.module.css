@@ -1,0 +1,140 @@
+/* Analytics on All teams, and the Activity tab of a team's Costs. */
+.page {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--catervas-space-5);
+	max-width: 1000px;
+}
+
+.head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--catervas-space-3);
+}
+
+.title {
+	margin: 0;
+	font:
+		var(--catervas-type-title-weight) var(--catervas-type-title-size) /
+		var(--catervas-type-title-line-height) var(--catervas-type-title-family);
+}
+
+.panel {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--catervas-space-3);
+}
+
+.panel h2 {
+	margin: 0;
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+
+.titled {
+	display: flex;
+	align-items: center;
+	gap: var(--catervas-space-1);
+}
+
+.muted {
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+	overflow-wrap: anywhere;
+}
+
+.stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(min(100%, 10rem), 1fr));
+	gap: var(--catervas-space-3);
+}
+
+.stat {
+	display: flex;
+	flex-direction: column;
+	gap: var(--catervas-space-1);
+	padding: var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+}
+
+.stat b {
+	font-family: var(--catervas-type-code-family);
+	font-size: 1.375rem;
+	line-height: 1.25;
+}
+
+.stat span {
+	color: var(--catervas-color-ink-muted);
+}
+
+.pair {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+	gap: var(--catervas-space-4);
+}
+
+.cell {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: var(--catervas-space-2);
+	align-content: start;
+}
+
+.used {
+	margin: 0;
+	padding-inline-start: 1.25em;
+}
+
+.blockers {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--catervas-space-2);
+}
+
+.blockers li {
+	display: grid;
+	gap: var(--catervas-space-1);
+	padding: var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+	overflow-wrap: anywhere;
+}
+
+.blockers span {
+	color: var(--catervas-color-ink-muted);
+}
+
+/* The two views of a team's Costs. */
+.tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+}
+
+.tab {
+	padding: var(--catervas-space-1) var(--catervas-space-3);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: 999px;
+	background: transparent;
+	color: var(--catervas-color-ink);
+	font: inherit;
+	min-height: 44px;
+	cursor: pointer;
+}
+
+.tab[aria-selected="true"] {
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	border-color: var(--catervas-color-ink);
+}
+
+.tab:focus-visible {
+	outline: 2px solid var(--catervas-color-focus);
+	outline-offset: 2px;
+}

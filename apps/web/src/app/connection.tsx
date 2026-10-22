@@ -21,7 +21,7 @@ type Status =
 	| "open"
 	| "lost"
 	| "reopening";
-type Connection = {
+export type Connection = {
 	status: Status;
 	client: DaemonClient | null;
 	/** The link's code was refused: the link was used before. */

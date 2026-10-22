@@ -118,7 +118,9 @@ export type MethodName =
 	| "reminders.snooze"
 	| "reminders.dismiss"
 	| "reminders.give"
-	| "reminders.mine";
+	| "reminders.mine"
+	| "analytics.get"
+	| "analytics.mine";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */
