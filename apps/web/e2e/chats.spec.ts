@@ -85,7 +85,7 @@ test("the user chats with an agent, and sends her proposal as a request, through
 		// 4. The proposal, sent by the user's hand.
 		await reply.getByRole("button", { name: "Send as a request" }).click();
 		const sent = reply.getByRole("link", { name: "Sent as CTV-1" });
-		await expect(sent).toHaveAttribute("href", "/requests/CTV-1");
+		await expect(sent).toHaveAttribute("href", /\/t\/[^/]+\/requests\/CTV-1$/);
 		const created = events(serve.project).find(
 			(e) => e.kind === "task.created",
 		);
@@ -101,7 +101,7 @@ test("the user chats with an agent, and sends her proposal as a request, through
 		});
 		await expect(page.getByRole("link", { name: "Answer" })).toHaveAttribute(
 			"href",
-			"/tasks/CTV-1/questions",
+			/\/t\/[^/]+\/tasks\/CTV-1\/questions$/,
 		);
 
 		// 6. Ada, paused, still answers her chat. (The only Product Manager and Developer cannot be paused.)

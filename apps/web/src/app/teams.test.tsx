@@ -8,6 +8,7 @@ import {
 	teamList,
 	where,
 } from "../test/render-app.tsx";
+import { ON_CURRENT } from "./teams.ts";
 
 const noProject = {
 	project_root: null,
@@ -65,5 +66,21 @@ describe("several teams in the address", () => {
 		expect(await goes("/", ["bakery", "shop"])).toBe("/teams");
 		expect(await goes("/", ["bakery"])).toBe("/t/bakery/");
 		expect(await goes("/", [])).toBe("/setup/computer");
+	});
+
+	it("waits_for_the_team_that_was_just_taken_on", async () => {
+		const { hub, go } = await renderApp("/setup/project");
+		const h = hub as FakeSocket;
+		await go("/", ON_CURRENT);
+		await answerQuery(h, "teams.list", teamList());
+		await answerStatus(h, false, 1, noProject);
+		// No team yet: its drive starts after the hub is back, so the page asks again.
+		expect(where()).toBe("/");
+		const lists = () =>
+			h.calls("query").filter((f) => f.params.name === "teams.list").length;
+		await waitFor(() => expect(lists()).toBeGreaterThan(1), { timeout: 3000 });
+		expect(where()).toBe("/");
+		await answerQuery(h, "teams.list", teamList("bakery"));
+		await waitFor(() => expect(where()).toBe("/t/bakery/"), { timeout: 3000 });
 	});
 });

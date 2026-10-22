@@ -10,6 +10,8 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
@@ -194,10 +196,17 @@ export async function startServe(o: {
 	 * changelog task, which would take an id the journey's transcripts name (ADR 0062).
 	 */
 	deliveryClosed?: boolean;
+	/**
+	 * How many teams the computer has: with 2, a second project with its team is written beside the
+	 * first, and both are listed in `state.json`, so that serve drives both (ADR 0059).
+	 */
+	teams?: 1 | 2;
 }): Promise<{
 	url: string;
 	port: number;
 	project: string;
+	/** Every project of the computer's teams, the first being the one serve ran in. */
+	projects: string[];
 	stop(): Promise<void>;
 }> {
 	const project = mkdtempSync(join(tmpdir(), "catervas-e2e-project-"));
@@ -240,6 +249,25 @@ export async function startServe(o: {
 		}
 	}
 
+	const projects = [project];
+	// The teams an earlier test remembered are not this test's: each serve starts with its own.
+	if (o.project !== false)
+		rmSync(join(stateFolder, "state.json"), { force: true });
+	if (o.teams === 2 && o.project !== false) {
+		const second = mkdtempSync(join(tmpdir(), "catervas-e2e-project-"));
+		made.push(second);
+		setUp(second, false, false);
+		projects.push(second);
+		mkdirSync(stateFolder, { recursive: true, mode: 0o700 });
+		writeFileSync(
+			join(stateFolder, "state.json"),
+			JSON.stringify({
+				last_project: realpathSync(project),
+				projects: projects.map((one) => realpathSync(one)),
+			}),
+		);
+	}
+
 	const port = await freePort();
 	args.push("--port", String(port));
 	if (o.transcripts.length > 0)
@@ -257,6 +285,7 @@ export async function startServe(o: {
 		url,
 		port,
 		project,
+		projects,
 		async stop() {
 			// The first Ctrl-C waits for the session running now; once the named sessions are
 			// played it never ends, and the second aborts it.

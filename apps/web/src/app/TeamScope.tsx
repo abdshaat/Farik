@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router";
 import { NotFound } from "../pages/NotFound.tsx";
 import { Opening } from "../pages/Opening.tsx";
@@ -66,24 +66,40 @@ export function CurrentScope() {
 	);
 }
 
+/** How long, and how often, the page asks for the team it has just taken on. */
+const TAKE_ON_WAIT_MS = 30_000;
+const TAKE_ON_EVERY_MS = 500;
+
 /** An address with no `/t/`, an old one or a bookmark: the same page of the team it belongs to. */
 export function TeamRedirect() {
 	const location = useLocation();
-	const { data: list } = useHubQuery<TeamList>("teams.list", {});
+	const { data: list, again } = useHubQuery<TeamList>("teams.list", {});
 	const { data: status } = useHubQuery<ServeStatus>("serve.status", {});
-	if (!isTeamAddress(location.pathname)) return <NotFound />;
-	if (!list || !status) return <Opening />;
-	const address = `${location.pathname}${location.search}${location.hash}`;
 	const state = location.state as { team?: string } | null;
+	const onCurrent = state?.team === ON_CURRENT.team;
+	const [gaveUp, setGaveUp] = useState(false);
+	// A project just chosen in setup is a team only once its drive has started, after the hub is
+	// back: until it is listed, ask again rather than say there is none.
+	const waiting =
+		onCurrent &&
+		!gaveUp &&
+		list?.teams.length === 0 &&
+		status !== undefined &&
+		!status.takeOnError &&
+		!status.leaving;
+	useEffect(() => {
+		if (!waiting) return;
+		const timer = setInterval(again, TAKE_ON_EVERY_MS);
+		const stop = setTimeout(() => setGaveUp(true), TAKE_ON_WAIT_MS);
+		return () => {
+			clearInterval(timer);
+			clearTimeout(stop);
+		};
+	}, [waiting, again]);
+	if (!isTeamAddress(location.pathname)) return <NotFound />;
+	if (!list || !status || waiting) return <Opening />;
+	const address = `${location.pathname}${location.search}${location.hash}`;
 	return (
-		<Navigate
-			to={redirectTarget(
-				address,
-				list,
-				status,
-				state?.team === ON_CURRENT.team,
-			)}
-			replace
-		/>
+		<Navigate to={redirectTarget(address, list, status, onCurrent)} replace />
 	);
 }

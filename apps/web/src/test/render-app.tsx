@@ -42,10 +42,10 @@ export async function renderApp(
 	const fetch = vi.fn(fakeFetch(statuses));
 	vi.stubGlobal("fetch", fetch);
 	const { factory, sockets } = socketsMade();
-	let go: (to: string) => void = () => {};
+	let go: (to: string, state?: unknown) => void = () => {};
 	function Capture() {
 		const navigate = useNavigate();
-		go = (to) => void navigate(to);
+		go = (to, state) => void navigate(to, { state });
 		const { pathname } = useLocation();
 		useEffect(() => {
 			document.body.dataset.where = pathname;
@@ -101,7 +101,7 @@ export async function renderApp(
 		hub,
 		sockets,
 		/** Goes to `to` inside the app. */
-		go: (to: string) => act(() => go(to)),
+		go: (to: string, state?: unknown) => act(() => go(to, state)),
 		/** Opens the sockets made since. */
 		open,
 	};

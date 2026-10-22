@@ -142,7 +142,7 @@ The test (`e2e/many-teams.spec.ts`), "the owner moves between two teams and sees
 2. It opens the first team, sees its Today, switches to the second from the rail, and sees the second's Today.
 3. It opens `/board` and lands on the second team's board.
 
-- [ ] `test(web): move between two teams`
+- [x] `test(web): move between two teams`
 
 ### Task 5: Spec
 
