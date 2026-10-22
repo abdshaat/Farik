@@ -75,6 +75,8 @@ pub mod mailbox;
 /// The owner's decisions on marketing plans, the ends that dates bring, and how a plan is worded
 /// on the wire.
 pub mod marketing;
+/// The notification sent through the operating system when a digest is due and no tab is open.
+pub mod notify;
 /// An OAuth authorization server and a protected MCP server for the sign-in tests.
 #[cfg(all(test, unix))]
 #[path = "../tests/support/oauth_fixture.rs"]

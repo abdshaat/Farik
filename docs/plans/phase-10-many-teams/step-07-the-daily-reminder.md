@@ -173,7 +173,7 @@ Tests (`notify.rs`, through a seam that records the program and its arguments):
   - A title holding `'; rm -rf /` reaches the program as one argument, unchanged.
   - A missing program answers `NotSent`.
 
-- [ ] `feat(runtime): send a notification through the operating system`
+- [x] `feat(runtime): send a notification through the operating system`
 
 ### Task 5: The digest, its actions, and the one notification
 
