@@ -225,3 +225,8 @@ export function useHub(): Connection {
 export function useConnection(): Connection {
 	return useContext(Context);
 }
+
+/** Opens a socket the way this page does; a team's page asks it for a socket of its own. */
+export function useSocketFactory(): Factory {
+	return useContext(FactoryContext);
+}

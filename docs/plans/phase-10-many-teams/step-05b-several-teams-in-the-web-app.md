@@ -131,7 +131,7 @@ Tests:
   - "No limit" sends `null`.
   - The refusal `agents_at_once_out_of_range` shows its plain words.
 
-- [ ] `feat(web): all teams and this computer`
+- [x] `feat(web): all teams and this computer`
 
 ### Task 4: The journey with two teams
 

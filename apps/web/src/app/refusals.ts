@@ -26,6 +26,10 @@ const WORDS: Record<string, keyof typeof en> = {
 	template_unreadable: "templateUnreadable",
 	no_state_folder: "templateNoFolder",
 	template_changed: "templateChanged",
+	// The computer's limits and its teams (SPEC 4.1; ADR 0059).
+	agents_at_once_out_of_range: "refuseAgentsAtOnce",
+	daily_cap_out_of_range: "refuseComputerCap",
+	team_unknown: "refuseTeamUnknown",
 	// The human's commands (SPEC 4.2), refused by the orchestrator with `code: detail`.
 	already_paused: "refuseAlreadyPaused",
 	not_paused: "refuseNotPaused",

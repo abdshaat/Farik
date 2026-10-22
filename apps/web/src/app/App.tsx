@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
+import { AllTeams } from "../pages/AllTeams.tsx";
 import { Board } from "../pages/Board.tsx";
 import { Chats } from "../pages/Chats.tsx";
 import { ChatsAlias } from "../pages/ChatsAlias.tsx";
@@ -42,6 +43,7 @@ import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
 import { TeamSetup } from "../pages/setup/TeamSetup.tsx";
 import { TaskDetail } from "../pages/TaskDetail.tsx";
 import { Team } from "../pages/Team.tsx";
+import { ThisComputer } from "../pages/ThisComputer.tsx";
 import { Today } from "../pages/Today.tsx";
 import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
@@ -83,6 +85,11 @@ export function App() {
 						element={<Navigate to="/setup/finish" replace />}
 					/>
 				</Route>
+			</Route>
+			{/* All teams and This computer have the rail of the computer, not of a team. */}
+			<Route element={<Shell />}>
+				<Route path="/teams" element={<AllTeams />} />
+				<Route path="/computer" element={<ThisComputer />} />
 			</Route>
 			{/* Each team's pages are under its own address (ADR 0059). */}
 			<Route path="/t/:team" element={<TeamScope />}>
