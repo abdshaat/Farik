@@ -1762,6 +1762,7 @@ fn resume(
             EventKind::TaskTransitioned,
             EventKind::NoteWritten,
             EventKind::PullRequestConflicted,
+            EventKind::TaskConflicted,
         ],
         ..EventQuery::default()
     })?;
@@ -1788,6 +1789,9 @@ fn resume(
                 conflicts = None;
             }
             EventBody::PullRequestConflicted(body) => {
+                conflicts = Some((body.into.clone(), body.paths.clone()));
+            }
+            EventBody::TaskConflicted(body) => {
                 conflicts = Some((body.into.clone(), body.paths.clone()));
             }
             EventBody::NoteWritten(body) => {

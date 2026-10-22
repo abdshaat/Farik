@@ -75,7 +75,7 @@ Files: `integrate.rs`, `rules.rs`, the `task.conflicted` event (schema, `EventBo
 - `a_local_team_lands_finished_work_on_this_computer` (runtime) — with an `origin` remote and the fake forge, under `local`: an accepted task's tick records `task.integrated { integrated_by: governor }`, its branch is in `into` at the root, `origin`'s refs are unchanged and the forge saw no call; a folder change lands the same way; with the root checked out on another branch the task is escalated with the decision's words and `into` is unchanged; a task with a pull request opened before the switch still goes through the forge.
 - `a_local_conflict_goes_back_to_the_builder` (runtime) — two tasks changing the same line, the first landed: the second records `task.conflicted { into, paths }`, moves to `assigned`, and its worktree has the merge in progress; nothing is pushed.
 
-- [ ] `feat(runtime): a local team's finished work lands on this computer`
+- [x] `feat(runtime): a local team's finished work lands on this computer`
 
 ### Task 3: nothing else goes online
 

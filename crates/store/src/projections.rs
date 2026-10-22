@@ -719,6 +719,7 @@ fn apply_to(transaction: &Transaction<'_>, event: &CatervasEvent) -> Result<(), 
         | EventBody::WorktreeTidied(_)
         | EventBody::PullRequestConflicted(_)
         | EventBody::PullRequestRefreshed(_)
+        | EventBody::TaskConflicted(_)
         | EventBody::GoalSet(_)
         | EventBody::GoalPaused(_)
         | EventBody::GoalResumed(_)

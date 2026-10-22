@@ -19,7 +19,8 @@ use catervas_core::team::{Team, task_private_folder};
 use catervas_protocol::event::{
     CatervasEvent, EscalationRaisedBody, EscalationRaisedBodyReason, EventBody, EventKind,
     NoteWrittenBodyKind, PullRequestConflictedBody, PullRequestOpenedBody,
-    PullRequestRefreshedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
+    PullRequestRefreshedBody, TaskConflictedBody, TaskIntegratedBody,
+    TaskIntegratedBodyIntegratedBy,
 };
 use catervas_protocol::generated::event::{CriteriaUpdatedBody, ProjectScannedBody};
 use catervas_store::autopilot::merges_on_its_own;
@@ -636,6 +637,11 @@ fn through_the_forge(
 ) -> Result<Option<IntegrationOutcome>, OrchestratorError> {
     let branch = subject.branch(tools)?;
     let Some(url) = opened_url(tools, subject)? else {
+        // A team that keeps everything on this computer lands the work itself (ADR 0085); work
+        // that opened a pull request before it chose so keeps following it.
+        if team.keeps_local() {
+            return land_here(tools, team, subject, target, &branch).map(Some);
+        }
         return open(tools, subject, target, &branch, asker).map(Some);
     };
     let state = match target.forge.pull_request_state(&url) {
@@ -891,56 +897,170 @@ fn stopped_merging(
             )?;
             Ok(IntegrationOutcome::AwaitingForge)
         }
-        MergeOutcome::Conflicts(paths) => {
-            append(
+        MergeOutcome::Conflicts(paths) => sent_back(
+            tools,
+            team,
+            task_id,
+            target,
+            &worktree,
+            EventBody::PullRequestConflicted(PullRequestConflictedBody {
+                url: url.to_string(),
+                into: into.to_string(),
+                paths: paths.iter().take(200).cloned().collect(),
+            }),
+            paths,
+            &format!("the pull request {url}"),
+        ),
+    }
+}
+
+/// Records a conflict (`conflicted`, a `pull_request.conflicted` or a `task.conflicted`) and
+/// sends the accepted task back to its assignee through the governor, its worktree holding the
+/// merge in progress; `what` is what no longer merges, for the escalation when the move is
+/// refused.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "what the two callers each know, passed once"
+)]
+fn sent_back(
+    tools: &ToolDeps,
+    team: &Team,
+    task_id: &TaskId,
+    target: &IntegrationTarget,
+    worktree: &Path,
+    conflicted: EventBody,
+    paths: Vec<String>,
+    what: &str,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let into = target.into.as_str();
+    let subject = Subject::Task(task_id.clone());
+    append(tools, task_id, None, None, conflicted)?;
+    let outcome = tools.transitions.request(
+        &TransitionRequest {
+            task_id: task_id.clone(),
+            to: TaskStatus::Assigned,
+            actor: TransitionActor::Governor,
+            agent_id: None,
+        },
+        &TransitionAsk {
+            pull_request_conflicts: Some(paths.clone()),
+            ..TransitionAsk::default()
+        },
+        team,
+    )?;
+    match outcome {
+        TransitionOutcome::Moved(_) => {
+            // The task's documents are a copy of the owner's folder (ADR 0074); the
+            // worktree made again for the merge gets one for the agent to work in.
+            if catervas_store::document_source::documents_on_disk(team, &tools.log)? {
+                catervas_store::local_documents::copy_in(
+                    &target.git,
+                    tools.files.root(),
+                    worktree,
+                    None,
+                )?;
+            }
+            Ok(IntegrationOutcome::SentBack { paths })
+        }
+        TransitionOutcome::Refused(refusal) => {
+            let _ = target.git.remove_worktree(worktree);
+            let detail = format!(
+                "{what} no longer merges into {into}, and the task could not be sent back: {}",
+                refusal_details(&refusal).join("; ")
+            );
+            escalate(tools, &subject, &target.into, detail)
+        }
+    }
+}
+
+/// Adds a subject's branch to the integration branch on this computer, for a team that keeps
+/// everything here (ADR 0085): a merge commit made in the project folder's own checkout, which
+/// must be on the integration branch, else the subject is escalated and the owner's checkout is
+/// left where it is. A task that conflicts goes back to its builder; a folder change that does
+/// is escalated.
+fn land_here(
+    tools: &ToolDeps,
+    team: &Team,
+    subject: &Subject,
+    target: &IntegrationTarget,
+    branch: &str,
+) -> Result<IntegrationOutcome, OrchestratorError> {
+    let into = target.into.as_str();
+    match target.git.current_branch() {
+        Ok(on) if on == into => {}
+        Ok(on) => {
+            let detail = format!(
+                "Your project folder is on {on}, not {into}. Switch it back to {into} and \
+                 Catervas adds the finished work."
+            );
+            return escalate(tools, subject, &target.into, detail);
+        }
+        Err(error) => return escalate(tools, subject, &target.into, git_words(&error)),
+    }
+    // Merged by hand already: the branch is in the integration branch, and there is nothing to add.
+    if matches!(target.git.commit_count(into, branch), Ok(0)) {
+        return merged_by_hand(tools, subject, target, branch, Asker::Tick);
+    }
+    let message = format!("Merge {branch}: {}", subject.title(tools)?);
+    match target.git.merge(into, branch, &message) {
+        Ok(MergeOutcome::Merged { sha }) => {
+            record_integrated(
                 tools,
-                task_id,
-                None,
-                None,
-                EventBody::PullRequestConflicted(PullRequestConflictedBody {
-                    url: url.to_string(),
-                    into: into.to_string(),
-                    paths: paths.iter().take(200).cloned().collect(),
-                }),
+                subject,
+                &sha,
+                into,
+                TaskIntegratedBodyIntegratedBy::Governor,
             )?;
-            let outcome = tools.transitions.request(
-                &TransitionRequest {
-                    task_id: task_id.clone(),
-                    to: TaskStatus::Assigned,
-                    actor: TransitionActor::Governor,
-                    agent_id: None,
-                },
-                &TransitionAsk {
-                    pull_request_conflicts: Some(paths.clone()),
-                    ..TransitionAsk::default()
-                },
-                team,
-            )?;
-            match outcome {
-                TransitionOutcome::Moved(_) => {
-                    // The task's documents are a copy of the owner's folder (ADR 0074); the
-                    // worktree made again for the merge gets one for the agent to work in.
-                    if catervas_store::document_source::documents_on_disk(team, &tools.log)? {
-                        catervas_store::local_documents::copy_in(
-                            &target.git,
-                            tools.files.root(),
-                            &worktree,
-                            None,
-                        )?;
-                    }
-                    Ok(IntegrationOutcome::SentBack { paths })
+            Ok(IntegrationOutcome::Merged {
+                sha,
+                scan: ScanRefresh::Unchanged,
+            })
+        }
+        Ok(MergeOutcome::Conflicts(paths)) => {
+            let Subject::Task(task_id) = subject else {
+                let detail = format!(
+                    "{branch} conflicts with {into} in {}: resolve it, then run catervas integrate",
+                    paths.join(", ")
+                );
+                return escalate(tools, subject, &target.into, detail);
+            };
+            let worktree = tools
+                .files
+                .root()
+                .join(".catervas/local/worktrees")
+                .join(task_id.as_str());
+            if !worktree.is_dir() {
+                target.git.add_worktree(&worktree, branch)?;
+            }
+            let message = format!("chore: bring up to date with {into}");
+            match target
+                .git
+                .merge_keeping_conflicts(&worktree, into, &message)?
+            {
+                // Nothing conflicts after all: the branch is up to date, and the next tick lands it.
+                MergeOutcome::Merged { .. } => {
+                    target.git.remove_worktree(&worktree)?;
+                    Ok(IntegrationOutcome::AwaitingHand {
+                        branch: branch.to_string(),
+                        into: into.to_string(),
+                    })
                 }
-                TransitionOutcome::Refused(refusal) => {
-                    let _ = target.git.remove_worktree(&worktree);
-                    let detail = format!(
-                        "the pull request {url} no longer merges into {into}, and the task could \
-                         not be sent back: {}",
-                        refusal_details(&refusal).join("; ")
-                    );
-                    escalate(tools, subject, &target.into, detail)
-                }
+                MergeOutcome::Conflicts(paths) => sent_back(
+                    tools,
+                    team,
+                    task_id,
+                    target,
+                    &worktree,
+                    EventBody::TaskConflicted(TaskConflictedBody {
+                        into: into.to_string(),
+                        paths: paths.iter().take(200).cloned().collect(),
+                    }),
+                    paths,
+                    "the task",
+                ),
             }
         }
+        Err(error) => escalate(tools, subject, &target.into, git_words(&error)),
     }
 }
 
@@ -2772,6 +2892,179 @@ mod tests {
             harness.row("CTV-1").status,
             catervas_core::contract::TaskStatus::InProgress
         );
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    /// `origin`'s refs, as a remote that nothing was pushed to would still show them.
+    fn refs_of(origin: &std::path::Path) -> String {
+        git_output_in(
+            origin,
+            &["for-each-ref", "--format=%(refname) %(objectname)"],
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_local_team_lands_finished_work_on_this_computer() {
+        // A task: its branch lands in `main` at the root, `origin` and the forge untouched.
+        let harness = under("int-local-lands", "local");
+        let origin = harness.with_origin();
+        let refs = refs_of(&origin);
+        harness.accepted("CTV-1");
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let landed = integrations(&harness);
+        let [landed] = landed.as_slice() else {
+            panic!("expected one: {landed:?}");
+        };
+        assert_eq!(
+            landed.integrated_by,
+            TaskIntegratedBodyIntegratedBy::Governor
+        );
+        assert_eq!(landed.into, "main");
+        assert_eq!(landed.sha, at_root(&harness, &["rev-parse", "main"]));
+        let branch = harness.branch("CTV-1");
+        assert_eq!(
+            at_root(
+                &harness,
+                &["rev-list", "--count", &format!("main..{branch}")]
+            ),
+            "0"
+        );
+        assert_eq!(refs_of(&origin), refs, "nothing was pushed");
+        assert!(harness.gh.calls().is_empty(), "{:?}", harness.gh.calls());
+        assert!(!harness.row("CTV-1").awaiting_integration);
+
+        // A folder change lands the same way.
+        let folder = under("int-local-folder", "local");
+        let folder_origin = folder.with_origin();
+        folder.folder_change(CADENCE, "a\n");
+        let orchestrator = folder.orchestrator(folder.recorded(Vec::new()));
+        let (change, _) = folder_report(orchestrator.tick().await.expect("the tick runs"));
+        assert_eq!(change, 1);
+        let integrated = folder_events(&folder, EventKind::FolderChangeIntegrated);
+        assert_eq!(integrated[0]["body"]["integrated_by"], "governor");
+        assert_eq!(
+            git_output_in(
+                &folder.project.repo.path,
+                &["show", &format!("main:{CADENCE}")]
+            ),
+            "a"
+        );
+        assert!(folder.gh.calls().is_empty());
+
+        // The owner's checkout is on another branch: the work waits, and it is told why.
+        let away = Harness::new("int-local-away", |wire| {
+            wire["policy"]["integration"] = json!("local");
+            wire["policy"]["integration_branch"] = json!("main");
+        });
+        let away_origin = away.with_origin();
+        away.accepted("CTV-1");
+        git_in(&away.project.repo.path, &["checkout", "-b", "elsewhere"]);
+        let main_was = at_root(&away, &["rev-parse", "main"]);
+        let orchestrator = away.orchestrator(away.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+        let raised = escalations(&away);
+        let [raised] = raised.as_slice() else {
+            panic!("expected one: {raised:?}");
+        };
+        assert!(
+            raised.detail.contains(
+                "Your project folder is on elsewhere, not main. Switch it back to main and \
+                 Catervas adds the finished work."
+            ),
+            "{}",
+            raised.detail
+        );
+        assert_eq!(at_root(&away, &["rev-parse", "main"]), main_was);
+        assert_eq!(at_root(&away, &["branch", "--show-current"]), "elsewhere");
+        assert!(integrations(&away).is_empty());
+
+        // A pull request opened before the switch is followed, not landed over.
+        let local = under("int-local-before", "local");
+        let before_origin = local.with_origin();
+        local.accepted("CTV-1");
+        local.project.record(
+            "CTV-1",
+            "pull_request.opened",
+            &json!({ "url": PULL_URL, "number": 7, "branch": local.branch("CTV-1") }),
+        );
+        local.gh.answers("view", OPEN, "", 0);
+        let orchestrator = local.orchestrator(local.recorded(Vec::new()));
+        orchestrator.tick().await.expect("the tick runs");
+        assert!(integrations(&local).is_empty());
+        assert!(
+            local
+                .gh
+                .calls()
+                .iter()
+                .any(|call| call.get(1).map(String::as_str) == Some("view")),
+            "its pull request was read"
+        );
+
+        for path in [origin, folder_origin, away_origin, before_origin] {
+            let _ = std::fs::remove_dir_all(&path);
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_local_conflict_goes_back_to_the_builder() {
+        let harness = under("int-local-conflicts", "local");
+        let origin = harness.with_origin();
+        let refs = refs_of(&origin);
+        harness.accepted("CTV-1");
+        let git = &harness.project.deps.git;
+        let side = harness.worktree("CTV-1");
+        git.add_worktree(&side, &harness.branch("CTV-1"))
+            .expect("the branch is checked out");
+        std::fs::write(side.join("README.md"), "the task's line\n").expect("written");
+        git.commit(&side, "Edit README", &["README.md".to_string()])
+            .expect("committed");
+        git.remove_worktree(&side).expect("it is taken away");
+        // Other work landed first, on this computer alone.
+        harness.commit_at_root("README.md", "main wrote this first\n", "docs: landed first");
+        let main_was = at_root(&harness, &["rev-parse", "main"]);
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+
+        orchestrator.tick().await.expect("the tick runs");
+
+        let conflicted = harness.events(&[EventKind::TaskConflicted]);
+        let [conflicted] = conflicted.as_slice() else {
+            panic!("expected one: {conflicted:?}");
+        };
+        let EventBody::TaskConflicted(body) = &conflicted.body else {
+            panic!("{conflicted:?}");
+        };
+        assert_eq!(body.into, "main");
+        assert_eq!(body.paths, vec!["README.md".to_string()]);
+        let row = harness.row("CTV-1");
+        assert_eq!(row.status, catervas_core::contract::TaskStatus::Assigned);
+        assert!(!row.awaiting_integration);
+        let moved = harness
+            .events(&[EventKind::TaskTransitioned])
+            .pop()
+            .expect("a move");
+        let EventBody::TaskTransitioned(moved) = &moved.body else {
+            panic!("{moved:?}");
+        };
+        assert_eq!(
+            serde_json::to_value(moved.gate).expect("a gate"),
+            json!("pull_request_conflicted")
+        );
+        let worktree = harness.worktree("CTV-1");
+        let text = std::fs::read_to_string(worktree.join("README.md")).expect("read");
+        assert!(text.contains("<<<<<<< "), "{text}");
+        assert!(git.is_merging(&worktree).expect("the read works"));
+        assert_eq!(at_root(&harness, &["rev-parse", "main"]), main_was);
+        assert_eq!(
+            at_root(&harness, &["status", "--porcelain", "--untracked-files=no"]),
+            ""
+        );
+        assert_eq!(refs_of(&origin), refs, "nothing was pushed");
+        assert!(harness.gh.calls().is_empty());
         let _ = std::fs::remove_dir_all(&origin);
     }
 

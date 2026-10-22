@@ -180,6 +180,7 @@
         "worktree.tidied",
         "pull_request.conflicted",
         "pull_request.refreshed",
+        "task.conflicted",
         "goal.set",
         "goal.paused",
         "goal.resumed",
@@ -316,6 +317,7 @@
         { "$ref": "#/$defs/worktreeTidiedBody" },
         { "$ref": "#/$defs/pullRequestConflictedBody" },
         { "$ref": "#/$defs/pullRequestRefreshedBody" },
+        { "$ref": "#/$defs/taskConflictedBody" },
         { "$ref": "#/$defs/goalSetBody" },
         { "$ref": "#/$defs/goalIdBody" },
         { "$ref": "#/$defs/goalEndedBody" },
@@ -2095,6 +2097,17 @@
       "required": ["url", "into", "paths"],
       "properties": {
         "url": { "type": "string" },
+        "into": { "type": "string" },
+        "paths": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
+      }
+    },
+    "taskConflictedBody": {
+      "title": "Task Conflicted Body",
+      "description": "A local team's accepted task no longer merges into the integration branch (ADR 0085, docs/SPEC.md 5.14): Catervas merged into the branch, left the conflicts in the task's worktree and sent the task back to its assignee. into is the branch it should merge into, paths the conflicted files, relative to the worktree. It is about one task and names no actor.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["into", "paths"],
+      "properties": {
         "into": { "type": "string" },
         "paths": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "type": "string" } }
       }
