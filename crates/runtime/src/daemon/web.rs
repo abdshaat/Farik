@@ -260,7 +260,7 @@ const USED_LINK: &str =
 /// link and the cookie are bound to `127.0.0.1`; the port counts, because a browser sends the
 /// cookie to every port of a host, and a page on another local port is another origin. The one
 /// exception is the end-to-end server's `--preview` ([`local_preview`]).
-fn from_own_page(headers: &HeaderMap, web: &WebState) -> bool {
+pub(super) fn from_own_page(headers: &HeaderMap, web: &WebState) -> bool {
     own_host(headers, web)
         && named(headers, header::ORIGIN).is_some_and(|origin| own_origin(origin, web))
 }

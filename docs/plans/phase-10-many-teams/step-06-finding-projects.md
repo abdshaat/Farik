@@ -186,7 +186,7 @@ Tests:
   - With finding paused, none starts.
   - With no index, none starts until `finding.start`.
 
-- [ ] `feat(runtime): take claude.ai's export on the page, and look again each day`
+- [x] `feat(runtime): take claude.ai's export on the page, and look again each day`
 
 ### Task 6: Spec
 

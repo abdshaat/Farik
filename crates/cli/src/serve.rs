@@ -234,6 +234,10 @@ async fn run<'io>(
             home: home_of(io),
         }));
     }
+    // Looks again each day while finding is on (the first scan is the owner's to ask for).
+    let rescan = tokio::spawn(catervas_runtime::daemon::finding::rescan_daily(Arc::clone(
+        &hub,
+    )));
     let (removals, mut removed) = mpsc::unbounded_channel();
     hub.set_removals(removals);
     let mut serving = Serving {
@@ -307,6 +311,7 @@ async fn run<'io>(
             Some(()) = ctrl_c.recv() => {
                 serving.presses += 1;
                 if serving.drives.is_empty() {
+                    rescan.abort();
                     serving.hub.stop_finding();
                     serving.shut_down(hub_run).await;
                     return Ok(INTERRUPTED);
@@ -355,6 +360,7 @@ async fn run<'io>(
             }
         }
     }
+    rescan.abort();
     serving.hub.stop_finding();
     serving.shut_down(hub_run).await;
     while let Ok(event) = heard.try_recv() {

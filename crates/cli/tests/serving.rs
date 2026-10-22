@@ -2664,3 +2664,85 @@ fn finds_projects_through_serve() {
     let (ran, _, err) = serving.interrupted();
     assert_eq!(ran.code, 130, "{err}");
 }
+
+/// `POST /hub/export` with `body`, from the page's own origin and with `cookie` when it is given:
+/// the status and the text of the answer.
+fn post_export(port: u16, cookie: Option<&str>, body: &[u8]) -> (u16, String) {
+    use std::io::Read as _;
+
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    let cookie = cookie.map_or_else(String::new, |cookie| format!("Cookie: {cookie}\r\n"));
+    write!(
+        stream,
+        "POST /hub/export HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+         {cookie}Content-Type: application/zip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .expect("sent");
+    stream.write_all(body).expect("sent");
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).expect("read");
+    let answer = String::from_utf8_lossy(&answer).into_owned();
+    let status = answer
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .expect("a status");
+    let text = answer.split_once("\r\n\r\n").map_or("", |(_, text)| text);
+    (status, text.to_string())
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn imports_an_export_posted_to_the_hub() {
+    use catervas_store::claude_export::fixtures::the_2026_10_export;
+
+    let (home, state) = setup_folders("serve-export");
+    let serving = serving_setup(&home, &home, &state);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+
+    // The export is read, and its Project is in the list.
+    let (status, text) = post_export(serving.port, Some(&serving.cookie), &the_2026_10_export());
+    assert_eq!(status, 200, "{text}");
+    let summary: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(summary["conversations"], 3, "{summary}");
+    assert_eq!(summary["new_projects"], 2, "{summary}");
+    let listed = hub("finding.list", json!({}));
+    let names: Vec<&str> = listed["result"]["main"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter(|row| row["kind"] == "claude_ai")
+        .filter_map(|row| row["name"].as_str())
+        .collect();
+    assert!(names.contains(&"Shop launch"), "{listed}");
+    // The file it was read from is gone, whatever the result.
+    let left: Vec<String> = std::fs::read_dir(state.join("catervas"))
+        .expect("the state folder")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("export"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+
+    // Without the session's cookie it is refused, and what is not a zip is said not to be one.
+    let (status, _) = post_export(serving.port, None, &the_2026_10_export());
+    assert_eq!(status, 401);
+    let (status, text) = post_export(serving.port, Some(&serving.cookie), b"not a zip");
+    let refused: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        (status, &refused["error"]),
+        (422, &json!("not_an_export")),
+        "{text}"
+    );
+    let left = std::fs::read_dir(state.join("catervas"))
+        .expect("the state folder")
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains("export"));
+    assert!(!left, "no temporary file after a refusal");
+
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}

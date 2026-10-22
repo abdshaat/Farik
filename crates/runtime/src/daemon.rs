@@ -1240,6 +1240,7 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
             .route("/rpc", get(hub::current_rpc))
             .route("/documents/raw", get(hub::current_documents))
             .route("/hub/rpc", get(web::rpc))
+            .route("/hub/export", post(finding::export))
             .route("/t/{team}/rpc", get(hub::team_rpc))
             .route("/t/{team}/documents/raw", get(hub::team_documents))
     } else {

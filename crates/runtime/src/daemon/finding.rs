@@ -8,9 +8,17 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
+use axum::Json;
+use axum::body::{Body, Bytes};
+use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use futures_util::StreamExt as _;
+
 use catervas_core::claude_history::{ProjectKey, fold_by_remote, normalise_remote};
 use catervas_core::claude_services::catalog::CATALOG;
 use catervas_core::finding::{Candidate, Choice, Section, section_of, suggest};
+use catervas_store::claude_export::{ExportError, ExportLimits, import_claude_export};
 use catervas_store::claude_history::{HistoryError, add_project_by_hand, place_sessions};
 use catervas_store::git::Git;
 use catervas_store::machine::{
@@ -20,14 +28,15 @@ use catervas_store::repos::{MemberPathRefusal, member_root};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 
+use super::DaemonState;
 use super::hub::Hub;
-use super::web::{Failure, INTERNAL_ERROR, REFUSED};
-
-/// How often a scan's counts are published to the page at most.
-const PUBLISH_EVERY: Duration = Duration::from_millis(250);
+use super::web::{Failure, INTERNAL_ERROR, REFUSED, from_own_page, has_session};
 
 /// How long the daily rescan waits between two scans.
 const RESCAN_EVERY: Duration = Duration::from_hours(24);
+
+/// How often a scan's counts are published to the page at most.
+const PUBLISH_EVERY: Duration = Duration::from_millis(250);
 
 /// How many files a scan reads before it says how long it has left.
 const FILES_BEFORE_ESTIMATE: u64 = 20;
@@ -999,6 +1008,197 @@ pub(super) async fn call_blocking(
         .unwrap_or_else(|error| Err(internal(&error)))
 }
 
+/// A temporary file that is deleted when it goes out of scope, whatever happened to it.
+struct Temporary(PathBuf);
+
+impl Drop for Temporary {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// The answer to a refused or failed export.
+fn export_error(status: StatusCode, word: &str, message: &str) -> Response {
+    (status, Json(json!({ "error": word, "message": message }))).into_response()
+}
+
+/// Writes the request's body to `file`, a chunk at a time off the async workers, and answers
+/// whether it was all written within `limit` bytes.
+async fn write_body(body: Body, file: std::fs::File, limit: u64) -> Result<bool, std::io::Error> {
+    use std::io::Write as _;
+
+    let (chunks, mut written) = tokio::sync::mpsc::channel::<Bytes>(8);
+    let writer = tokio::task::spawn_blocking(move || {
+        let mut file = file;
+        while let Some(chunk) = written.blocking_recv() {
+            file.write_all(&chunk)?;
+        }
+        file.sync_all()
+    });
+    let (mut total, mut within) = (0_u64, true);
+    let mut stream = body.into_data_stream();
+    while let Some(Ok(chunk)) = stream.next().await {
+        total += chunk.len() as u64;
+        if total > limit {
+            within = false;
+            break;
+        }
+        if chunks.send(chunk).await.is_err() {
+            break;
+        }
+    }
+    drop(chunks);
+    writer
+        .await
+        .unwrap_or_else(|error| Err(std::io::Error::other(error)))?;
+    Ok(within)
+}
+
+/// The word an export that could not be read is refused with.
+fn export_word(error: &ExportError) -> &'static str {
+    match error {
+        ExportError::NotAZip
+        | ExportError::NotAnExport(_)
+        | ExportError::NotAList { .. }
+        | ExportError::Unreadable { .. } => "not_an_export",
+        ExportError::Damaged { .. } => "damaged",
+        ExportError::Unsupported { .. } => "unsupported",
+        ExportError::Encrypted { .. } => "encrypted",
+        ExportError::TooLarge { .. } => "export_too_large",
+        ExportError::NothingDated => "nothing_dated",
+        ExportError::Io(_) | ExportError::Store(_) => "failed",
+    }
+}
+
+/// `POST /hub/export`: claude.ai's export, dropped onto the page, read into the index. Behind the
+/// page's own origin and its session, as the socket is. The body is written to a temporary file
+/// in the state folder (mode 0600), read, and deleted, whatever the result.
+pub(super) async fn export(
+    State(state): State<Arc<DaemonState>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    let Some(web) = state.web() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    if !from_own_page(&headers, web) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    if !has_session(&headers, web) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    let Some(hub) = state.hub() else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(host) = hub.finding.host.get().cloned() else {
+        return export_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed",
+            "this catervas has nothing to read an export with",
+        );
+    };
+    let limits = ExportLimits::DEFAULT;
+    if headers
+        .get(axum::http::header::CONTENT_LENGTH)
+        .and_then(|length| length.to_str().ok())
+        .and_then(|length| length.parse::<u64>().ok())
+        .is_some_and(|length| length > limits.file_bytes)
+    {
+        return too_large();
+    }
+    let kept = host.state_dir();
+    let (temporary, file) = match create_temporary(&kept) {
+        Ok(made) => made,
+        Err(error) => {
+            return export_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed",
+                &error.to_string(),
+            );
+        }
+    };
+    match write_body(body, file, limits.file_bytes).await {
+        Ok(true) => {}
+        Ok(false) => return too_large(),
+        Err(error) => {
+            return export_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed",
+                &error.to_string(),
+            );
+        }
+    }
+    let imported = tokio::task::spawn_blocking(move || {
+        let imported = open_index(host.as_ref())
+            .map_err(|_| ExportError::Io(std::io::Error::other("the index could not be opened")))
+            .and_then(|mut index| {
+                import_claude_export(&mut index, &temporary.0, limits, host.now())
+            });
+        drop(temporary);
+        if imported.is_ok() {
+            let _ = host.set_export_dismissed(false);
+        }
+        imported
+    })
+    .await;
+    match imported {
+        Ok(Ok(summary)) => Json(json!({
+            "conversations": summary.conversations,
+            "new_conversations": summary.new_conversations,
+            "projects": summary.projects,
+            "new_projects": summary.new_projects,
+            "skipped": summary.skipped,
+            "skipped_projects": summary.skipped_projects,
+            "content_at": moment(summary.content_at),
+        }))
+        .into_response(),
+        Ok(Err(ExportError::TooLarge { .. })) => too_large(),
+        Ok(Err(error)) => {
+            let status = if matches!(error, ExportError::Io(_) | ExportError::Store(_)) {
+                StatusCode::INTERNAL_SERVER_ERROR
+            } else {
+                StatusCode::UNPROCESSABLE_ENTITY
+            };
+            export_error(status, export_word(&error), &error.to_string())
+        }
+        Err(error) => export_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "failed",
+            &error.to_string(),
+        ),
+    }
+}
+
+fn too_large() -> Response {
+    export_error(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "export_too_large",
+        &ExportError::TooLarge {
+            limit_bytes: ExportLimits::DEFAULT.file_bytes,
+        }
+        .to_string(),
+    )
+}
+
+/// A new temporary file for an export in `folder`, readable by its owner alone.
+fn create_temporary(folder: &Path) -> std::io::Result<(Temporary, std::fs::File)> {
+    use std::os::unix::fs::OpenOptionsExt as _;
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    std::fs::create_dir_all(folder)?;
+    let path = folder.join(format!(
+        "export-{}-{}.zip.tmp",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)?;
+    Ok((Temporary(path), file))
+}
+
 /// Scans once at start and then every 24 hours, for as long as it is polled: while finding is not
 /// paused and a first scan, which the owner asked for, made the index. A scan that still runs when
 /// the time comes is left to finish.
@@ -1023,7 +1223,7 @@ mod tests {
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
 
-    use super::{FindingHost, FindingProgress, call};
+    use super::{FindingHost, FindingProgress, call, rescan_daily};
     use crate::daemon::hub::{Hub, IdleStatus, IdleTeam, TeamSlug};
 
     fn now() -> DateTime<Utc> {
@@ -1235,5 +1435,65 @@ mod tests {
         assert_eq!(forgotten, json!({ "forgotten": true }));
         assert!(!fake.state_dir().join(MACHINE_DB).exists());
         assert_eq!(asked(&hub, "finding.status", &json!({}))["phase"], "idle");
+    }
+
+    /// Gives the scan thread and the rescan task time to run, without letting paused time move.
+    async fn settle() {
+        for _ in 0..40 {
+            tokio::task::yield_now().await;
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rescans_each_day_while_finding_is_on() {
+        let day = Duration::from_hours(24);
+        let scans = |fake: &Fake| fake.scans.load(Ordering::SeqCst);
+
+        // With an index present a scan starts at once, and again after 24 hours.
+        let fake = Fake::new("rescan-index");
+        fake.release.store(true, Ordering::SeqCst);
+        drop(open_machine_index(&fake.state_dir().join(MACHINE_DB), now()).expect("an index"));
+        let hub = Arc::new(Hub::default());
+        hub.set_finder(fake.clone());
+        let task = tokio::spawn(rescan_daily(Arc::clone(&hub)));
+        settle().await;
+        assert_eq!(scans(&fake), 1, "a scan at start");
+        tokio::time::advance(day).await;
+        settle().await;
+        assert_eq!(scans(&fake), 2, "and one a day later");
+
+        // Paused, none starts; resumed, the next day's does.
+        asked(&hub, "finding.pause", &json!({ "paused": true }));
+        tokio::time::advance(day).await;
+        settle().await;
+        assert_eq!(scans(&fake), 2, "paused finding scans nothing");
+        asked(&hub, "finding.pause", &json!({ "paused": false }));
+        tokio::time::advance(day).await;
+        settle().await;
+        assert_eq!(scans(&fake), 3);
+        task.abort();
+
+        // With no index, none starts until the owner starts one.
+        let fake = Fake::new("rescan-none");
+        fake.release.store(true, Ordering::SeqCst);
+        let hub = Arc::new(Hub::default());
+        hub.set_finder(fake.clone());
+        let task = tokio::spawn(rescan_daily(Arc::clone(&hub)));
+        settle().await;
+        tokio::time::advance(day).await;
+        settle().await;
+        assert_eq!(scans(&fake), 0, "no first scan was asked for");
+        asked(&hub, "finding.start", &json!({}));
+        settle().await;
+        assert_eq!(scans(&fake), 1);
+        tokio::time::advance(day).await;
+        settle().await;
+        assert_eq!(
+            scans(&fake),
+            2,
+            "the index the owner asked for is looked at again"
+        );
+        task.abort();
     }
 }
