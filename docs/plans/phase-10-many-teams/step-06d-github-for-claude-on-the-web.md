@@ -1,6 +1,6 @@
 # Phase 10, step 06d: GitHub, for an owner who uses Claude on the web
 
-Status: ready
+Status: executed 2026-10-22
 Branch: `phase/10-many-teams`
 Spec: `docs/SPEC.md` 4.4, 6.7, 8.4, 8.6; ADR 0059, ADR 0044
 Depends on: steps 06 and 06c (committed)
@@ -132,7 +132,7 @@ Tests (`pages/find/Github.test.tsx`):
 
 Then the project plan's row 06d: "planned and executed 2026-10-22".
 
-- [ ] `docs(spec): github for claude on the web, revision 0.148`
+- [x] `docs(spec): github for claude on the web, revision 0.148`
 
 ## Verification
 
