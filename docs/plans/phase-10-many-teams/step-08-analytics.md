@@ -135,7 +135,7 @@ Tests:
 
 `docs/SPEC.md` revision 0.152 (2026-10-22), "records phase 10 step 08, analytics". It covers F17 and 4.4: what is counted and from where, the once-per-reply rule, the API label, and the screens. Then the project plan's row 08: "planned and executed 2026-10-22".
 
-- [ ] `docs(spec): analytics, revision 0.152`
+- [x] `docs(spec): analytics, revision 0.152`
 
 ## Verification
 
