@@ -156,7 +156,7 @@ The test (`e2e/finding.spec.ts`), "a new owner finds their projects":
 1. The computer check offers "Find your projects?". Pressing **Look for my projects** shows the scan, then **See what you work on**.
 2. Both projects are listed with Team chosen. The test switches one to Watch and presses **Continue**.
 
-- [ ] `test(web): a new owner finds their projects`
+- [x] `test(web): a new owner finds their projects`
 
 ### Task 6: Spec
 
