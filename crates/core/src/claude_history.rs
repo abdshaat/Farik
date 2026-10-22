@@ -434,6 +434,8 @@ pub enum Source {
     Export,
     /// The owner added it by hand.
     ByHand,
+    /// The owner's GitHub lists its repository.
+    Github,
 }
 
 impl Source {
@@ -445,6 +447,7 @@ impl Source {
             Self::Teleported => "teleported",
             Self::Export => "export",
             Self::ByHand => "by_hand",
+            Self::Github => "github",
         }
     }
 }
@@ -1630,6 +1633,7 @@ mod tests {
             (Source::Teleported, "teleported"),
             (Source::Export, "export"),
             (Source::ByHand, "by_hand"),
+            (Source::Github, "github"),
         ];
         for (source, wire) in wires {
             assert_eq!(source.as_wire(), wire);

@@ -95,7 +95,7 @@ Tests (`machine.rs`):
   - A later read without it keeps it, marked not seen lately.
   - The migrations list ends at 8.
 
-- [ ] `feat(store): keep github repositories and claude's work in the machine index`
+- [x] `feat(store): keep github repositories and claude's work in the machine index`
 
 ### Task 3: Connect, read and copy from the hub
 

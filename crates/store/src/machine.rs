@@ -266,6 +266,81 @@ pub struct ClaudeAi {
     pub projects_not_in_latest: u64,
 }
 
+/// What Claude Code on the web made in a repository.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkKind {
+    /// A branch named `claude/…`.
+    Branch,
+    /// An open pull request from such a branch.
+    Pull,
+}
+
+impl WorkKind {
+    fn as_wire(self) -> &'static str {
+        match self {
+            Self::Branch => "branch",
+            Self::Pull => "pull",
+        }
+    }
+
+    fn from_wire(wire: &str) -> Self {
+        if wire == "pull" {
+            Self::Pull
+        } else {
+            Self::Branch
+        }
+    }
+}
+
+/// A branch or an open pull request that Claude Code on the web made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeWork {
+    /// A branch or a pull request.
+    pub kind: WorkKind,
+    /// The branch's name; a pull request's title.
+    pub name: String,
+    /// The pull request's number.
+    pub number: Option<u64>,
+    /// Whether the pull request is a draft.
+    pub draft: Option<bool>,
+    /// When the pull request last changed.
+    pub updated_at: Option<String>,
+}
+
+/// One repository as a read of GitHub saw it, with its Claude work.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubSeen {
+    /// `owner/name`.
+    pub full_name: String,
+    /// Whether it is private.
+    pub private: bool,
+    /// When it was last pushed to.
+    pub pushed_at: DateTime<Utc>,
+    /// Its default branch.
+    pub default_branch: String,
+    /// Its `claude/…` branches and open pull requests from them.
+    pub work: Vec<ClaudeWork>,
+}
+
+/// A GitHub repository that no folder on this computer has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GithubProject {
+    /// `owner/name`.
+    pub full_name: String,
+    /// Its normalised remote.
+    pub remote_key: String,
+    /// When it was last pushed to.
+    pub pushed_at: DateTime<Utc>,
+    /// Whether it is private.
+    pub private: bool,
+    /// Its default branch.
+    pub default_branch: String,
+    /// Whether the latest read of GitHub did not list it.
+    pub not_seen_lately: bool,
+    /// Its `claude/…` branches and open pull requests from them.
+    pub claude_work: Vec<ClaudeWork>,
+}
+
 /// A project on this computer that sessions were placed under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundProject {
@@ -289,6 +364,8 @@ pub struct FoundProject {
     /// Where it was found: `Local` always, `Teleported` when one of its sessions has a copy, and
     /// `ByHand` when a project added by hand is this one.
     pub sources: BTreeSet<Source>,
+    /// The `claude/…` branches and pull requests of its GitHub repository, when GitHub lists it.
+    pub claude_work: Vec<ClaudeWork>,
 }
 
 /// A project the owner added by hand: where it is, in a folder, a repository, or both.
@@ -332,6 +409,8 @@ pub struct Found {
     pub by_hand: Vec<HandProject>,
     /// What the imported claude.ai exports hold.
     pub claude_ai: ClaudeAi,
+    /// GitHub repositories no folder on this computer has, most recently pushed first.
+    pub github: Vec<GithubProject>,
 }
 
 /// A project formed from connector work done at home, with what its sessions did.
@@ -412,6 +491,11 @@ fn add(activity: &mut Activity, tokens: Option<&BTreeMap<String, Usage>>) {
         total.cache_read_tokens += usage.cache_read_tokens;
         total.cache_write_tokens += usage.cache_write_tokens;
     }
+}
+
+/// The normalised remote of `owner/name` on GitHub, as a found folder's remote reads.
+fn github_remote_key(full_name: &str) -> String {
+    format!("github.com/{}", full_name.to_lowercase())
 }
 
 fn read_time(text: &str) -> Result<DateTime<Utc>, StoreError> {
@@ -1267,6 +1351,7 @@ impl MachineIndex {
                     own: Activity::default(),
                     catervas: Activity::default(),
                     sources: BTreeSet::from([Source::Local]),
+                    claude_work: Vec::new(),
                 });
             if kept_copies.contains(&id) {
                 project.sources.insert(Source::Teleported);
@@ -1283,6 +1368,7 @@ impl MachineIndex {
         let mut projects: Vec<FoundProject> = projects.into_values().collect();
         projects.sort_by(|a, b| b.last_at.cmp(&a.last_at).then_with(|| a.root.cmp(&b.root)));
         let by_hand = self.join_hand_projects(&mut projects)?;
+        let github = self.join_github(&mut projects)?;
         let mut gone: Vec<GoneFolder> = gone.into_values().collect();
         gone.sort_by(|a, b| {
             b.last_at
@@ -1299,7 +1385,123 @@ impl MachineIndex {
             maybe_same_sessions: maybe_same.len() as u64,
             by_hand,
             claude_ai: self.claude_ai()?,
+            github,
         })
+    }
+
+    /// Keeps what a read of GitHub saw: each repository seen replaces its row and its Claude work.
+    /// A repository this read did not list stays as it was, and shows as not seen lately.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be written.
+    pub fn replace_github(
+        &mut self,
+        seen: &[GithubSeen],
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let at = now.to_rfc3339_opts(SecondsFormat::Millis, true);
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        for repo in seen {
+            let remote_key = github_remote_key(&repo.full_name);
+            transaction.execute(
+                "INSERT INTO github_repos
+                     (full_name, remote_key, pushed_at, private, default_branch, seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(full_name) DO UPDATE SET
+                     remote_key = excluded.remote_key, pushed_at = excluded.pushed_at,
+                     private = excluded.private, default_branch = excluded.default_branch,
+                     seen_at = excluded.seen_at",
+                (
+                    &repo.full_name,
+                    &remote_key,
+                    repo.pushed_at.to_rfc3339_opts(SecondsFormat::Millis, true),
+                    i64::from(repo.private),
+                    &repo.default_branch,
+                    &at,
+                ),
+            )?;
+            transaction.execute(
+                "DELETE FROM github_claude_work WHERE full_name = ?1",
+                (&repo.full_name,),
+            )?;
+            for work in &repo.work {
+                transaction.execute(
+                    "INSERT OR REPLACE INTO github_claude_work
+                         (full_name, kind, name, number, draft, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    (
+                        &repo.full_name,
+                        work.kind.as_wire(),
+                        &work.name,
+                        work.number.map(int),
+                        work.draft.map(i64::from),
+                        &work.updated_at,
+                    ),
+                )?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Gives each found project its GitHub repository's Claude work and the `Github` source, and
+    /// returns the repositories no found project has.
+    fn join_github(&self, projects: &mut [FoundProject]) -> Result<Vec<GithubProject>, StoreError> {
+        let mut work: HashMap<String, Vec<ClaudeWork>> = HashMap::new();
+        let mut statement = self.connection.prepare(
+            "SELECT full_name, kind, name, number, draft, updated_at FROM github_claude_work
+             ORDER BY kind, name",
+        )?;
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            work.entry(row.get(0)?).or_default().push(ClaudeWork {
+                kind: WorkKind::from_wire(&row.get::<_, String>(1)?),
+                name: row.get(2)?,
+                number: row.get::<_, Option<i64>>(3)?.map(natural),
+                draft: row.get::<_, Option<i64>>(4)?.map(|draft| draft != 0),
+                updated_at: row.get(5)?,
+            });
+        }
+        let latest: Option<String> =
+            self.connection
+                .query_row("SELECT max(seen_at) FROM github_repos", [], |row| {
+                    row.get(0)
+                })?;
+        let mut statement = self.connection.prepare(
+            "SELECT full_name, remote_key, pushed_at, private, default_branch, seen_at
+             FROM github_repos ORDER BY pushed_at DESC, full_name",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut elsewhere = Vec::new();
+        while let Some(row) = rows.next()? {
+            let full_name: String = row.get(0)?;
+            let remote_key: String = row.get(1)?;
+            let claude_work = work.remove(&full_name).unwrap_or_default();
+            let mut on_this_computer = false;
+            for project in projects
+                .iter_mut()
+                .filter(|project| project.remote.as_deref() == Some(remote_key.as_str()))
+            {
+                on_this_computer = true;
+                project.sources.insert(Source::Github);
+                project.claude_work.clone_from(&claude_work);
+            }
+            if !on_this_computer {
+                elsewhere.push(GithubProject {
+                    full_name,
+                    remote_key,
+                    pushed_at: read_time(&row.get::<_, String>(2)?)?,
+                    private: row.get::<_, i64>(3)? != 0,
+                    default_branch: row.get(4)?,
+                    not_seen_lately: Some(row.get::<_, String>(5)?) < latest,
+                    claude_work,
+                });
+            }
+        }
+        Ok(elsewhere)
     }
 
     /// The imported claude.ai exports, grouped for the report. Whether an item is in its account's
@@ -1819,13 +2021,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7]
+            vec![1, 2, 3, 4, 5, 6, 7, 8]
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7]
+            vec![1, 2, 3, 4, 5, 6, 7, 8]
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -1846,6 +2048,8 @@ mod tests {
                 "claude_projects",
                 "configured_servers",
                 "declared_services",
+                "github_claude_work",
+                "github_repos",
                 "hand_projects",
                 "hand_routines",
                 "jobs",
@@ -2277,6 +2481,98 @@ mod tests {
                 .bookkeeping_roots
                 .is_empty()
         );
+    }
+
+    fn github_seen(full_name: &str, pushed: &str, work: Vec<ClaudeWork>) -> GithubSeen {
+        GithubSeen {
+            full_name: full_name.to_string(),
+            private: true,
+            pushed_at: DateTime::parse_from_rfc3339(pushed)
+                .expect("a time")
+                .with_timezone(&Utc),
+            default_branch: "main".to_string(),
+            work,
+        }
+    }
+
+    #[test]
+    fn keeps_github_repositories_once_beside_folders() {
+        let temp = TempProject::new("keeps-github");
+        let path = temp.root.join(MACHINE_DB);
+        let mut index = open_machine_index(&path, now()).expect("the index opens");
+        assert_eq!(
+            index.applied_migrations().expect("versions").last(),
+            Some(&8)
+        );
+        let c = &index.connection;
+        seed_project(c, "/home/me/shop", true);
+        c.execute(
+            "UPDATE projects SET remote = 'github.com/octo/shop' WHERE root = '/home/me/shop'",
+            [],
+        )
+        .expect("a remote");
+        seed_session_at(
+            c,
+            "s1",
+            "owner",
+            Some("/home/me/shop"),
+            "2026-10-12T09:00:00.000Z",
+        );
+        let branch = ClaudeWork {
+            kind: WorkKind::Branch,
+            name: "claude/fix-login".to_string(),
+            number: None,
+            draft: None,
+            updated_at: None,
+        };
+        let pull = ClaudeWork {
+            kind: WorkKind::Pull,
+            name: "Fix the login".to_string(),
+            number: Some(12),
+            draft: Some(true),
+            updated_at: Some("2026-10-20T09:00:00Z".to_string()),
+        };
+        index
+            .replace_github(
+                &[
+                    github_seen("octo/Shop", "2026-10-11T09:00:00Z", vec![branch.clone()]),
+                    github_seen(
+                        "octo/notes",
+                        "2026-10-10T09:00:00Z",
+                        vec![branch.clone(), pull.clone()],
+                    ),
+                ],
+                later(1),
+            )
+            .expect("a read");
+
+        // The repository a folder has is that project, sourced github too; no second project.
+        let found = index.found().expect("found");
+        assert_eq!(found.projects.len(), 1);
+        assert!(found.projects[0].sources.contains(&Source::Github));
+        assert!(found.projects[0].sources.contains(&Source::Local));
+        assert_eq!(found.projects[0].claude_work, vec![branch.clone()]);
+        // The one with no folder is a github project with its Claude work.
+        assert_eq!(found.github.len(), 1);
+        assert_eq!(found.github[0].full_name, "octo/notes");
+        assert_eq!(found.github[0].remote_key, "github.com/octo/notes");
+        assert!(!found.github[0].not_seen_lately);
+        assert_eq!(found.github[0].claude_work.len(), 2);
+        assert!(found.github[0].claude_work.contains(&pull));
+
+        // A later read without it keeps it, marked not seen lately; the work of a repository the
+        // read did list is replaced.
+        index
+            .replace_github(
+                &[github_seen("octo/Shop", "2026-10-12T09:00:00Z", Vec::new())],
+                later(2),
+            )
+            .expect("a later read");
+        let found = index.found().expect("found");
+        assert!(found.projects[0].claude_work.is_empty());
+        assert_eq!(found.github.len(), 1);
+        assert!(found.github[0].not_seen_lately);
+        assert_eq!(found.github[0].claude_work.len(), 2, "kept as it was");
     }
 
     #[test]
