@@ -83,7 +83,7 @@ Files: `rules.rs` (fetch), `folders.rs`, `daemon/team.rs`, the exec call site.
 
 - `a_local_team_never_reaches_origin` (runtime) — under `local`, `team.get` answers `online: false` with an `origin`; `bring_up_to_date` does not fetch (a fake `origin` with a new commit on `into` is not merged in); `catervas_exec` with `git push` listed in `rules.git_subcommands` is refused `kept_local`; `catervas_git_push` is refused for a Developer of a `push: true` team.
 
-- [ ] `feat(runtime): a local team never reaches its remote`
+- [x] `feat(runtime): a local team never reaches its remote`
 
 ### Task 4: the third answer
 

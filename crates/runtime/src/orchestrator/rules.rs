@@ -1837,7 +1837,8 @@ pub(super) fn bring_up_to_date(
     }
     let repository = task_repository_of(deps, team, contract).ok()?;
     let into = repository.integration_branch.clone();
-    if repository.git.has_remote("origin").ok()? {
+    // A team that keeps everything on this computer never fetches (ADR 0085).
+    if !team.keeps_local() && repository.git.has_remote("origin").ok()? {
         // Offline, the local branch is what there is.
         let _ = repository.git.fetch_fast_forward("origin", &into);
     }
@@ -4225,6 +4226,115 @@ mod tests {
         assert!(worktree.join("from_main.txt").is_file());
         let merges = git_output_in(&worktree, &["log", "--merges", "--format=%s"]);
         assert_eq!(merges, "chore: bring up to date with main");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn a_local_team_never_reaches_origin() {
+        use crate::exec::{ExecResult, Executor};
+        use crate::tools::ToolError;
+
+        struct Silent;
+        impl Executor for Silent {
+            fn run(
+                &self,
+                _command: &str,
+                _cwd: &str,
+                _timeout: Duration,
+                _env: &std::collections::BTreeMap<String, String>,
+            ) -> Result<ExecResult, ExecError> {
+                Ok(ExecResult {
+                    exit_code: 0,
+                    stdout: String::new(),
+                    stderr: String::new(),
+                    timed_out: false,
+                    truncated: false,
+                })
+            }
+        }
+
+        let harness = Harness::new("orch-local-origin", |wire| {
+            wire["policy"]["integration"] = json!("local");
+            wire["policy"]["permissions"] = json!({ "push": true });
+            wire["agents"][1]["rules"] = json!({ "git_subcommands": ["push"] });
+        });
+        harness.in_progress("CTV-1", "dev-a", "dev-b");
+        let origin = harness.with_origin();
+        let repo = harness.project.repo.path.clone();
+        // `origin` has a commit the project folder does not.
+        let elsewhere = repo.with_extension("elsewhere");
+        let _ = std::fs::remove_dir_all(&elsewhere);
+        git_in(
+            &repo,
+            &[
+                "clone",
+                origin.to_str().expect("a path"),
+                elsewhere.to_str().expect("a path"),
+            ],
+        );
+        std::fs::write(elsewhere.join("from_origin.txt"), "origin moved\n").expect("written");
+        git_in(&elsewhere, &["add", "from_origin.txt"]);
+        git_in(
+            &elsewhere,
+            &[
+                "-c",
+                "user.name=Someone",
+                "-c",
+                "user.email=someone@example.com",
+                "commit",
+                "-m",
+                "origin gains a file",
+            ],
+        );
+        git_in(&elsewhere, &["push", "origin", "main"]);
+        let refs = git_output_in(&origin, &["for-each-ref"]);
+        let main = git_output_in(&repo, &["rev-parse", "main"]);
+        let adapter = harness.recorded(vec![implement_stops_early()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        // A tool call makes a runtime of its own, so the tick runs on one made here.
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("a runtime is made")
+            .block_on(orchestrator.tick())
+            .expect("the session runs");
+
+        assert_eq!(adapter.started().len(), 1);
+        assert_eq!(
+            git_output_in(&repo, &["rev-parse", "main"]),
+            main,
+            "not fetched"
+        );
+        assert!(!harness.worktree("CTV-1").join("from_origin.txt").exists());
+
+        let ran = Arc::new(Silent);
+        for command in ["git push origin x", "sudo git push"] {
+            match harness.project.call_with(
+                ran.clone(),
+                "dev-a",
+                Some("CTV-1"),
+                "catervas_exec",
+                json!({ "command": command }),
+            ) {
+                Err(ToolError::Refused { reason }) => assert_eq!(
+                    reason, "kept_local: this team keeps everything on this computer",
+                    "{command}"
+                ),
+                other => panic!("{command}: expected a refusal, got {other:?}"),
+            }
+        }
+        assert!(
+            harness
+                .project
+                .call("dev-a", Some("CTV-1"), "catervas_git_push", json!({}))
+                .is_err(),
+            "an agent of a push: true team does not push"
+        );
+        assert_eq!(git_output_in(&origin, &["for-each-ref"]), refs);
+        for path in [origin, elsewhere] {
+            let _ = std::fs::remove_dir_all(&path);
+        }
     }
 
     #[tokio::test]
