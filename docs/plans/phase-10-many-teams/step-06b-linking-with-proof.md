@@ -162,7 +162,7 @@ Tests (`crates/store/src/linking.rs` against an index with two git fixtures):
   - After No to a–b, a–b is not asked again. It is asked again once a `deploys` proof appears that was not in the No's proof list.
   - A pair whose proof file changed so that it no longer holds is not asked, and a Yes to it is `proof_no_longer_holds`.
 
-- [ ] `feat(store): ask each proven pair once and group by the owner's yes`
+- [x] `feat(store): ask each proven pair once and group by the owner's yes`
 
 ### Task 4: The hub's methods
 

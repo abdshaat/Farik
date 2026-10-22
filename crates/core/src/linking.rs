@@ -56,6 +56,38 @@ pub enum ProofKind {
     ClaudeAiNames,
 }
 
+impl ProofKind {
+    /// The kind as it is written on the wire and in the index.
+    #[must_use]
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::PathDependency => "path_dependency",
+            Self::Submodule => "submodule",
+            Self::DeclaredPackage => "declared_package",
+            Self::Deploys => "deploys",
+            Self::Workflow => "workflow",
+            Self::Domain => "domain",
+            Self::ClaudeAiNames => "claude_ai_names",
+        }
+    }
+
+    /// The kind a wire word names.
+    #[must_use]
+    pub fn from_wire(wire: &str) -> Option<Self> {
+        [
+            Self::PathDependency,
+            Self::Submodule,
+            Self::DeclaredPackage,
+            Self::Deploys,
+            Self::Workflow,
+            Self::Domain,
+            Self::ClaudeAiNames,
+        ]
+        .into_iter()
+        .find(|kind| kind.as_wire() == wire)
+    }
+}
+
 /// One end of a proof: where it was read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProofEnd {
@@ -1059,6 +1091,53 @@ fn claude_ai_names(
     }
 }
 
+impl Proof {
+    /// The proof as it is written on the wire and in the index.
+    #[must_use]
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": self.kind.as_wire(),
+            "a": self.a,
+            "b": self.b,
+            "sentence": self.sentence,
+            "ends": self.ends.iter().map(|end| serde_json::json!({
+                "project": end.project,
+                "file": end.file,
+                "line": end.line,
+                "text": end.text,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    /// The proof a wire value holds; `None` when it is not one.
+    #[must_use]
+    pub fn from_json(value: &serde_json::Value) -> Option<Self> {
+        let text = |value: &serde_json::Value, key: &str| -> Option<String> {
+            value.get(key)?.as_str().map(str::to_string)
+        };
+        let ends = value
+            .get("ends")?
+            .as_array()?
+            .iter()
+            .map(|end| {
+                Some(ProofEnd {
+                    project: text(end, "project")?,
+                    file: text(end, "file")?,
+                    line: usize::try_from(end.get("line")?.as_u64()?).ok()?,
+                    text: text(end, "text")?,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Self {
+            kind: ProofKind::from_wire(&text(value, "kind")?)?,
+            a: text(value, "a")?,
+            b: text(value, "b")?,
+            ends,
+            sentence: text(value, "sentence")?,
+        })
+    }
+}
+
 /// Every proof among `projects` and `claude_ai`, in the order of the kinds, then of the keys. A
 /// pair proved by the same kind in several places is proved once, by the first.
 #[must_use]
@@ -1125,6 +1204,19 @@ pub enum HintKind {
     SimilarNames,
     /// A session wrote files under both.
     WroteBoth,
+}
+
+impl HintKind {
+    /// The kind as it is written on the wire.
+    #[must_use]
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            Self::SameOwner => "same_owner",
+            Self::SameDays => "same_days",
+            Self::SimilarNames => "similar_names",
+            Self::WroteBoth => "wrote_both",
+        }
+    }
 }
 
 /// Two projects with a hint, `a` before `b` by key.
