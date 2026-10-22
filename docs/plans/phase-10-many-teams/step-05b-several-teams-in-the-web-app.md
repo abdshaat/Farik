@@ -148,7 +148,7 @@ The test (`e2e/many-teams.spec.ts`), "the owner moves between two teams and sees
 
 `docs/SPEC.md` revision 0.145 (2026-10-22), "records phase 10 step 05b, several teams in the web app". Insert it above 0.144. It covers 4.1 and 4.4: the switcher, the addresses, All teams and This computer. Then the project plan's row 05b: "planned and executed 2026-10-22 (`step-05b-several-teams-in-the-web-app.md`)".
 
-- [ ] `docs(spec): several teams in the web app, revision 0.145`
+- [x] `docs(spec): several teams in the web app, revision 0.145`
 
 ## Verification
 
