@@ -198,7 +198,7 @@ Tests:
 
 Then the project plan: row 06 becomes three rows, 06, 06c and 06d, as the start of this plan says. Row 06 records "planned and executed 2026-10-22 (`step-06-finding-projects.md`)".
 
-- [ ] `docs(spec): finding projects behind the hub, revision 0.146`
+- [x] `docs(spec): finding projects behind the hub, revision 0.146`
 
 ## Verification
 
