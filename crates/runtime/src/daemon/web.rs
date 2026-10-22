@@ -665,9 +665,10 @@ const SETUP_METHODS: [&str; 8] = [
 pub(super) const NO_ACCOUNT: &str = "connect your AI account first";
 /// The methods whose params hold a secret, whose refusal never quotes them: the schema's errors
 /// quote the whole frame.
-const SECRET_METHODS: [&str; 4] = [
+const SECRET_METHODS: [&str; 5] = [
     "account.sign_in_code",
     "connector.connect",
+    "github.connect",
     "connector.tools",
     "procurement_mailbox.connect",
 ];

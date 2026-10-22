@@ -627,6 +627,18 @@
           "$ref": "#/$defs/findingForgetRequest"
         },
         {
+          "$ref": "#/$defs/githubConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/githubStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/githubDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/githubCopyRequest"
+        },
+        {
           "$ref": "#/$defs/repoAddRequest"
         },
         {
@@ -3830,7 +3842,7 @@
     },
     "findingForgetRequest": {
       "title": "Finding Forget Request",
-      "description": "Forgets everything Catervas found: deletes machine.db, and clears finding_paused and export_card from state.json (docs/SPEC.md 4.1, 4.4; ADR 0059). A scan that runs is stopped first. Without confirmed true it is refused with -32005 and forget_needs_confirming. Answers findingForgetResult.",
+      "description": "Forgets everything Catervas found: deletes machine.db, clears export_card and sets finding_paused in state.json, so finding is paused after it (docs/SPEC.md 4.1, 4.4; ADR 0059). A scan that runs is stopped first. Without confirmed true it is refused with -32005 and forget_needs_confirming. Answers findingForgetResult.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -3860,6 +3872,72 @@
         }
       }
     },
+    "githubConnectRequest": {
+      "title": "Github Connect Request",
+      "description": "Connects GitHub for this computer with a fine-grained, read-only token the owner pastes (docs/SPEC.md 4.4, 6.7, 8.6; ADR 0059, ADR 0044): the token is checked with GitHub, kept under machine:github in the connector key store, and the owner's repositories and Claude's work in them are read. Refused with -32005 and github_token_refused (GitHub did not accept it), github_rate_limited, github_unreachable or no_secret_store; a refusal never holds the token. Answers githubConnectResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.connect" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["token"],
+          "properties": { "token": { "type": "string", "minLength": 1, "maxLength": 1000 } }
+        }
+      }
+    },
+    "githubStatusRequest": {
+      "title": "Github Status Request",
+      "description": "Whether GitHub is connected for this computer, and as whom (docs/SPEC.md 4.4; ADR 0059). Answers githubStatusResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.status" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "githubDisconnectRequest": {
+      "title": "Github Disconnect Request",
+      "description": "Forgets the GitHub token kept for this computer (docs/SPEC.md 4.4; ADR 0059). The repositories already read stay in the index, marked not seen lately. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.disconnect" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "githubCopyRequest": {
+      "title": "Github Copy Request",
+      "description": "Copies a repository of the owner's to this computer: git clone into a new folder named name (default: the repository's name, lowercase) under parent, relative to home, with the token given to git through its environment and never on a command line (docs/SPEC.md 4.4, 8.6; ADR 0059). The folder becomes a project. Refused with -32005 and github_not_connected, unknown_repository, outside_home, bad_name, folder_taken or copy_failed (git's last line, the token cut out). Answers githubCopyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.copy" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["full_name", "parent"],
+          "properties": {
+            "full_name": { "type": "string" },
+            "parent": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        }
+      }
+    },
     "findingRow": {
       "type": "object",
       "additionalProperties": false,
@@ -3874,7 +3952,8 @@
         "suggested",
         "choice",
         "already_team",
-        "gone"
+        "gone",
+        "claude_work"
       ],
       "properties": {
         "key": {
@@ -3889,7 +3968,8 @@
             "connector",
             "claude_ai",
             "hand",
-            "job"
+            "job",
+            "github"
           ]
         },
         "folders": {
@@ -3953,9 +4033,35 @@
         },
         "gone": {
           "type": "boolean"
+        },
+        "claude_work": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": { "enum": ["branch", "pull"] },
+              "name": { "type": "string" },
+              "number": { "type": "integer" },
+              "draft": { "type": "boolean" }
+            }
+          }
+        },
+        "github": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["full_name", "private", "default_branch", "pushed_at", "not_seen_lately"],
+          "properties": {
+            "full_name": { "type": "string" },
+            "private": { "type": "boolean" },
+            "default_branch": { "type": "string" },
+            "pushed_at": { "type": "string" },
+            "not_seen_lately": { "type": "boolean" }
+          }
         }
       },
-      "description": "One row of the found list. key is the project's key: its normalised repository address, else its real path, the connector project's name, or the claude.ai uuid. kind is folder, connector, claude_ai, hand, or job (a job or routine on this computer with no project). suggested is the Team, Watch or Ignore Catervas suggests (null for a gone folder), choice the owner's own, already_team the slug of the team whose project folder is one of folders."
+      "description": "One row of the found list. key is the project's key: its normalised repository address, else its real path, the connector project's name, or the claude.ai uuid. kind is folder, connector, claude_ai, hand, github (a repository on the owner's GitHub that no folder on this computer has; github is then its details) or job (a job or routine on this computer with no project). claude_work lists the claude/ branches and open pull requests from them that Claude Code on the web made in its GitHub repository. suggested is the Team, Watch or Ignore Catervas suggests (null for a gone folder), choice the owner's own, already_team the slug of the team whose project folder is one of folders."
     },
     "findingOfferResult": {
       "description": "history is claude_code when the history's projects folder holds a .jsonl file, else none; sessions_dir_exists whether that folder is there.",
@@ -4312,6 +4418,24 @@
           "const": true
         }
       }
+    },
+    "githubConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["login"],
+      "properties": { "login": { "type": "string" } }
+    },
+    "githubStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connected"],
+      "properties": { "connected": { "type": "boolean" }, "login": { "type": "string" } }
+    },
+    "githubCopyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["folder"],
+      "properties": { "folder": { "type": "string" } }
     },
     "repoAddRequest": {
       "title": "Repo Add Request",

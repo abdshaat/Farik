@@ -60,11 +60,25 @@ impl SecretAt {
         }
     }
 
+    /// What a key of the computer's own is kept under (phase 10 step 06d), such as the GitHub
+    /// token: the account `machine:<name>`, in no project.
+    #[must_use]
+    pub fn machine(name: &str) -> SecretAt {
+        SecretAt {
+            project_id: String::new(),
+            agent_id: String::new(),
+            server: name.to_string(),
+        }
+    }
+
     /// The keychain account, and the key in `connectors.json`:
     /// `connector:<project_id>:<agent_id>:<server>`; a mailbox's, which has no agent, is
-    /// `mailbox:<project_id>:<purpose>`.
+    /// `mailbox:<project_id>:<purpose>`; a computer's own is `machine:<name>`.
     #[must_use]
     pub fn account(&self) -> String {
+        if self.project_id.is_empty() {
+            return format!("machine:{}", self.server);
+        }
         if self.agent_id.is_empty() {
             return format!("mailbox:{}:{}", self.project_id, self.server);
         }

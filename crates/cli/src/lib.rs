@@ -208,6 +208,10 @@ pub struct CliIo<'a> {
     /// Catervas's own executable, which runs Catervas's own connectors (ADR 0038): none here, so a
     /// test names the binary it built, and `std::env::current_exe()` in `main`.
     pub own_program: Option<PathBuf>,
+    /// Where GitHub is and how `git clone` is run (phase 10 step 06d): GitHub itself and `git` here
+    /// and in `main`, which a test points at a fixture of its own.
+    #[cfg(unix)]
+    pub github: catervas_runtime::github::GithubPlaces,
     /// Whether `catervas serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -267,6 +271,8 @@ impl<'a> CliIo<'a> {
             registered_apps: catervas_runtime::registered_apps::REGISTERED_APPS,
             own_program: None,
             #[cfg(unix)]
+            github: catervas_runtime::github::GithubPlaces::default(),
+            #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
@@ -312,6 +318,8 @@ impl CliIo<'_> {
             #[cfg(unix)]
             connector_secrets: Arc::clone(&self.connector_secrets),
             own_program: self.own_program.clone(),
+            #[cfg(unix)]
+            github: self.github.clone(),
             #[cfg(feature = "e2e")]
             admit_local_preview: self.admit_local_preview,
             #[cfg(feature = "e2e")]

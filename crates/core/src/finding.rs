@@ -63,6 +63,8 @@ pub enum Candidate {
     Gone,
     /// A project the owner added by hand.
     ByHand,
+    /// A repository on the owner's GitHub that no folder on this computer has.
+    Github,
 }
 
 /// The list's sections a row can sit in.
@@ -108,7 +110,7 @@ pub fn suggest(candidate: Candidate, now: DateTime<Utc>) -> Option<Choice> {
             })
         }
         Candidate::Explored => Some(Choice::Ignore),
-        Candidate::ClaudeAi | Candidate::ComputerJob => Some(Choice::Watch),
+        Candidate::ClaudeAi | Candidate::ComputerJob | Candidate::Github => Some(Choice::Watch),
         Candidate::ByHand => Some(Choice::Team),
         Candidate::Gone => None,
     }
@@ -124,7 +126,8 @@ pub fn section_of(candidate: Candidate) -> Section {
         Candidate::Yours { .. }
         | Candidate::Connector { .. }
         | Candidate::ClaudeAi
-        | Candidate::ByHand => Section::Main,
+        | Candidate::ByHand
+        | Candidate::Github => Section::Main,
     }
 }
 

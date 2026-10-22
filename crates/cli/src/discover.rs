@@ -54,6 +54,7 @@ fn nothing_found() -> Found {
         maybe_same_sessions: 0,
         by_hand: Vec::new(),
         claude_ai: ClaudeAi::default(),
+        github: Vec::new(),
     }
 }
 

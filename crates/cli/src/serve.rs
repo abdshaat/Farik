@@ -232,6 +232,8 @@ async fn run<'io>(
             state,
             claude,
             home: home_of(io),
+            secrets: Arc::clone(&io.connector_secrets),
+            github: io.github.clone(),
         }));
     }
     // Looks again each day while finding is on (the first scan is the owner's to ask for).

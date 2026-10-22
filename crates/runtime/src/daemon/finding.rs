@@ -22,9 +22,14 @@ use catervas_store::claude_export::{ExportError, ExportLimits, import_claude_exp
 use catervas_store::claude_history::{HistoryError, add_project_by_hand, place_sessions};
 use catervas_store::git::Git;
 use catervas_store::machine::{
-    MACHINE_DB, MachineIndex, Ownership, forget_machine_index, open_machine_index,
+    ClaudeWork, GithubProject, MACHINE_DB, MachineIndex, Ownership, WorkKind, forget_machine_index,
+    open_machine_index,
 };
 use catervas_store::repos::{MemberPathRefusal, member_root};
+
+use crate::claude::Secret;
+use crate::connectors::ConnectorSecrets;
+use crate::github::{self, GithubClient, GithubError, GithubPlaces};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 
@@ -104,6 +109,10 @@ pub trait FindingHost: Send + Sync {
     ///
     /// A sentence saying what could not be written.
     fn set_export_dismissed(&self, dismissed: bool) -> Result<(), String>;
+    /// Where this computer's own keys are kept: the GitHub token among them.
+    fn secrets(&self) -> Arc<dyn ConnectorSecrets>;
+    /// Where GitHub is and how a repository is cloned from it.
+    fn github(&self) -> GithubPlaces;
 }
 
 /// Where a scan is.
@@ -210,7 +219,7 @@ impl Finding {
 }
 
 /// The methods the hub answers for finding (docs/schemas/rpc.schema.json).
-pub(super) const METHODS: [&str; 18] = [
+pub(super) const METHODS: [&str; 22] = [
     "finding.offer",
     "finding.catalog",
     "finding.start",
@@ -229,6 +238,10 @@ pub(super) const METHODS: [&str; 18] = [
     "finding.pause",
     "finding.export_dismissed",
     "finding.forget",
+    "github.connect",
+    "github.status",
+    "github.disconnect",
+    "github.copy",
 ];
 
 /// A refusal: its code, then its sentence.
@@ -296,8 +309,179 @@ pub(super) fn call(hub: &Hub, method: &str, params: &Value) -> Result<Value, Fai
                 .map_err(|why| internal(&why))?;
             Ok(json!({}))
         }
+        "github.connect" => github_connect(hub, host.as_ref(), params),
+        "github.status" => Ok(github_status(host.as_ref())),
+        "github.disconnect" => github_disconnect(host.as_ref()),
+        "github.copy" => github_copy(hub, host.as_ref(), params),
         _ => forget(hub, host.as_ref(), params),
     }
+}
+
+/// What a failure to speak to GitHub is told as.
+fn github_refusal(error: &GithubError) -> Failure {
+    match error {
+        GithubError::Refused => refusal(
+            "github_token_refused",
+            "GitHub did not accept that token: check that it is a fine-grained token that has not expired",
+        ),
+        GithubError::RateLimited { .. } => refusal("github_rate_limited", &error.to_string()),
+        GithubError::Failed(why) => refusal("github_unreachable", why),
+    }
+}
+
+/// `github.connect`: checks the token with GitHub, keeps it, and reads the repositories. The
+/// refusal never holds the token.
+fn github_connect(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Failure> {
+    let token = Secret::new(
+        params["token"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    );
+    if token.expose().is_empty() {
+        return Err(refusal("github_token_refused", "paste the token first"));
+    }
+    let places = host.github();
+    let client = GithubClient::new_at(&places.api).map_err(|e| github_refusal(&e))?;
+    let login = github::block_on(client.login(&token))
+        .map_err(|e| internal(&e))?
+        .map_err(|e| github_refusal(&e))?;
+    github::save_connection(host.secrets().as_ref(), &token, &login)
+        .map_err(|why| refusal("no_secret_store", &why))?;
+    // The first read. GitHub saying no here (a limit) leaves the connection kept and the list
+    // empty until the next scan.
+    let mut index = open_index(host)?;
+    let _ = github::read_into_index(
+        &places.api,
+        &token,
+        &mut index,
+        host.now(),
+        &AtomicBool::new(false),
+    );
+    hub.finding.bump();
+    Ok(json!({ "login": login }))
+}
+
+/// `github.status`: whether a token is kept, and whose it is.
+fn github_status(host: &dyn FindingHost) -> Value {
+    match github::load_connection(host.secrets().as_ref()) {
+        Ok(Some((_, login))) if !login.is_empty() => json!({ "connected": true, "login": login }),
+        Ok(Some(_)) => json!({ "connected": true }),
+        _ => json!({ "connected": false }),
+    }
+}
+
+/// `github.disconnect`: forgets the token.
+fn github_disconnect(host: &dyn FindingHost) -> Result<Value, Failure> {
+    github::delete_token(host.secrets().as_ref()).map_err(|why| internal(&why))?;
+    Ok(json!({}))
+}
+
+/// The folder `parent`, relative to home, which need not exist yet: its nearest folder that does,
+/// followed through its links, must be inside home. A `..`, a root or a prefix is refused.
+fn parent_in_home(home: &Path, parent: &str) -> Result<PathBuf, Failure> {
+    let outside = || refusal("outside_home", "choose a folder inside your home folder");
+    let home = std::fs::canonicalize(home).map_err(|e| internal(&e))?;
+    let mut parts = Vec::new();
+    for component in Path::new(parent).components() {
+        match component {
+            std::path::Component::Normal(part) => parts.push(part),
+            std::path::Component::CurDir => {}
+            _ => return Err(outside()),
+        }
+    }
+    let mut folder = home.clone();
+    for (made, part) in parts.iter().enumerate() {
+        let next = folder.join(part);
+        if std::fs::symlink_metadata(&next).is_err() {
+            return Ok(parts[made..]
+                .iter()
+                .fold(folder, |path, part| path.join(part)));
+        }
+        folder = std::fs::canonicalize(&next).map_err(|_| outside())?;
+        if !folder.starts_with(&home) {
+            return Err(outside());
+        }
+    }
+    Ok(folder)
+}
+
+/// The folder name a repository is copied to when the owner gives none: its name, lowercase.
+fn folder_name_of(full_name: &str) -> String {
+    let name: String = full_name
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .to_lowercase()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_lowercase() || c.is_ascii_digit() {
+                c
+            } else {
+                '-'
+            }
+        })
+        .take(64)
+        .collect();
+    name.trim_matches('-').to_string()
+}
+
+/// `github.copy`: clones a repository of the owner's into a new folder, and makes the folder a
+/// project like any other. The token reaches git through its environment alone.
+fn github_copy(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Failure> {
+    let full_name = params["full_name"]
+        .as_str()
+        .and_then(github::valid_full_name)
+        .ok_or_else(|| refusal("unknown_repository", "that is not a GitHub repository"))?;
+    let Some((token, _)) =
+        github::load_connection(host.secrets().as_ref()).map_err(|why| internal(&why))?
+    else {
+        return Err(refusal("github_not_connected", "connect GitHub first"));
+    };
+    let name = params["name"]
+        .as_str()
+        .map_or_else(|| folder_name_of(full_name), str::to_string);
+    let named = (1..=64).contains(&name.len())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !named {
+        return Err(refusal(
+            "bad_name",
+            "name the folder with lowercase letters, digits and hyphens",
+        ));
+    }
+    let parent = parent_in_home(&host.home(), params["parent"].as_str().unwrap_or_default())?;
+    let folder = parent.join(&name);
+    if std::fs::symlink_metadata(&folder).is_ok() {
+        return Err(refusal(
+            "folder_taken",
+            "a folder with that name is already there",
+        ));
+    }
+    let places = host.github();
+    let call = github::clone_call(&places.clone_base, full_name, &folder, &token);
+    (places.spawn)(&call)
+        .map_err(|why| refusal("copy_failed", &why.replace(token.expose(), "***")))?;
+    // The folder is a project now: added by hand with the repository's address, so that the row for
+    // the repository and the row for the folder are one. A scan then reads its jobs.
+    let folder = folder.canonicalize().unwrap_or(folder);
+    let mut index = open_index(host)?;
+    let _ = add_project_by_hand(
+        &mut index,
+        &name,
+        Some(&folder),
+        Some(&format!("https://github.com/{full_name}.git")),
+        &host.not_projects(),
+        host.now(),
+    );
+    drop(index);
+    if !host.paused() {
+        let _ = start(hub);
+    }
+    hub.finding.bump();
+    Ok(json!({ "folder": folder.to_string_lossy() }))
 }
 
 /// Whether Claude Code's folder holds a transcript, counted without reading any.
@@ -435,6 +619,23 @@ struct Row {
     already_team: Option<String>,
     gone: bool,
     section: Section,
+    claude_work: Vec<ClaudeWork>,
+    github: Option<GithubProject>,
+}
+
+/// A piece of Claude's work on GitHub, as the page reads it.
+fn work_json(work: &ClaudeWork) -> Value {
+    let mut shown = json!({
+        "kind": if work.kind == WorkKind::Pull { "pull" } else { "branch" },
+        "name": work.name,
+    });
+    if let Some(number) = work.number {
+        shown["number"] = json!(number);
+    }
+    if let Some(draft) = work.draft {
+        shown["draft"] = json!(draft);
+    }
+    shown
 }
 
 impl Row {
@@ -451,6 +652,14 @@ impl Row {
             "choice": self.choice.map(Choice::as_wire),
             "already_team": self.already_team,
             "gone": self.gone,
+            "claude_work": self.claude_work.iter().map(work_json).collect::<Vec<_>>(),
+            "github": self.github.as_ref().map(|repo| json!({
+                "full_name": repo.full_name,
+                "private": repo.private,
+                "default_branch": repo.default_branch,
+                "pushed_at": moment(repo.pushed_at),
+                "not_seen_lately": repo.not_seen_lately,
+            })),
         })
     }
 
@@ -598,6 +807,8 @@ fn build_listing(
             last_at,
             services,
             gone,
+            claude_work: Vec::new(),
+            github: None,
         }
     };
 
@@ -646,7 +857,7 @@ fn build_listing(
             .find_map(|project| project.name_by_hand.clone())
             .unwrap_or_else(|| name_of(&first.root));
         let at = last_at.unwrap_or(first.last_at);
-        rows.push(make(
+        let mut row = make(
             key,
             name,
             "folder",
@@ -659,7 +870,28 @@ fn build_listing(
             },
             used,
             false,
-        ));
+        );
+        row.claude_work = members
+            .iter()
+            .find(|project| !project.claude_work.is_empty())
+            .map(|project| project.claude_work.clone())
+            .unwrap_or_default();
+        rows.push(row);
+    }
+    for repo in &found.github {
+        let mut row = make(
+            repo.remote_key.clone(),
+            repo.full_name.clone(),
+            "github",
+            Vec::new(),
+            Some(repo.pushed_at),
+            Candidate::Github,
+            Vec::new(),
+            false,
+        );
+        row.claude_work.clone_from(&repo.claude_work);
+        row.github = Some(repo.clone());
+        rows.push(row);
     }
     for hand in &found.by_hand {
         let key = hand
@@ -1227,6 +1459,7 @@ pub async fn rescan_daily(hub: Arc<Hub>) {
 mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
@@ -1238,7 +1471,9 @@ mod tests {
     use catervas_core::claude_services::catalog::CATALOG;
 
     use super::{FindingHost, FindingProgress, call, rescan_daily};
+    use crate::connectors::{ConnectorSecrets, MemoryConnectorSecrets, SecretAt};
     use crate::daemon::hub::{Hub, IdleStatus, IdleTeam, TeamSlug};
+    use crate::github::GithubPlaces;
 
     fn now() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-10-22T12:00:00Z")
@@ -1253,6 +1488,8 @@ mod tests {
         paused: AtomicBool,
         dismissed: AtomicBool,
         scans: AtomicU64,
+        secrets: Arc<MemoryConnectorSecrets>,
+        api: Mutex<String>,
     }
 
     impl Fake {
@@ -1267,6 +1504,8 @@ mod tests {
                 paused: AtomicBool::new(false),
                 dismissed: AtomicBool::new(false),
                 scans: AtomicU64::new(0),
+                secrets: Arc::new(MemoryConnectorSecrets::default()),
+                api: Mutex::new(String::new()),
             })
         }
 
@@ -1333,6 +1572,15 @@ mod tests {
             self.dismissed.store(dismissed, Ordering::SeqCst);
             Ok(())
         }
+        fn secrets(&self) -> Arc<dyn ConnectorSecrets> {
+            self.secrets.clone()
+        }
+        fn github(&self) -> GithubPlaces {
+            GithubPlaces {
+                api: self.api.lock().expect("api").clone(),
+                ..GithubPlaces::default()
+            }
+        }
     }
 
     fn asked(hub: &Hub, method: &str, params: &Value) -> Value {
@@ -1377,6 +1625,80 @@ mod tests {
             .map(|s| s["id"].as_str().expect("an id"))
             .collect();
         asked(&hub, "finding.declare_services", &json!({ "ids": ids }));
+    }
+
+    #[test]
+    fn connects_github_and_lists_its_repositories() {
+        let runtime = tokio::runtime::Runtime::new().expect("a runtime");
+        let fixture =
+            runtime.block_on(crate::github_fixture::Fixture::start("ghp_invented", now()));
+        let fake = Fake::new("github");
+        *fake.api.lock().expect("api") = fixture.address.clone();
+        let hub = Hub::default();
+        hub.set_finder(fake.clone());
+        let at = SecretAt::machine("github");
+
+        // Before connecting there is nothing, and a token GitHub refuses keeps nothing and is not
+        // quoted back.
+        assert_eq!(
+            asked(&hub, "github.status", &json!({})),
+            json!({ "connected": false })
+        );
+        let wrong = "ghp_wrong_invented_token";
+        let message = refused(&hub, "github.connect", &json!({ "token": wrong }));
+        assert!(message.starts_with("github_token_refused: "), "{message}");
+        assert!(!message.contains(wrong), "{message}");
+        assert!(fake.secrets.load(&at).expect("a store").is_none());
+
+        // A token it accepts is kept under machine:github, and answers the login.
+        let connected = asked(&hub, "github.connect", &json!({ "token": "ghp_invented" }));
+        assert_eq!(connected, json!({ "login": "octo" }));
+        let kept = fake.secrets.load(&at).expect("a store").expect("an entry");
+        assert!(kept.keys.values().any(|key| key.expose() == "ghp_invented"));
+        assert_eq!(at.account(), "machine:github");
+        assert_eq!(
+            asked(&hub, "github.status", &json!({})),
+            json!({ "connected": true, "login": "octo" })
+        );
+
+        // The list has the repositories that are not on this computer, with Claude's work.
+        let listed = asked(&hub, "finding.list", &json!({}));
+        let rows = listed["main"].as_array().expect("rows");
+        let shop = rows
+            .iter()
+            .find(|row| row["name"] == "octo/shop")
+            .unwrap_or_else(|| panic!("{listed}"));
+        assert_eq!(shop["kind"], "github", "{shop}");
+        assert_eq!(shop["suggested"], "watch", "{shop}");
+        assert_eq!(shop["key"], "github.com/octo/shop", "{shop}");
+        let work = shop["claude_work"].as_array().expect("work");
+        assert!(
+            work.contains(&json!({ "kind": "branch", "name": "claude/fix-login" })),
+            "{work:?}"
+        );
+        assert!(
+            work.contains(
+                &json!({ "kind": "pull", "name": "Fix the login", "number": 12, "draft": true })
+            ),
+            "{work:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row["name"] == "octo/notes"),
+            "{listed}"
+        );
+        assert!(
+            !rows.iter().any(|row| row["name"] == "octo/old-thing"),
+            "{listed}"
+        );
+
+        // Disconnecting forgets the key and lists no more of it.
+        asked(&hub, "github.disconnect", &json!({}));
+        assert!(fake.secrets.load(&at).expect("a store").is_none());
+        assert_eq!(
+            asked(&hub, "github.status", &json!({})),
+            json!({ "connected": false })
+        );
+        drop(runtime);
     }
 
     #[test]

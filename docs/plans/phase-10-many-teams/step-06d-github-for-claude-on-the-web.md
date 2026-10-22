@@ -110,7 +110,7 @@ Tests:
   - The folder is a git repository whose `origin` is the given address.
   - The token was not in any process's arguments: the clone is spawned through a seam that records its arguments.
 
-- [ ] `feat(runtime): connect github, list its work and copy a repository`
+- [x] `feat(runtime): connect github, list its work and copy a repository`
 
 ### Task 4: The pages
 

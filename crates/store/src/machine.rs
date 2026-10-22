@@ -1282,6 +1282,10 @@ impl MachineIndex {
     /// # Errors
     ///
     /// `Sqlite` when the index cannot be read.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one pass over the sessions, and the joins of what the other tables hold"
+    )]
     pub fn found(&self) -> Result<Found, StoreError> {
         let tokens = self.reply_tokens()?;
         let roots = self.root_flags()?;
@@ -1368,7 +1372,7 @@ impl MachineIndex {
         let mut projects: Vec<FoundProject> = projects.into_values().collect();
         projects.sort_by(|a, b| b.last_at.cmp(&a.last_at).then_with(|| a.root.cmp(&b.root)));
         let by_hand = self.join_hand_projects(&mut projects)?;
-        let github = self.join_github(&mut projects)?;
+        let github = self.join_github(&mut projects, &by_hand)?;
         let mut gone: Vec<GoneFolder> = gone.into_values().collect();
         gone.sort_by(|a, b| {
             b.last_at
@@ -1448,8 +1452,12 @@ impl MachineIndex {
     }
 
     /// Gives each found project its GitHub repository's Claude work and the `Github` source, and
-    /// returns the repositories no found project has.
-    fn join_github(&self, projects: &mut [FoundProject]) -> Result<Vec<GithubProject>, StoreError> {
+    /// returns the repositories no found project, and no folder added by hand, has.
+    fn join_github(
+        &self,
+        projects: &mut [FoundProject],
+        by_hand: &[HandProject],
+    ) -> Result<Vec<GithubProject>, StoreError> {
         let mut work: HashMap<String, Vec<ClaudeWork>> = HashMap::new();
         let mut statement = self.connection.prepare(
             "SELECT full_name, kind, name, number, draft, updated_at FROM github_claude_work
@@ -1480,7 +1488,10 @@ impl MachineIndex {
             let full_name: String = row.get(0)?;
             let remote_key: String = row.get(1)?;
             let claude_work = work.remove(&full_name).unwrap_or_default();
-            let mut on_this_computer = false;
+            // A project added by hand with this repository's address is on this computer too.
+            let mut on_this_computer = by_hand.iter().any(|hand| {
+                hand.root.is_some() && hand.remote.as_deref() == Some(remote_key.as_str())
+            });
             for project in projects
                 .iter_mut()
                 .filter(|project| project.remote.as_deref() == Some(remote_key.as_str()))

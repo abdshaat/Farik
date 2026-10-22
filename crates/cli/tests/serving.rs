@@ -1192,6 +1192,17 @@ fn serving_in_with(
     recorded_engine: bool,
     retry: Option<Duration>,
 ) -> Serving {
+    serving_custom(cwd, env, recorded_engine, retry, Box::new(|_| {}))
+}
+
+/// `serving_in_with`, then `customize` of the harness before serve starts.
+fn serving_custom(
+    cwd: &Path,
+    env: std::collections::BTreeMap<String, String>,
+    recorded_engine: bool,
+    retry: Option<Duration>,
+    customize: Box<dyn FnOnce(&mut catervas::CliIo<'_>) + Send>,
+) -> Serving {
     let (out, err) = (SharedOut::default(), SharedOut::default());
     let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
     let (cwd, port) = (cwd.to_path_buf(), free_port());
@@ -1208,6 +1219,7 @@ fn serving_in_with(
             io.stdout = Box::new(shared_out);
             io.stderr = Box::new(shared_err);
             io.interrupts = catervas::Interrupts::Channel(interrupts);
+            customize(io);
         })
     });
     until("the link is printed", || {
@@ -2659,6 +2671,151 @@ fn finds_projects_through_serve() {
             .as_str()
             .is_some_and(|said| said.contains("retention_not_offered")),
         "{refused}"
+    );
+
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+/// `git` with `args` in `folder`, as a test's own author, answering its output.
+fn git_in(folder: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .current_dir(folder)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one test of a copy from its bare repository to the project it becomes"
+)]
+fn copies_a_repository_to_this_computer() {
+    use catervas_runtime::claude::Secret;
+    use catervas_runtime::connectors::MemoryConnectorSecrets;
+    use catervas_runtime::github::{CloneCall, GithubPlaces, run_git, save_connection};
+
+    let (home, state) = setup_folders("serve-github-copy");
+    let home = home.canonicalize().expect("a home");
+    // The "GitHub" the clone talks to is a bare repository on this computer, under owner/name.git.
+    let remote = scratch("serve-github-copy-remote")
+        .canonicalize()
+        .expect("a remote folder");
+    let made = remote.join("made");
+    std::fs::create_dir_all(&made).expect("a folder");
+    git_in(&made, &["init", "-b", "main"]);
+    std::fs::write(made.join("README.md"), "# An invented shop\n").expect("a file");
+    git_in(&made, &["add", "README.md"]);
+    git_in(&made, &["commit", "-m", "Start"]);
+    std::fs::create_dir_all(remote.join("octo")).expect("an owner folder");
+    let bare = remote.join("octo/shop.git");
+    git_in(
+        &remote,
+        &[
+            "clone",
+            "--bare",
+            &made.display().to_string(),
+            &bare.display().to_string(),
+        ],
+    );
+
+    let token = "ghp_invented_for_the_copy_test";
+    let secrets = Arc::new(MemoryConnectorSecrets::default());
+    save_connection(secrets.as_ref(), &Secret::new(token.to_string()), "octo").expect("a token");
+    let spawned: Arc<Mutex<Vec<CloneCall>>> = Arc::default();
+    let places = GithubPlaces {
+        // Nothing here asks GitHub's API: the token is already kept.
+        api: "http://127.0.0.1:1".to_string(),
+        clone_base: format!("file://{}", remote.display()),
+        spawn: {
+            let spawned = Arc::clone(&spawned);
+            Arc::new(move |call| {
+                spawned.lock().expect("calls").push(call.clone());
+                run_git(call)
+            })
+        },
+    };
+    let mut env = setup_env(&home, &state);
+    signed_in(&mut env, "serving-github-copy");
+    let serving = serving_custom(
+        &home,
+        env,
+        true,
+        None,
+        Box::new(move |io| {
+            io.github = places;
+            io.connector_secrets = secrets;
+        }),
+    );
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+
+    let copied = hub(
+        "github.copy",
+        json!({ "full_name": "octo/shop", "parent": "work" }),
+    );
+    let folder = home.join("work/shop");
+    assert_eq!(
+        copied["result"]["folder"],
+        json!(folder.display().to_string()),
+        "{copied}"
+    );
+    // The folder is a git repository whose origin is the given address.
+    assert_eq!(
+        git_in(&folder, &["remote", "get-url", "origin"]),
+        format!("file://{}/octo/shop.git", remote.display())
+    );
+    assert!(folder.join("README.md").exists());
+    // The token went to git through its environment alone.
+    let calls = spawned.lock().expect("calls").clone();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(
+        calls[0]
+            .args
+            .iter()
+            .all(|argument| !argument.contains(token)),
+        "{:?}",
+        calls[0].args
+    );
+    assert!(
+        calls[0]
+            .env
+            .iter()
+            .any(|(name, value)| name == "GIT_CONFIG_VALUE_0" && value.contains(token)),
+        "{:?}",
+        calls[0]
+            .env
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+    );
+    // The folder is a project now, and a name that is taken is refused.
+    let listed = hub("finding.list", json!({}));
+    assert!(
+        listed["result"]["main"].as_array().is_some_and(|rows| rows
+            .iter()
+            .any(|row| row["folders"] == json!([folder.display().to_string()]))),
+        "{listed}"
+    );
+    let again = hub(
+        "github.copy",
+        json!({ "full_name": "octo/shop", "parent": "work" }),
+    );
+    assert!(
+        again["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("folder_taken")),
+        "{again}"
     );
 
     let (ran, _, err) = serving.interrupted();

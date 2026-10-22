@@ -3,13 +3,20 @@
 //! The client speaks to one fixed address, follows no redirect and uses no proxy, and every answer
 //! is read for the few fields named here and no others.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use catervas_store::machine::{ClaudeWork, GithubSeen, MachineIndex, WorkKind};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use crate::claude::Secret;
+use crate::connectors::{ConnectorEntry, ConnectorSecrets, SecretAt};
+use crate::credential::CredentialError;
 
 /// GitHub's address. Only the tests give [`GithubClient::new_at`] another.
 pub const GITHUB_API: &str = "https://api.github.com";
@@ -331,6 +338,238 @@ pub fn block_on<T>(future: impl std::future::Future<Output = T>) -> Result<T, St
         .build()
         .map(|runtime| runtime.block_on(future))
         .map_err(|error| error.to_string())
+}
+
+/// What the connector key store calls the GitHub token's entry: `machine:github`.
+const GITHUB_ACCOUNT: &str = "github";
+/// The name of the key inside that entry.
+const GITHUB_KEY: &str = "GITHUB_TOKEN";
+/// The name of the login kept beside it, which is not a secret but travels with the token.
+const GITHUB_LOGIN_KEY: &str = "GITHUB_LOGIN";
+/// The most repositories whose branches and pull requests one read asks for.
+const MOST_REPOSITORIES: usize = 60;
+
+/// What a store that failed said, which never holds a key.
+fn store_said(error: &CredentialError) -> String {
+    match error {
+        CredentialError::NoKeychain => {
+            "this computer has no keychain and no state folder to keep the GitHub token in"
+                .to_string()
+        }
+        CredentialError::Failed(why) => why.clone(),
+    }
+}
+
+/// The GitHub token kept for this computer, and the login it belongs to, when there is one.
+///
+/// # Errors
+///
+/// A sentence, holding none of the token, when the store cannot be read.
+pub fn load_connection(secrets: &dyn ConnectorSecrets) -> Result<Option<(Secret, String)>, String> {
+    let kept = secrets
+        .load(&SecretAt::machine(GITHUB_ACCOUNT))
+        .map_err(|error| store_said(&error))?;
+    Ok(kept.and_then(|entry| {
+        let token = entry.keys.get(GITHUB_KEY)?.clone();
+        let login = entry
+            .keys
+            .get(GITHUB_LOGIN_KEY)
+            .map(|login| login.expose().to_string())
+            .unwrap_or_default();
+        Some((token, login))
+    }))
+}
+
+/// Keeps `token`, and the `login` it belongs to, as this computer's GitHub connection, replacing
+/// any other.
+///
+/// # Errors
+///
+/// A sentence, holding none of the token, when the store cannot be written.
+pub fn save_connection(
+    secrets: &dyn ConnectorSecrets,
+    token: &Secret,
+    login: &str,
+) -> Result<(), String> {
+    let entry = ConnectorEntry {
+        spec_sha256: String::new(),
+        keys: BTreeMap::from([
+            (GITHUB_KEY.to_string(), token.clone()),
+            (GITHUB_LOGIN_KEY.to_string(), Secret::new(login.to_string())),
+        ]),
+        oauth: None,
+    };
+    secrets
+        .save(&SecretAt::machine(GITHUB_ACCOUNT), &entry)
+        .map(|_| ())
+        .map_err(|error| store_said(&error))
+}
+
+/// Forgets this computer's GitHub token.
+///
+/// # Errors
+///
+/// A sentence when the store cannot be written.
+pub fn delete_token(secrets: &dyn ConnectorSecrets) -> Result<(), String> {
+    secrets
+        .delete(&SecretAt::machine(GITHUB_ACCOUNT))
+        .map_err(|error| store_said(&error))
+}
+
+/// Reads the owner's repositories and the work Claude on the web made in them, and keeps what it
+/// read in `index`. Stops between two repositories once `stop` is set, or once GitHub says no, and
+/// keeps what it had.
+///
+/// # Errors
+///
+/// [`GithubError`] when the repositories themselves could not be read, or the index refused.
+pub fn read_into_index(
+    api: &str,
+    token: &Secret,
+    index: &mut MachineIndex,
+    now: DateTime<Utc>,
+    stop: &AtomicBool,
+) -> Result<usize, GithubError> {
+    let client = GithubClient::new_at(api)?;
+    let seen = block_on(async {
+        let repositories = client.repositories(token, now).await?;
+        let mut seen = Vec::new();
+        for repository in repositories.into_iter().take(MOST_REPOSITORIES) {
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
+            let (branches, pulls) = tokio::join!(
+                client.claude_branches(token, &repository.full_name),
+                client.claude_pulls(token, &repository.full_name)
+            );
+            let (Ok(branches), Ok(pulls)) = (branches, pulls) else {
+                // GitHub said no part way: what was read so far is kept.
+                break;
+            };
+            let mut work: Vec<ClaudeWork> = branches
+                .into_iter()
+                .map(|name| ClaudeWork {
+                    kind: WorkKind::Branch,
+                    name,
+                    number: None,
+                    draft: None,
+                    updated_at: None,
+                })
+                .collect();
+            work.extend(pulls.into_iter().map(|pull| ClaudeWork {
+                kind: WorkKind::Pull,
+                name: pull.title,
+                number: Some(pull.number),
+                draft: Some(pull.draft),
+                updated_at: Some(pull.updated_at),
+            }));
+            seen.push(GithubSeen {
+                full_name: repository.full_name,
+                private: repository.private,
+                pushed_at: repository.pushed_at,
+                default_branch: repository.default_branch,
+                work,
+            });
+        }
+        Ok::<_, GithubError>(seen)
+    })
+    .map_err(|why| failed(&why))??;
+    index
+        .replace_github(&seen, now)
+        .map_err(|_| failed("the list of repositories could not be kept"))?;
+    Ok(seen.len())
+}
+
+/// One run of `git clone`: its arguments, and the environment it is given beside the process's own.
+/// The token is in the environment, never in the arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CloneCall {
+    /// The arguments after `git`.
+    pub args: Vec<String>,
+    /// The variables set for it.
+    pub env: Vec<(String, String)>,
+}
+
+/// What runs a clone: `git` itself, or a test's recording of it.
+pub type GitSpawn = Arc<dyn Fn(&CloneCall) -> Result<(), String> + Send + Sync>;
+
+/// Where GitHub is, and how a repository is cloned from it.
+#[derive(Clone)]
+pub struct GithubPlaces {
+    /// The API's address ([`GITHUB_API`]).
+    pub api: String,
+    /// The address `<owner>/<name>.git` is cloned from, `https://github.com`.
+    pub clone_base: String,
+    /// What runs `git clone`.
+    pub spawn: GitSpawn,
+}
+
+impl Default for GithubPlaces {
+    fn default() -> Self {
+        Self {
+            api: GITHUB_API.to_string(),
+            clone_base: "https://github.com".to_string(),
+            spawn: Arc::new(run_git),
+        }
+    }
+}
+
+/// The clone of `full_name` into `folder`: the token goes to git through its environment as an
+/// extra header for github.com, and git never asks a terminal.
+#[must_use]
+pub fn clone_call(clone_base: &str, full_name: &str, folder: &Path, token: &Secret) -> CloneCall {
+    CloneCall {
+        args: vec![
+            "clone".to_string(),
+            "--".to_string(),
+            format!("{}/{full_name}.git", clone_base.trim_end_matches('/')),
+            folder.to_string_lossy().into_owned(),
+        ],
+        env: vec![
+            ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
+            (
+                "GIT_CONFIG_KEY_0".to_string(),
+                "http.https://github.com/.extraheader".to_string(),
+            ),
+            (
+                "GIT_CONFIG_VALUE_0".to_string(),
+                format!("AUTHORIZATION: bearer {}", token.expose()),
+            ),
+            ("GIT_TERMINAL_PROMPT".to_string(), "0".to_string()),
+        ],
+    }
+}
+
+/// Runs `git` with `call`, and answers git's last line of complaint, the token cut out of it.
+///
+/// # Errors
+///
+/// A sentence when git could not run or the clone failed.
+pub fn run_git(call: &CloneCall) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(&call.args)
+        .envs(call.env.iter().map(|(name, value)| (name, value)))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|_| "git could not be run".to_string())?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let mut last = String::from_utf8_lossy(&output.stderr)
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("git could not copy that repository")
+        .trim()
+        .to_string();
+    for (_, value) in &call.env {
+        if let Some(token) = value.strip_prefix("AUTHORIZATION: bearer ")
+            && !token.is_empty()
+        {
+            last = last.replace(token, "***");
+        }
+    }
+    Err(last)
 }
 
 #[cfg(test)]

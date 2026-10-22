@@ -8,7 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use catervas_protocol::clock::Clock;
 use catervas_runtime::computer::program_output;
+use catervas_runtime::connectors::ConnectorSecrets;
 use catervas_runtime::daemon::{FindingHost, FindingProgress};
+use catervas_runtime::github::{GithubPlaces, load_connection, read_into_index};
 use catervas_store::claude_history::{
     ReadProgress, ReadSummary, find_copies, place_sessions, read_transcripts_while,
 };
@@ -166,6 +168,10 @@ pub(crate) struct CliFinder {
     pub claude: PathBuf,
     /// Home.
     pub home: PathBuf,
+    /// Where this computer's own keys are kept: the GitHub token among them.
+    pub secrets: Arc<dyn ConnectorSecrets>,
+    /// Where GitHub is, and how a repository is cloned from it.
+    pub github: GithubPlaces,
 }
 
 impl CliFinder {
@@ -197,8 +203,23 @@ impl FindingHost for CliFinder {
                 reading: progress.reading,
                 unreadable: progress.unreadable,
             });
-        })
-        .map(|_| ())
+        })?;
+        // The GitHub phase, once the owner connected it. GitHub saying no (a limit, a token that
+        // expired) leaves what was read before, and is not a failed scan.
+        if !stop.load(Ordering::SeqCst)
+            && let Ok(Some((token, _))) = load_connection(self.secrets.as_ref())
+        {
+            let _ = read_into_index(&self.github.api, &token, &mut index, self.clock.now(), stop);
+        }
+        Ok(())
+    }
+
+    fn secrets(&self) -> Arc<dyn ConnectorSecrets> {
+        Arc::clone(&self.secrets)
+    }
+
+    fn github(&self) -> GithubPlaces {
+        self.github.clone()
     }
 
     fn state_dir(&self) -> PathBuf {
