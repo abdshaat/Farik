@@ -276,12 +276,12 @@ impl<'a> CliIo<'a> {
 impl CliIo<'_> {
     /// A harness for one more team of the same serve (ADR 0059): the same machine, clock, engine,
     /// environment and keys, writing to `stdout` and `stderr` and hearing `interrupts`.
-    pub(crate) fn fork(
+    pub(crate) fn fork<'x>(
         &self,
-        stdout: Box<dyn Write>,
-        stderr: Box<dyn Write>,
+        stdout: Box<dyn Write + 'x>,
+        stderr: Box<dyn Write + 'x>,
         interrupts: tokio::sync::mpsc::UnboundedReceiver<()>,
-    ) -> CliIo<'static> {
+    ) -> CliIo<'x> {
         CliIo {
             stdin: Box::new(std::io::empty()),
             stdin_is_terminal: false,
