@@ -585,9 +585,13 @@ mod tests {
         assert_eq!(exports.0, USER);
         assert_eq!(exports.1, "2026-10-05T12:00:00.000Z");
         assert_eq!(setup.rows(), 1 + 3 + 2);
-        assert_eq!(
-            setup.index.applied_migrations().expect("versions").last(),
-            Some(&4)
+        assert!(
+            setup
+                .index
+                .applied_migrations()
+                .expect("versions")
+                .contains(&4),
+            "the claude.ai tables come with migration 4"
         );
     }
 

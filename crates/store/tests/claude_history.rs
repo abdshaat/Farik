@@ -5,11 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
+use catervas_core::claude_history::Source;
 use catervas_core::claude_history::fixtures::{CLAUDE_CODE_2_1_296, a_reply_line, a_turn_line};
 use catervas_core::pricing::Usage;
 use catervas_protocol::event::EventKind;
 use catervas_protocol::event::fixtures::a_new_event;
-use catervas_store::claude_history::{place_sessions, read_transcripts};
+use catervas_store::claude_history::{find_copies, place_sessions, read_transcripts};
 use catervas_store::files::fixtures::TempProject;
 use catervas_store::git::fixtures::git_in;
 use catervas_store::machine::{Found, MACHINE_DB, MachineIndex, Ownership, open_machine_index};
@@ -97,10 +98,45 @@ impl World {
         id
     }
 
+    /// A session in `cwd` whose replies are `(message id, second, tokens)`, written under `file`
+    /// (transcripts are read in the order of their names, which is the order sessions are indexed in).
+    fn session_of(&self, file: &str, id: &str, cwd: &Path, replies: &[(&str, u32, u64)]) {
+        let cwd = cwd.to_string_lossy();
+        let mut lines = vec![a_turn_line(id, &cwd, "2026-10-12T09:00:00Z")];
+        for (message, second, count) in replies {
+            let at = format!("2026-10-12T09:{:02}:{:02}Z", second / 60, second % 60);
+            lines.push(a_reply_line(id, &cwd, &at, message, MODEL, tokens(*count)));
+        }
+        std::fs::write(
+            self.temp.root.join("claude/projects/-x").join(file),
+            lines.join("\n") + "\n",
+        )
+        .expect("a transcript");
+    }
+
+    /// The rows of the two copy tables, as text.
+    fn links(&self) -> Vec<String> {
+        let connection = rusqlite::Connection::open(self.temp.root.join("state").join(MACHINE_DB))
+            .expect("the index opens");
+        let mut lines = Vec::new();
+        for query in [
+            "SELECT 'link ' || session_id || ' ' || other_id || ' ' || kind FROM session_links ORDER BY 1",
+            "SELECT 'reply ' || reply_key || ' ' || same_as FROM reply_copies ORDER BY 1",
+        ] {
+            let mut statement = connection.prepare(query).expect("a statement");
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(0))
+                .expect("a query");
+            lines.extend(rows.map(|row| row.expect("a row")));
+        }
+        lines
+    }
+
     fn scan(&self) -> Found {
         let mut index = self.index();
         read_transcripts(&mut index, &self.temp.root.join("claude"), now()).expect("reads");
         place_sessions(&mut index, &[self.home()], now()).expect("places");
+        find_copies(&mut index).expect("finds copies");
         index.found().expect("found")
     }
 
@@ -327,4 +363,114 @@ fn treats_a_file_where_a_folder_was_as_gone() {
         .collect::<Result<_, _>>()
         .expect("rows");
     assert_eq!(places, vec!["gone".to_string()]);
+}
+
+const A: &str = "aaaaaaaa-0000-4000-8000-000000000001";
+const B: &str = "aaaaaaaa-0000-4000-8000-000000000002";
+const C: &str = "aaaaaaaa-0000-4000-8000-000000000003";
+
+/// Four replies at four different seconds, each with its own usage.
+const FOUR: [(&str, u32, u64); 4] = [("m1", 5, 1), ("m2", 65, 2), ("m3", 125, 3), ("m4", 185, 4)];
+
+/// The same four, under new message ids.
+fn copy_of_four(prefix: &str) -> Vec<(String, u32, u64)> {
+    FOUR.iter()
+        .map(|(id, second, count)| (format!("{prefix}{id}"), *second, *count))
+        .collect()
+}
+
+fn as_borrowed(replies: &[(String, u32, u64)]) -> Vec<(&str, u32, u64)> {
+    replies
+        .iter()
+        .map(|(id, second, count)| (id.as_str(), *second, *count))
+        .collect()
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn counts_a_teleported_copy_once() {
+    let world = World::new("counts-teleported-copy-once");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    world.session_of("a.jsonl", A, &shop, &FOUR);
+    let copy = copy_of_four("copy-");
+    world.session_of("b.jsonl", B, &shop, &as_borrowed(&copy));
+
+    let found = world.scan();
+
+    assert_eq!(world.links()[0], format!("link {B} {A} copy_of"));
+    let project = &found.projects[0];
+    assert_eq!(project.own.sessions, 1);
+    assert_eq!(project.own.tokens.get(MODEL), Some(&tokens(10)));
+    assert_eq!(
+        project.sources,
+        [Source::Local, Source::Teleported].into_iter().collect()
+    );
+    assert_eq!(found.maybe_same_sessions, 0);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn does_not_link_sessions_sharing_one_reply_by_chance() {
+    let world = World::new("no-link-by-chance");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    world.session_of("a.jsonl", A, &shop, &[("a1", 5, 1), ("a2", 65, 2)]);
+    world.session_of("b.jsonl", B, &shop, &[("b1", 5, 1), ("b2", 66, 7)]);
+
+    let found = world.scan();
+
+    assert_eq!(world.links(), Vec::<String>::new());
+    let project = &found.projects[0];
+    assert_eq!(project.own.sessions, 2);
+    assert_eq!(project.own.tokens.get(MODEL), Some(&tokens(1 + 2 + 1 + 7)));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn keeps_a_resumed_session_apart_from_a_copy() {
+    let world = World::new("resumed-is-not-a-copy");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    world.session_of("a.jsonl", A, &shop, &FOUR);
+    // A resumed session repeats the earlier replies under the same message ids.
+    world.session_of("b.jsonl", B, &shop, &FOUR);
+
+    let found = world.scan();
+
+    assert_eq!(world.links(), Vec::<String>::new());
+    assert_eq!(found.projects[0].own.sessions, 2);
+    assert!(!found.projects[0].sources.contains(&Source::Teleported));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn marks_ambiguous_copies_maybe_the_same() {
+    let world = World::new("marks-maybe-the-same");
+    let shop = world.repository("shop", Some("me@example.invalid"));
+    world.session_of("a.jsonl", A, &shop, &FOUR);
+    let (one, two) = (copy_of_four("one-"), copy_of_four("two-"));
+    world.session_of("b.jsonl", B, &shop, &as_borrowed(&one));
+    let found = world.scan();
+    assert_eq!(world.links()[0], format!("link {B} {A} copy_of"));
+    assert_eq!(found.maybe_same_sessions, 0);
+
+    world.session_of("c.jsonl", C, &shop, &as_borrowed(&two));
+    let found = world.scan();
+
+    let links: Vec<String> = world
+        .links()
+        .into_iter()
+        .filter(|line| line.starts_with("link"))
+        .collect();
+    assert_eq!(
+        links,
+        [
+            format!("link {A} {B} maybe_same"),
+            format!("link {A} {C} maybe_same"),
+            format!("link {B} {C} maybe_same"),
+        ]
+    );
+    assert_eq!(found.maybe_same_sessions, 3);
+    let project = &found.projects[0];
+    assert_eq!(project.own.sessions, 3);
+    assert_eq!(project.own.tokens.get(MODEL), Some(&tokens(10)));
+    assert!(!project.sources.contains(&Source::Teleported));
 }

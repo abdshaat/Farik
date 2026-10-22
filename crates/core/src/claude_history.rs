@@ -755,14 +755,23 @@ fn replies_counted_once(
 /// else the earliest session's, then the lowest row id, then the smallest key.
 #[must_use]
 pub fn copies_among(sessions: &[SessionReplies]) -> Copies {
-    let mut pairs = Vec::new();
-    for first in 0..sessions.len() {
-        for second in first + 1..sessions.len() {
-            if are_linked(&sessions[first], &sessions[second]) {
-                pairs.push((first, second));
-            }
+    // Only sessions that hold a fingerprint in common can be linked, so only they are compared.
+    let mut holders: BTreeMap<&String, BTreeSet<usize>> = BTreeMap::new();
+    for (index, session) in sessions.iter().enumerate() {
+        for (_, print) in &session.replies {
+            holders.entry(print).or_default().insert(index);
         }
     }
+    let mut candidates: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for group in holders.values().filter(|group| group.len() > 1) {
+        for first in group {
+            candidates.extend(group.range(first + 1..).map(|second| (*first, *second)));
+        }
+    }
+    let pairs: Vec<(usize, usize)> = candidates
+        .into_iter()
+        .filter(|(first, second)| are_linked(&sessions[*first], &sessions[*second]))
+        .collect();
     let mut degree = vec![0_usize; sessions.len()];
     for (first, second) in &pairs {
         degree[*first] += 1;

@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use catervas_core::claude_export::{ClaudeProjectRecord, ConversationRecord};
-use catervas_core::claude_history::ToolUse;
+use catervas_core::claude_history::{
+    Copies, CopyLink, SessionReplies, Source, ToolUse, reply_fingerprint,
+};
 use catervas_core::claude_services::{
     Call, Configured, ConfiguredServer, ServerKind, Service, ServiceSource, ServiceUse, SessionUse,
     Work, find_services, is_bookkeeping_folder,
@@ -276,6 +278,8 @@ pub struct FoundProject {
     pub own: Activity,
     /// Catervas's agents' sessions.
     pub catervas: Activity,
+    /// Where it was found: always `Local` here, and `Teleported` when one of its sessions has a copy.
+    pub sources: BTreeSet<Source>,
 }
 
 /// A folder that is no longer on this computer, with everything that worked in it.
@@ -302,6 +306,8 @@ pub struct Found {
     pub unreadable_sessions: u64,
     /// Lines in all transcript files that could not be read.
     pub unreadable_lines: u64,
+    /// Sessions that may be copies of others but are not certain enough to drop; none is dropped.
+    pub maybe_same_sessions: u64,
     /// What the imported claude.ai exports hold.
     pub claude_ai: ClaudeAi,
 }
@@ -913,13 +919,94 @@ impl MachineIndex {
         Ok(jobs)
     }
 
+    /// Every link between sessions as `(session_id, other_id, kind)`.
+    fn session_links(&self) -> Result<Vec<(String, String, String)>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT session_id, other_id, kind FROM session_links ORDER BY session_id, other_id",
+        )?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Every reply with the start of its session and the session's row id, sessions in row order and
+    /// replies in time order, for finding copies. A reply of a session no turn started reads as
+    /// starting its session.
+    pub(crate) fn session_replies(&self) -> Result<Vec<SessionReplies>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT sessions.session_id, sessions.rowid, coalesce(sessions.first_at, replies.at),
+                    replies.reply_key, replies.model, replies.at, replies.input_tokens,
+                    replies.output_tokens, replies.cache_read_tokens, replies.cache_write_tokens
+             FROM replies JOIN sessions ON sessions.session_id = replies.session_id
+             ORDER BY sessions.rowid, replies.at, replies.reply_key",
+        )?;
+        let mut sessions: Vec<SessionReplies> = Vec::new();
+        let mut rows = statement.query([])?;
+        while let Some(row) = rows.next()? {
+            let id: String = row.get(0)?;
+            let usage = Usage {
+                input_tokens: natural(row.get(6)?),
+                output_tokens: natural(row.get(7)?),
+                cache_read_tokens: natural(row.get(8)?),
+                cache_write_tokens: natural(row.get(9)?),
+            };
+            let print = reply_fingerprint(
+                read_time(&row.get::<_, String>(5)?)?,
+                &row.get::<_, String>(4)?,
+                usage,
+            );
+            if sessions.last().is_none_or(|last| last.session_id != id) {
+                sessions.push(SessionReplies {
+                    session_id: id,
+                    first_at: read_time(&row.get::<_, String>(2)?)?,
+                    indexed: row.get(1)?,
+                    replies: Vec::new(),
+                });
+            }
+            if let Some(last) = sessions.last_mut() {
+                last.replies.push((row.get(3)?, print));
+            }
+        }
+        Ok(sessions)
+    }
+
+    /// Replaces the links between sessions and the replies counted once, in one transaction.
+    pub(crate) fn replace_copies(&mut self, copies: &Copies) -> Result<(), StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute("DELETE FROM session_links", [])?;
+        transaction.execute("DELETE FROM reply_copies", [])?;
+        for link in &copies.links {
+            let (first, second, kind) = match link {
+                CopyLink::CopyOf { copy, of } => (copy, of, "copy_of"),
+                CopyLink::MaybeSame { first, second } => (first, second, "maybe_same"),
+            };
+            transaction.execute(
+                "INSERT INTO session_links (session_id, other_id, kind) VALUES (?1, ?2, ?3)",
+                (first, second, kind),
+            )?;
+        }
+        for (copied, kept) in &copies.reply_copies {
+            transaction.execute(
+                "INSERT INTO reply_copies (reply_key, same_as) VALUES (?1, ?2)",
+                (copied, kept),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     /// Each session's reply tokens, by model.
     fn reply_tokens(&self) -> Result<HashMap<String, BTreeMap<String, Usage>>, StoreError> {
         let mut tokens: HashMap<String, BTreeMap<String, Usage>> = HashMap::new();
         let mut statement = self.connection.prepare(
             "SELECT session_id, model, SUM(input_tokens), SUM(output_tokens),
                     SUM(cache_read_tokens), SUM(cache_write_tokens)
-             FROM replies GROUP BY session_id, model",
+             FROM replies
+             WHERE reply_key NOT IN (SELECT reply_key FROM reply_copies)
+             GROUP BY session_id, model",
         )?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
@@ -965,6 +1052,22 @@ impl MachineIndex {
     pub fn found(&self) -> Result<Found, StoreError> {
         let tokens = self.reply_tokens()?;
         let roots = self.root_flags()?;
+        let links = self.session_links()?;
+        let copies: BTreeSet<&String> = links
+            .iter()
+            .filter(|link| link.2 == "copy_of")
+            .map(|link| &link.0)
+            .collect();
+        let kept_copies: BTreeSet<&String> = links
+            .iter()
+            .filter(|link| link.2 == "copy_of")
+            .map(|link| &link.1)
+            .collect();
+        let maybe_same: BTreeSet<&String> = links
+            .iter()
+            .filter(|link| link.2 == "maybe_same")
+            .flat_map(|link| [&link.0, &link.1])
+            .collect();
 
         let mut projects: HashMap<String, FoundProject> = HashMap::new();
         let mut gone: HashMap<String, GoneFolder> = HashMap::new();
@@ -976,6 +1079,9 @@ impl MachineIndex {
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
             let id: String = row.get(0)?;
+            if copies.contains(&id) {
+                continue;
+            }
             let place: String = row.get(1)?;
             let root: Option<String> = row.get(2)?;
             let last_at = read_time(&row.get::<_, String>(3)?)?;
@@ -1008,7 +1114,11 @@ impl MachineIndex {
                     last_at,
                     own: Activity::default(),
                     catervas: Activity::default(),
+                    sources: BTreeSet::from([Source::Local]),
                 });
+            if kept_copies.contains(&id) {
+                project.sources.insert(Source::Teleported);
+            }
             project.last_at = project.last_at.max(last_at);
             let side = if place == "catervas" {
                 &mut project.catervas
@@ -1039,6 +1149,7 @@ impl MachineIndex {
             not_a_project,
             unreadable_sessions: natural(unreadable_sessions),
             unreadable_lines: natural(unreadable_lines),
+            maybe_same_sessions: maybe_same.len() as u64,
             claude_ai: self.claude_ai()?,
         })
     }
@@ -1325,13 +1436,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4]
+            vec![1, 2, 3, 4, 5]
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4]
+            vec![1, 2, 3, 4, 5]
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -1353,6 +1464,8 @@ mod tests {
                 "jobs",
                 "projects",
                 "replies",
+                "reply_copies",
+                "session_links",
                 "sessions",
                 "tool_calls",
                 "transcript_files"

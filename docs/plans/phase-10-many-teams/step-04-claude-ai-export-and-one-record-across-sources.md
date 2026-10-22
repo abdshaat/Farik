@@ -228,7 +228,7 @@ Files: `migrations.rs`, `<n>_copies.sql`; `claude_history.rs` (`find_copies`: re
 - `keeps_a_resumed_session_apart_from_a_copy`: step 02's resumed session (same message ids): no link rows; 2 sessions. RED.
 - `marks_ambiguous_copies_maybe_the_same`: two copies of `a`: three `maybe_same` rows (a–b, a–c, b–c), 3 sessions, `maybe_same_sessions` 3, tokens once, sources without `teleported`. One copy, then a second in a later scan: the `copy_of` becomes `maybe_same`. RED.
 
-- [ ] `feat(store): count a copied claude code session once`
+- [x] `feat(store): count a copied claude code session once`
 
 ### Task 6: Remotes and projects by hand
 

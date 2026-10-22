@@ -6,8 +6,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use catervas_core::claude_history::{
-    Folder, KnownRoot, Place, SessionPlace, TranscriptLine, once_per_reply, place_folders,
-    place_session, read_line,
+    Folder, KnownRoot, Place, SessionPlace, TranscriptLine, copies_among, once_per_reply,
+    place_folders, place_session, read_line,
 };
 use catervas_core::claude_services::server_segment;
 use chrono::{DateTime, Utc};
@@ -487,6 +487,19 @@ pub fn place_sessions(
         });
     }
     index.write_placements(&placements, &projects, now)?;
+    Ok(())
+}
+
+/// Finds the sessions that are copies of one another (a session teleported from another computer
+/// keeps its replies, with new ids) and the replies to count once, and writes them, replacing what an
+/// earlier scan wrote: a third copy turns a merge into a maybe. Run after `place_sessions`.
+///
+/// # Errors
+///
+/// `Store` when the index refuses.
+pub fn find_copies(index: &mut MachineIndex) -> Result<(), HistoryError> {
+    let sessions = index.session_replies()?;
+    index.replace_copies(&copies_among(&sessions))?;
     Ok(())
 }
 
