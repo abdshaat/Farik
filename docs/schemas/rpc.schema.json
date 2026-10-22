@@ -573,6 +573,24 @@
           "$ref": "#/$defs/teamsUndoRequest"
         },
         {
+          "$ref": "#/$defs/remindersGetRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersSetRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersSnoozeRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersDismissRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersGiveRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersMineRequest"
+        },
+        {
           "$ref": "#/$defs/computerSetRequest"
         },
         {
@@ -3319,6 +3337,223 @@
       "additionalProperties": false,
       "required": ["removed"],
       "properties": { "removed": { "const": true }, "left": { "type": "string" } }
+    },
+    "remindersGetRequest": {
+      "title": "Reminders Get Request",
+      "description": "The daily digest of what needs the owner (docs/SPEC.md 4.4, F12; ADR 0059): sessions they may have forgotten, session crons ending soon, scheduled runs and deployments that failed or went silent, workflows GitHub turned off, what waits on them in each team for over a day, and connectors Claude Code says need signing in again. The digest is kept in memory from the owner's time each day (reminder_time, 09:00 by default); with none yet it is computed at once. Answers remindersGetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "remindersSetRequest": {
+      "title": "Reminders Set Request",
+      "description": "Sets when the daily reminder comes and where its notice shows, and keeps it in state.json (reminder_time, reminder_browser, reminder_system). time is HH:MM on this computer's clock; browser is the notice in an open Catervas tab, system the notice from the computer when none is open; both are on by default. A field that is left out is kept. A time that is not HH:MM is refused with -32005 and bad_time. Answers remindersSetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "time": { "type": "string" },
+            "browser": { "type": "boolean" },
+            "system": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "remindersSnoozeRequest": {
+      "title": "Reminders Snooze Request",
+      "description": "Hides the item key from the digest for a day or a week. An item that is not in the digest is refused with -32005 and unknown_item. Answers emptyResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.snooze" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "for"],
+          "properties": {
+            "key": { "type": "string" },
+            "for": { "enum": ["day", "week"] }
+          }
+        }
+      }
+    },
+    "remindersDismissRequest": {
+      "title": "Reminders Dismiss Request",
+      "description": "Hides the item key until it changes: it comes back when what it says is not what it said (a new failure, a new deadline). An item that is not in the digest is refused with -32005 and unknown_item. Answers emptyResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.dismiss" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": { "key": { "type": "string" } }
+        }
+      }
+    },
+    "remindersGiveRequest": {
+      "title": "Reminders Give Request",
+      "description": "Gives the item key to the team of its project: files a request in that team with request.file, in words made from the item (a forgotten session's title, project, days, reason and branch), for its Product Manager to sort. An item that is not in the digest is refused with -32005 and unknown_item, one a team cannot finish with cannot_give, and one whose project has no team this serve drives with no_team_for_this. Answers remindersGiveResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.give" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": { "key": { "type": "string" } }
+        }
+      }
+    },
+    "remindersMineRequest": {
+      "title": "Reminders Mine Request",
+      "description": "The part of the digest that is this team's: the items about its project, its member repositories and what waits on the owner in it. Answered on the team's socket (/t/<team>/rpc), shown on its Today. Answers remindersMineResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.mine" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "remindersItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "kind", "title", "detail"],
+      "description": "One item of the digest. key is stable from one day to the next (<rule>:<thing key>). kind is session, cron, schedule, deploy, team, service, run or connect_github. explain is cron or off for an item that is explained behind an info button. resume holds the shell command that resumes a session, github_url the repository's actions or deployments page, give the request that would be filed and the team it would go to, answer the team whose page answers the item, and connect_github is true when the item offers to connect GitHub.",
+      "properties": {
+        "key": { "type": "string" },
+        "kind": { "enum": ["session", "cron", "schedule", "deploy", "team", "service", "run", "connect_github"] },
+        "title": { "type": "string" },
+        "detail": { "type": "string" },
+        "project": { "type": "string" },
+        "explain": { "enum": ["cron", "off"] },
+        "resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": { "command": { "type": "string" } }
+        },
+        "github_url": { "type": "string" },
+        "give": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string" },
+            "team": { "type": "string" },
+            "team_name": { "type": "string" }
+          }
+        },
+        "answer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["team"],
+          "properties": { "team": { "type": "string" } }
+        },
+        "connect_github": { "const": true }
+      }
+    },
+    "remindersGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "count", "headline", "time", "browser", "system", "notified", "groups"],
+      "description": "at is when the digest was computed. count is the things that need the owner, not today's runs. headline is the first two items' short words. time, browser and system are the owner's settings. notified is how the owner was told: browser, system, or none when the program failed; null when they were not told. groups holds the non-empty groups, in order: forgotten, ending, schedules, teams, services, and runs (today's runs, collapsed on the page).",
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "count": { "type": "integer", "minimum": 0 },
+        "headline": { "type": "string" },
+        "time": { "type": "string" },
+        "browser": { "type": "boolean" },
+        "system": { "type": "boolean" },
+        "notified": { "enum": ["browser", "system", "none", null] },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["group", "items"],
+            "properties": {
+              "group": { "enum": ["forgotten", "ending", "schedules", "teams", "services", "runs"] },
+              "items": { "type": "array", "items": { "$ref": "#/$defs/remindersItem" } }
+            }
+          }
+        }
+      }
+    },
+    "remindersSetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "browser", "system"],
+      "properties": {
+        "time": { "type": "string" },
+        "browser": { "type": "boolean" },
+        "system": { "type": "boolean" }
+      }
+    },
+    "remindersGiveResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "team"],
+      "properties": { "task_id": { "type": "string" }, "team": { "type": "string" } }
+    },
+    "remindersMineResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "count", "items"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "count": { "type": "integer", "minimum": 0 },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/remindersItem" } }
+      }
+    },
+    "remindersDueNotification": {
+      "title": "Reminders Due Notification",
+      "description": "What the hub pushes to every page of the computer on its /hub/rpc socket when the daily digest is due and a Catervas tab is open (docs/SPEC.md 4.4): the page shows one browser notice for the digest at, and none for a digest it showed. With no tab open the computer is notified instead and nothing is pushed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "reminders.due" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["at", "count", "headline", "time"],
+          "properties": {
+            "at": { "type": "string", "format": "date-time" },
+            "count": { "type": "integer", "minimum": 1 },
+            "headline": { "type": "string" },
+            "time": { "type": "string" }
+          }
+        }
+      }
     },
     "computerSetRequest": {
       "title": "Computer Set Request",

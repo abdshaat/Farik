@@ -212,6 +212,10 @@ pub struct CliIo<'a> {
     /// and in `main`, which a test points at a fixture of its own.
     #[cfg(unix)]
     pub github: catervas_runtime::github::GithubPlaces,
+    /// What runs the program that shows the daily reminder when no tab is open (phase 10 step 07):
+    /// nothing here, so that no test runs `notify-send`, `osascript` or `powershell.exe`, and the
+    /// program itself in `main`.
+    pub notify: catervas_runtime::notify::NotifyRun,
     /// Whether `catervas serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -274,6 +278,7 @@ impl<'a> CliIo<'a> {
             github: catervas_runtime::github::GithubPlaces::default(),
             #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
+            notify: Arc::new(|_| Err("notifications are off here".to_string())),
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
             #[cfg(feature = "e2e")]
@@ -320,6 +325,7 @@ impl CliIo<'_> {
             own_program: self.own_program.clone(),
             #[cfg(unix)]
             github: self.github.clone(),
+            notify: Arc::clone(&self.notify),
             #[cfg(feature = "e2e")]
             admit_local_preview: self.admit_local_preview,
             #[cfg(feature = "e2e")]

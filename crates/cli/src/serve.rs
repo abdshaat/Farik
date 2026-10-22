@@ -236,10 +236,16 @@ async fn run<'io>(
             home: home_of(io),
             secrets: Arc::clone(&io.connector_secrets),
             github: io.github.clone(),
+            notify: Arc::clone(&io.notify),
+            port: bound,
         }));
     }
     // Looks again each day while finding is on (the first scan is the owner's to ask for).
     let rescan = tokio::spawn(catervas_runtime::daemon::finding::rescan_daily(Arc::clone(
+        &hub,
+    )));
+    // Tells the owner once a day, at the time they chose, what needs them.
+    let reminding = tokio::spawn(catervas_runtime::daemon::reminders::run_daily(Arc::clone(
         &hub,
     )));
     let (removals, mut removed) = mpsc::unbounded_channel();
@@ -319,6 +325,7 @@ async fn run<'io>(
                 serving.presses += 1;
                 if serving.drives.is_empty() {
                     rescan.abort();
+                    reminding.abort();
                     serving.hub.stop_finding();
                     serving.shut_down(hub_run).await;
                     return Ok(INTERRUPTED);
@@ -374,6 +381,7 @@ async fn run<'io>(
         }
     }
     rescan.abort();
+    reminding.abort();
     serving.hub.stop_finding();
     serving.shut_down(hub_run).await;
     while let Ok(event) = heard.try_recv() {

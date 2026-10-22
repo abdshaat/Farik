@@ -9,11 +9,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use catervas_protocol::clock::Clock;
 use catervas_runtime::computer::program_output;
 use catervas_runtime::connectors::ConnectorSecrets;
+use catervas_runtime::daemon::reminders::{ReminderChange, ReminderSettings};
 use catervas_runtime::daemon::{
     FindingHost, FindingProgress, MadeProject, MemberRequest, NamesRun, PlanKind, SETUP_PENDING,
     SetupHost, TeamPlan, apply_to_new_team,
 };
-use catervas_runtime::github::{GithubPlaces, load_connection, read_into_index};
+use catervas_runtime::github::{
+    GithubPlaces, load_connection, read_into_index, read_runs_into_index,
+};
+use catervas_runtime::notify::{NotSent, NotifyRun, Platform};
 use catervas_store::claude_history::{
     ReadProgress, ReadSummary, find_copies, place_sessions, read_transcripts_while,
 };
@@ -177,6 +181,10 @@ pub(crate) struct CliFinder {
     pub secrets: Arc<dyn ConnectorSecrets>,
     /// Where GitHub is, and how a repository is cloned from it.
     pub github: GithubPlaces,
+    /// What runs the program that shows a notification.
+    pub notify: NotifyRun,
+    /// The port Catervas is served on, for the Windows toast to open.
+    pub port: u16,
 }
 
 impl CliFinder {
@@ -384,6 +392,8 @@ impl FindingHost for CliFinder {
             && let Ok(Some((token, _))) = load_connection(self.secrets.as_ref())
         {
             let _ = read_into_index(&self.github.api, &token, &mut index, self.clock.now(), stop);
+            // And the runs and deployments of the repositories that have a schedule.
+            let _ = read_runs_into_index(&self.github.api, &token, &mut index, stop);
         }
         Ok(())
     }
@@ -533,6 +543,36 @@ impl FindingHost for CliFinder {
 
     fn set_export_dismissed(&self, dismissed: bool) -> Result<(), String> {
         self.keep(|state| state.export_dismissed = dismissed)
+    }
+
+    fn reminder_settings(&self) -> ReminderSettings {
+        let state = read_state(&self.state);
+        let default = ReminderSettings::default();
+        ReminderSettings {
+            time: state.reminder_time.unwrap_or(default.time),
+            browser: state.reminder_browser.unwrap_or(default.browser),
+            system: state.reminder_system.unwrap_or(default.system),
+        }
+    }
+
+    fn set_reminder_settings(&self, change: &ReminderChange) -> Result<ReminderSettings, String> {
+        self.keep(|state| {
+            if let Some(time) = &change.time {
+                state.reminder_time = Some(time.clone());
+            }
+            if let Some(browser) = change.browser {
+                state.reminder_browser = Some(browser);
+            }
+            if let Some(system) = change.system {
+                state.reminder_system = Some(system);
+            }
+        })?;
+        Ok(self.reminder_settings())
+    }
+
+    fn notify(&self, title: &str, body: &str) -> Result<(), NotSent> {
+        let platform = Platform::detect(std::env::consts::OS, &self.env);
+        catervas_runtime::notify::send(&platform, self.port, &self.notify, title, body)
     }
 }
 

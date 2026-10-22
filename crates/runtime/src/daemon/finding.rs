@@ -40,7 +40,9 @@ use serde_json::{Value, json};
 
 use super::DaemonState;
 use super::hub::Hub;
+use super::reminders::{ReminderChange, ReminderSettings};
 use super::web::{Failure, INTERNAL_ERROR, REFUSED, from_own_page, has_session};
+use crate::notify::NotSent;
 
 /// How long the daily rescan waits between two scans.
 const RESCAN_EVERY: Duration = Duration::from_hours(24);
@@ -148,6 +150,36 @@ pub trait FindingHost: Send + Sync {
     fn ask_names(&self, prompt: &str) -> Result<NamesRun, String> {
         let _ = prompt;
         Err("Claude Code cannot be asked here".to_string())
+    }
+    /// When the daily reminder comes and how it is told.
+    fn reminder_settings(&self) -> ReminderSettings {
+        ReminderSettings::default()
+    }
+    /// Keeps a change to the daily reminder's settings and answers them as they are now.
+    ///
+    /// # Errors
+    ///
+    /// A sentence saying what could not be written.
+    fn set_reminder_settings(&self, change: &ReminderChange) -> Result<ReminderSettings, String> {
+        let _ = change;
+        Err("not_available: this catervas cannot keep the reminder's settings".to_string())
+    }
+    /// The computer's offset from UTC at `at`, in seconds.
+    fn utc_offset_secs(&self, at: DateTime<Utc>) -> i32 {
+        use chrono::{Local, Offset as _, TimeZone as _};
+        Local
+            .offset_from_utc_datetime(&at.naive_utc())
+            .fix()
+            .local_minus_utc()
+    }
+    /// Shows a notification through the operating system.
+    ///
+    /// # Errors
+    ///
+    /// [`NotSent`] when the program is missing or fails.
+    fn notify(&self, title: &str, body: &str) -> Result<(), NotSent> {
+        let _ = (title, body);
+        Err(NotSent("this catervas has no way to notify".to_string()))
     }
     /// The committed files of the repository at `root` that proofs of linking are read from, as
     /// `(path, text)`; none when they cannot be read.
@@ -269,6 +301,11 @@ impl Finding {
         self.stop.store(true, Ordering::SeqCst);
     }
 
+    /// The host, once it is given.
+    pub(super) fn host(&self) -> Option<&Arc<dyn FindingHost>> {
+        self.host.get()
+    }
+
     fn run(&self) -> MutexGuard<'_, Run> {
         self.run
             .lock()
@@ -378,7 +415,7 @@ fn moment(time: DateTime<Utc>) -> String {
 }
 
 /// The host, or the refusal of a Catervas that cannot look through the history.
-fn host_of(hub: &Hub) -> Result<&Arc<dyn FindingHost>, Failure> {
+pub(super) fn host_of(hub: &Hub) -> Result<&Arc<dyn FindingHost>, Failure> {
     hub.finding
         .host
         .get()
@@ -386,7 +423,7 @@ fn host_of(hub: &Hub) -> Result<&Arc<dyn FindingHost>, Failure> {
 }
 
 /// The machine index, made if it was not there.
-fn open_index(host: &dyn FindingHost) -> Result<MachineIndex, Failure> {
+pub(super) fn open_index(host: &dyn FindingHost) -> Result<MachineIndex, Failure> {
     open_machine_index(&host.state_dir().join(MACHINE_DB), host.now()).map_err(|e| internal(&e))
 }
 

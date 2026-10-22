@@ -24,6 +24,7 @@ use catervas_store::projections::TaskProjection;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use tokio::sync::broadcast;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -31,7 +32,7 @@ use super::setup::list_folders;
 use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
-use super::{board, documents, finding, gates, hub, repos, team, templates};
+use super::{board, documents, finding, gates, hub, reminders, repos, team, templates};
 use catervas_core::claude_account::AccountStatus;
 
 use crate::account::AccountPort;
@@ -493,6 +494,10 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
     // The answers under way. Each runs on a task of its own, which a socket that closes does not
     // end: a request read is carried out, as one answered in turn was.
     let mut answering: JoinSet<Value> = JoinSet::new();
+    // A Catervas tab is open as long as this socket is (the daily reminder tells a tab, or the
+    // computer when there is none), and the hub's sockets hear when the digest is due.
+    let _page = state.reminders().map(|reminders| reminders.page_opened());
+    let mut pushes = state.hub().map(|hub| hub.reminders.subscribe());
     loop {
         tokio::select! {
             // A closing daemon is heard before anything else, so that no frame is taken on after
@@ -518,6 +523,15 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
                     return;
                 }
             }
+            push = next_push(&mut pushes) => match push {
+                Ok(frame) => {
+                    if socket.send(Message::Text(frame.to_string().into())).await.is_err() {
+                        return;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {}
+                Err(broadcast::error::RecvError::Closed) => pushes = None,
+            },
             message = socket.recv() => {
                 let text = match message {
                     Some(Ok(Message::Text(text))) => text,
@@ -554,6 +568,16 @@ async fn talk(mut socket: WebSocket, state: Arc<DaemonState>, cancel: Cancellati
         if !push(&mut socket, &state, &mut sent, &mut failed, &mut more).await {
             return;
         }
+    }
+}
+
+/// The next frame the hub pushes to every one of its sockets; never, for a socket that is not the hub's.
+async fn next_push(
+    pushes: &mut Option<broadcast::Receiver<Value>>,
+) -> Result<Value, broadcast::error::RecvError> {
+    match pushes {
+        Some(pushes) => pushes.recv().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -723,6 +747,7 @@ fn known_method(method: &str) -> bool {
         || repos::METHODS.contains(&method)
         || hub::METHODS.contains(&method)
         || finding::METHODS.contains(&method)
+        || reminders::METHODS.contains(&method)
 }
 
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, or to the head of
@@ -797,6 +822,9 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         method if hub::METHODS.contains(&method) => hub::call(state, method, params),
         method if finding::METHODS.contains(&method) => {
             finding::call_blocking(state, method, params).await
+        }
+        method if reminders::METHODS.contains(&method) => {
+            reminders::call(state, method, params).await
         }
         "query" => {
             // Claude Code is asked on the async workers; the store and the files are read off

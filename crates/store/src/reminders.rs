@@ -66,7 +66,8 @@ fn name_of(path: &str) -> String {
 /// The names of the connectors Claude Code lists in `mcp-needs-auth-cache.json`, sorted. Only the
 /// top-level keys are read; a file that is not a regular file, is too large or is not an object
 /// reads as none.
-fn services_needing_sign_in(claude_dir: &Path) -> Vec<String> {
+#[must_use]
+pub fn services_needing_sign_in(claude_dir: &Path) -> Vec<String> {
     let path = claude_dir.join("mcp-needs-auth-cache.json");
     let Ok(meta) = std::fs::symlink_metadata(&path) else {
         return Vec::new();

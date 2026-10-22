@@ -188,7 +188,7 @@ Tests (`crates/runtime/src/daemon/reminders.rs`, with tokio's paused time and fa
   - On a project with no team it is `no_team_for_this`.
   - `reminders.snooze` hides the item from the next `reminders.get`.
 
-- [ ] `feat(runtime): the daily digest, its actions and one notification`
+- [x] `feat(runtime): the daily digest, its actions and one notification`
 
 ### Task 6: The screens
 

@@ -105,6 +105,8 @@ pub struct Hub {
     additions: OnceLock<tokio::sync::mpsc::UnboundedSender<TeamAdded>>,
     /// What finding projects keeps (`finding.*`).
     pub(super) finding: Arc<super::finding::Finding>,
+    /// The daily reminder every page of the computer asks about (step 07).
+    pub reminders: Arc<super::reminders::Reminders>,
 }
 
 impl Hub {
@@ -200,6 +202,7 @@ impl Hub {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         teams.retain(|(name, _)| *name != slug);
+        state.set_reminders(slug.as_str(), Arc::clone(&self.reminders));
         teams.push((slug, state));
     }
 
@@ -262,7 +265,7 @@ impl Hub {
     }
 
     /// Every driven team with its name in an address, in the order they were added.
-    fn driven(&self) -> Vec<(TeamSlug, Arc<DaemonState>)> {
+    pub(super) fn driven(&self) -> Vec<(TeamSlug, Arc<DaemonState>)> {
         self.teams
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

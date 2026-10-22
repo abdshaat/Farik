@@ -55,6 +55,7 @@ mod hooks;
 pub mod hub;
 mod mcp;
 pub(crate) mod own_calls;
+pub mod reminders;
 mod repos;
 mod setup;
 mod signed_in;
@@ -270,6 +271,9 @@ pub struct DaemonState {
     hub: OnceLock<Arc<hub::Hub>>,
     /// Cancelled when this state's daemon shuts down, which ends the sockets of its pages.
     closing: OnceLock<CancellationToken>,
+    /// The name in an address of the team this state drives, and what the hub keeps of the daily
+    /// reminder, once the hub has added the team (step 07).
+    team_reminders: OnceLock<(String, Arc<reminders::Reminders>)>,
 }
 
 /// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
@@ -369,6 +373,7 @@ impl DaemonState {
             image_build: crate::computer::ImageBuild::default(),
             hub: OnceLock::new(),
             closing: OnceLock::new(),
+            team_reminders: OnceLock::new(),
         }
     }
 
@@ -404,6 +409,7 @@ impl DaemonState {
             image_build: crate::computer::ImageBuild::default(),
             hub: OnceLock::new(),
             closing: OnceLock::new(),
+            team_reminders: OnceLock::new(),
         }
     }
 
@@ -433,6 +439,27 @@ impl DaemonState {
     #[must_use]
     pub fn hub(&self) -> Option<&Arc<hub::Hub>> {
         self.hub.get()
+    }
+
+    /// Gives a team's state the name it has in an address and the daily reminder the hub keeps.
+    pub(crate) fn set_reminders(&self, slug: &str, reminders: Arc<reminders::Reminders>) -> bool {
+        self.team_reminders
+            .set((slug.to_string(), reminders))
+            .is_ok()
+    }
+
+    /// The name in an address of the team this state drives, when the hub added it.
+    pub(crate) fn team_slug(&self) -> Option<&str> {
+        self.team_reminders.get().map(|(slug, _)| slug.as_str())
+    }
+
+    /// The daily reminder this state's pages ask about: the hub's own, or the one the hub gave the
+    /// team.
+    pub(crate) fn reminders(&self) -> Option<Arc<reminders::Reminders>> {
+        self.team_reminders
+            .get()
+            .map(|(_, reminders)| Arc::clone(reminders))
+            .or_else(|| self.hub().map(|hub| Arc::clone(&hub.reminders)))
     }
 
     /// The project `project.leave` is leaving, if it was asked to; serve reads it once the run has

@@ -114,6 +114,14 @@ pub(crate) struct ServeState {
     /// Whether the owner dismissed the card that offers claude.ai's export (`export_card` is
     /// `"dismissed"`).
     pub(crate) export_dismissed: bool,
+    /// When the daily reminder comes, `HH:MM` on this computer's clock (`reminder_time`); none is
+    /// 09:00.
+    pub(crate) reminder_time: Option<String>,
+    /// Whether an open Catervas tab gets the reminder as a browser notice (`reminder_browser`); none
+    /// is yes.
+    pub(crate) reminder_browser: Option<bool>,
+    /// Whether the computer gets the reminder when no tab is open (`reminder_system`); none is yes.
+    pub(crate) reminder_system: Option<bool>,
 }
 
 /// What `state.json` in `directory` holds; an unreadable or absent file reads as empty. A file
@@ -145,6 +153,9 @@ pub(crate) fn read_state(directory: &Path) -> ServeState {
         daily_cap_usd: state["daily_cap_usd"].as_f64(),
         finding_paused: state["finding_paused"].as_bool().unwrap_or(false),
         export_dismissed: state["export_card"].as_str() == Some("dismissed"),
+        reminder_time: state["reminder_time"].as_str().map(str::to_string),
+        reminder_browser: state["reminder_browser"].as_bool(),
+        reminder_system: state["reminder_system"].as_bool(),
     }
 }
 
@@ -181,6 +192,15 @@ pub(crate) fn write_state(directory: &Path, state: &ServeState) -> Result<(), St
     }
     if state.export_dismissed {
         text.insert("export_card".to_string(), "dismissed".into());
+    }
+    if let Some(time) = &state.reminder_time {
+        text.insert("reminder_time".to_string(), time.clone().into());
+    }
+    if let Some(browser) = state.reminder_browser {
+        text.insert("reminder_browser".to_string(), browser.into());
+    }
+    if let Some(system) = state.reminder_system {
+        text.insert("reminder_system".to_string(), system.into());
     }
     catervas_runtime::write_private(
         &file,
@@ -335,6 +355,18 @@ mod tests {
         assert_eq!(state.agents_at_once, Some(3));
         assert_eq!(state.daily_cap_usd, Some(12.5));
         assert_eq!(state.projects, [PathBuf::from("/a"), PathBuf::from("/b")]);
+
+        // The daily reminder's time and switches are kept with the rest.
+        std::fs::write(
+            directory.join("state.json"),
+            r#"{"projects":["/a"],"reminder_time":"07:30","reminder_browser":false}"#,
+        )
+        .expect("written");
+        remember(&directory, &PathBuf::from("/b")).expect("remembers");
+        let state = read_state(&directory);
+        assert_eq!(state.reminder_time.as_deref(), Some("07:30"));
+        assert_eq!(state.reminder_browser, Some(false));
+        assert_eq!(state.reminder_system, None);
 
         std::fs::write(directory.join("state.json"), "not json").expect("written");
         assert_eq!(read_state(&directory), ServeState::default());
