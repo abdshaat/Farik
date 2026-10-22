@@ -1,6 +1,6 @@
 import { Button, Choice, TextArea, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { daemonSaid } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
@@ -31,7 +31,6 @@ export function slug(name: string): string {
 export function SetupProject() {
 	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
-	const stored = (useLocation().state as { stored?: string } | null)?.stored;
 	const { data: serve } = useQuery<ServeStatus>("serve.status", {});
 	const [view, setView] = useState<"question" | "project" | "parent">(
 		"question",
@@ -179,11 +178,6 @@ export function SetupProject() {
 		>
 			{leaving && (
 				<p role="status">{t("movingFrom").replace("{name}", base(leaving))}</p>
-			)}
-			{stored && (
-				<p role="status">
-					{t(stored === "keychain" ? "storedKeychain" : "storedFile")}
-				</p>
 			)}
 			{serve?.takeOnError && (
 				<p role="alert" className={styles.alert}>

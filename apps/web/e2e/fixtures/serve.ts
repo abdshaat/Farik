@@ -174,8 +174,9 @@ export function mergeByHand(project: string, branch: string): void {
 /**
  * `catervas-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
- * which holds Catervas's state folder too, the fake `claude` and `docker` come first on `PATH`, no
- * key is in the environment, and the key is kept in a file, never the keychain. A team with a
+ * which holds Catervas's state folder too, the fake `claude` (signed out until its login is given
+ * the code `e2e-code`) and `docker` come first on `PATH`, no key is in the environment, and the
+ * OS keychain is left alone. A team with a
  * Designer runs in Docker's sandbox, and its first `docker info` answers after 8 seconds.
  */
 export async function startServe(o: {

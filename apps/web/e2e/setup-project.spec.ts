@@ -17,10 +17,10 @@ async function screenshots(page: Page, name: string) {
 	await page.screenshot({ path: `${shots}${name}-1280.png`, fullPage: true });
 }
 
-test("a first run checks the computer, keeps the key, and takes the project on", async ({
+test("a first run checks the computer, signs in through Claude Code, and takes the project on", async ({
 	page,
 }) => {
-	// A home with one git project, and Catervas started in an empty folder with no key anywhere.
+	// A home with one git project, and Catervas started in an empty folder, with a Claude Code that is not signed in.
 	const home = realpathSync(mkdtempSync(join(tmpdir(), "catervas-e2e-home-")));
 	const project = join(home, "Projects", "corner-bakery");
 	gitProject(project);
@@ -44,16 +44,42 @@ test("a first run checks the computer, keeps the key, and takes the project on",
 		await page.getByRole("button", { name: "Continue without Docker" }).click();
 
 		await expect(page).toHaveURL(/\/setup\/account$/);
-		await page.getByLabel("Your subscription key").fill("sk-ant-oat01-test");
+		await page.evaluate(() => {
+			// The page tries to open Claude's sign-in page in a new tab: the journey only records it.
+			const opened: string[] = [];
+			(window as unknown as { opened: string[] }).opened = opened;
+			window.open = (url) => {
+				opened.push(String(url));
+				return null;
+			};
+		});
 		await screenshots(page, "setup-account");
-		await page.getByRole("button", { name: "Save and continue" }).click();
+		await page
+			.getByRole("button", { name: "Sign in with Claude (Pro or Max)" })
+			.click();
+		await expect(
+			page.getByText(/Sign in on the page that opened/),
+		).toBeVisible();
+		expect(
+			await page.evaluate(
+				() => (window as unknown as { opened: string[] }).opened,
+			),
+		).toEqual(["https://claude.com/cai/oauth/authorize?fake=1"]);
+		await page.getByLabel("Your sign-in code").fill("e2e-code");
+		await page.getByRole("button", { name: "Finish signing in" }).click();
 
 		await expect(page).toHaveURL(/\/setup\/project$/);
-		// No keychain here, so the key went to a private file in Catervas's state folder.
-		await expect(page.getByText(/saved in a private file/)).toBeVisible();
+		// Catervas kept no key: Claude Code holds the sign-in.
 		expect(existsSync(join(home, ".config/catervas/credential.json"))).toBe(
-			true,
+			false,
 		);
+		expect(existsSync(join(home, ".fake-claude-signed-in"))).toBe(true);
+		// Back on the account step, Claude Code is signed in and the check works.
+		await page.getByRole("button", { name: "Back" }).click();
+		await expect(page).toHaveURL(/\/setup\/account$/);
+		await expect(page.getByText("It works.")).toBeVisible();
+		await page.getByRole("button", { name: "Continue" }).click();
+		await expect(page).toHaveURL(/\/setup\/project$/);
 		await screenshots(page, "setup-question");
 		await page.getByRole("button", { name: "Continue" }).click();
 		const folders = page.getByRole("group", { name: "Folders" });

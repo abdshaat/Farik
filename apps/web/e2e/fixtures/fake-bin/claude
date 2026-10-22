@@ -1,3 +1,35 @@
 #!/bin/sh
-# The Claude Code the journey finds: new enough, and never run for real.
+# The Claude Code the journey finds: new enough, never run for real, and signed in only once its
+# login has been given the code the journey types (`$HOME/.fake-claude-signed-in` is its sign-in).
+signed_in="${HOME}/.fake-claude-signed-in"
+case "$1 $2" in
+  "auth status")
+    if [ -f "$signed_in" ]; then
+      echo '{"loggedIn": true, "authMethod": "oauth_token", "apiProvider": "firstParty"}'
+    else
+      echo '{"loggedIn": false}'
+    fi
+    exit 0
+    ;;
+  "auth login")
+    echo "Opening browser to sign in…"
+    echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?fake=1"
+    printf 'Paste code here if prompted > '
+    IFS= read -r code
+    if [ "$code" = "e2e-code" ]; then
+      touch "$signed_in"
+      exit 0
+    fi
+    echo "Invalid code"
+    exit 1
+    ;;
+  "auth logout")
+    rm -f "$signed_in"
+    exit 0
+    ;;
+esac
+if [ "$1" = "-p" ]; then
+  echo '{"type":"result","subtype":"success","is_error":false,"result":"OK"}'
+  exit 0
+fi
 echo "2.1.300 (Claude Code)"

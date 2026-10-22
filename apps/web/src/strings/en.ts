@@ -146,25 +146,40 @@ export const en = {
 	continueWithoutDocker: "Continue without Docker",
 	accountTitle: "Connect your AI account",
 	accountLead:
-		"Your agents think with Claude, and your account pays for it. Catervas keeps the key safely on this computer and never shows it to an agent.",
-	accountKind: "Your Claude account",
-	subscription: "I have a Claude subscription (Pro or Max)",
-	subscriptionNote:
-		"Recommended if you already pay for Claude. Make a key for Catervas in two steps:",
-	subscriptionStepType: "Open the Terminal and type",
-	subscriptionStepPaste:
-		"Sign in when your browser opens, then paste the key it prints here.",
-	subscriptionKey: "Your subscription key",
-	subscriptionHint: "It starts with sk-ant-oat.",
-	apiKey: "I have an API key",
-	apiKeyNote: "From console.anthropic.com. You pay for what your agents use.",
-	apiKeyField: "Your API key",
-	apiKeyHint: "It starts with sk-ant-api.",
-	saveContinue: "Save and continue",
-	storedKeychain: "Your key is saved in your computer’s keychain.",
-	storedFile:
-		"Your key is saved in a private file on this computer, because it has no keychain Catervas can use.",
-	accountFound: "Catervas already has your key. You can go on.",
+		"Your agents think with Claude, and your account pays for it. You sign in through Claude Code, which keeps your sign-in on this computer. Catervas never sees your key.",
+	signInClaude: "Sign in with Claude (Pro or Max)",
+	signInClaudeNote: "Recommended if you already pay for Claude.",
+	signInConsole: "Sign in with an Anthropic Console account",
+	signInConsoleNote: "Pay for what your agents use.",
+	signInOnThePage:
+		"Sign in on the page that opened. It shows a code at the end: paste it here.",
+	signInCode: "Your sign-in code",
+	signInFinish: "Finish signing in",
+	signInOpenAgain: "Open the page again",
+	signInOpenPage: "Open Claude’s sign-in page",
+	signInTerminal:
+		"Prefer the Terminal? Run claude auth login, then press Check again.",
+	signInCheckAgain: "Check again",
+	signInChecking: "Checking the connection…",
+	signedInSubscription:
+		"Claude Code is signed in with your Claude subscription.",
+	signedInConsole:
+		"Claude Code is signed in with your Anthropic Console account.",
+	signedInEnvironment:
+		"Claude Code is signed in with {variable} from where you started Catervas.",
+	signedInOther: "Claude Code is signed in with another sign-in.",
+	connectionWorks: "It works.",
+	connectionKeyRefused: "Your key was refused.",
+	connectionLimitReached: "Your plan’s limit is reached for now.",
+	connectionNotSignedIn: "Claude Code is not signed in.",
+	connectionFailed: "It didn’t work: {detail}",
+	signInNoneWaiting:
+		"No sign-in is waiting for a code. Press a sign-in button again.",
+	signInNoAddress:
+		"Claude Code did not give a sign-in page. Run claude auth login in the Terminal, then press Check again.",
+	signInFailed:
+		"Claude Code did not sign you in. Check the code, then press a sign-in button again.",
+	signOutFailed: "Claude Code did not sign out. Try again.",
 	projectTitle: "Is this for a project you already have?",
 	projectLead:
 		"Catervas works inside a folder on this computer. Your team keeps its plans and notes there, next to your work.",
@@ -504,25 +519,24 @@ export const en = {
 	agentCancel: "Cancel",
 	agentNextWork: "Applies from {name}’s next task.",
 	accountRow: "Your AI account",
-	accountConnected: "Claude, with {kind}.",
-	accountApiKey: "an API key",
+	accountSignedIn: "Claude, through Claude Code: signed in with {kind}.",
 	accountSubscription: "your Claude subscription",
-	accountKeychain: "Kept in your computer’s keychain.",
-	accountFile: "Kept in a private file on this computer.",
-	accountEnvironment: "Read from this computer’s environment.",
-	accountNone: "No AI account is connected.",
-	accountKeyRefused:
-		"The key did not work, so your team is paused. Connect your AI account again with a new key.",
-	accountConnectAgain: "Connect again",
-	accountConnect: "Connect account",
-	accountBack: "Connected. If your team is paused, press Resume.",
+	accountConsole: "your Anthropic Console account",
+	accountOther: "another sign-in",
+	accountNone: "Not signed in.",
+	accountSignInAgain: "Sign in again",
+	accountSignInHeading: "Sign in",
+	accountCheck: "Check connection",
+	accountSignOut: "Sign out",
+	accountSignedBack: "Signed in. If your team is paused, press Resume.",
+	accountSignedOut:
+		"Signed out. The team is paused until you sign in again and press Resume.",
+	accountKeptKeyRemoved:
+		"Catervas no longer keeps your key. It removed the one it kept, so sign in through Claude Code once.",
 	accountKeyRefusedEnvironment:
-		"The key in {variable} did not work, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
-	accountDisconnect: "Disconnect this account",
-	accountGone:
-		"Disconnected. The team is paused until you connect an account and press Resume.",
+		"The key in {variable} was refused, so your team is paused. Change it where Catervas runs, start Catervas again, then press Resume.",
 	accountKept:
-		"Catervas reads this key from the {variable} variable on this computer, so it cannot remove it. Remove it there, then start Catervas again.",
+		"It comes from {variable} where you start Catervas. Remove it there to sign in here instead.",
 	statusPlanning: "Planning",
 	statusToDo: "To do",
 	statusInProgress: "In progress",
@@ -588,10 +602,9 @@ export const en = {
 		"“Allow once” lets {agent} make this one call, with exactly this, in {agent}’s next session on this task. Any other call asks you again.",
 	toolApprovalRefuse: "Don’t allow",
 	toolApprovalAllow: "Allow once",
-	waitingKeyRefused: "Your AI account’s key did not work",
-	waitingKeyRefusedLine:
-		"The team is paused until you connect your AI account again.",
-	waitingKeyConnect: "Connect again",
+	waitingKeyRefused: "Your AI account’s key was refused",
+	waitingKeyRefusedLine: "The team is paused until you sign in again.",
+	waitingKeyConnect: "Sign in again in Settings",
 	checksPassed: "All {count} of Catervas’s checks passed.",
 	movedTitle: "What moved since yesterday",
 	movedYou: "You",
@@ -881,13 +894,8 @@ export const en = {
 	setupNameTaken:
 		"A folder with that name is already there. Choose another name.",
 	setupNoGit: "Git is not installed on this computer.",
-	setupNotSubscription:
-		"That is not a subscription key. A subscription key starts with sk-ant-oat.",
-	setupNotApiKey: "That is not an API key. An API key starts with sk-ant-api.",
-	setupNoKeep:
-		"This computer has no keychain and no folder to keep the key in.",
 	setupKeyFromEnvironment:
-		"Your AI account’s key is set where Catervas runs. Change it there, then start Catervas again.",
+		"Your AI account comes from a key set where Catervas runs. Remove it there to sign in here.",
 	setupNoDocker: "Docker is not installed on this computer.",
 	setupBuildFailed:
 		"Catervas could not prepare the sandbox. Check that Docker is running, then try again.",
@@ -922,8 +930,8 @@ export const en = {
 	refuseBranchMissing:
 		"This project has no branch of that name yet. Make it, then save.",
 	accountConfirm:
-		"Disconnecting pauses your team until you start Catervas again and connect an account.",
-	accountDisconnectYes: "Disconnect and pause the team",
+		"Sign out of Claude Code? The team pauses until you sign in again.",
+	accountSignOutYes: "Sign out",
 	board: "Board",
 	costs: "Costs",
 	boardFilters: "Filters",
@@ -1163,8 +1171,9 @@ export const en = {
 	chatsDaySpentLink: "See today’s costs",
 	chatsAsleep:
 		"{name} is resting until {time}, when the AI account’s usage limit resets, and will answer then.",
-	chatsKeyRefused: "{name} cannot answer: your AI provider refused the key.",
-	chatsKeyLink: "Check the key in Settings",
+	chatsKeyRefused:
+		"{name} cannot answer: your AI account’s key was refused. Sign in again in Settings.",
+	chatsKeyLink: "Open Settings",
 	chatsNoAnswer: "{name} could not answer. Ask again.",
 	chatsRetired: "{name} has left the team. This chat is kept for you to read.",
 	chatsInterviewIntro:

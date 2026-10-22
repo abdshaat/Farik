@@ -26,8 +26,8 @@ use catervas_store::git::fixtures::TempRepo;
 use serde_json::{Value, json};
 
 use project::{
-    LiveDriver, a_bare_env, a_claude_saying, a_team, events, filed, files_of, joined, record,
-    record_as, run_with, scratch, status_of, the_run_lock_frees,
+    LiveDriver, a_claude_saying, a_team, events, filed, files_of, joined, record, record_as,
+    run_with, scratch, status_of, the_run_lock_frees,
 };
 
 const BRIEF: &str = "Add done.txt and a check that it exists.";
@@ -366,25 +366,23 @@ fn nothing_filed(repository: &TempRepo, before: usize) {
 fn files_nothing_when_the_start_refuses() {
     // Each refusal in a project of its own, so that what one leaves behind cannot hide another.
     let (_old, old_claude) = a_claude_saying("new-old-claude", "2.1.200 (Claude Code)");
+    let (signed_out, signed_out_path) =
+        a_claude_saying("new-signed-out-claude", "2.1.280 (Claude Code)");
+    std::fs::write(signed_out.join("signed-out"), "").expect("a marker");
     let nowhere = scratch("new-no-claude");
-    let with_key = |path: String| {
-        BTreeMap::from([
-            ("PATH".to_string(), path),
-            ("ANTHROPIC_API_KEY".to_string(), "sk-test".to_string()),
-        ])
-    };
+    let on_path = |path: String| BTreeMap::from([("PATH".to_string(), path)]);
     for (name, said, env) in [
         (
-            "new-start-refused-token",
-            "CLAUDE_CODE_OAUTH_TOKEN",
-            a_bare_env(),
+            "new-start-refused-signed-out",
+            "Claude Code is not signed in",
+            BTreeMap::from([("PATH".to_string(), signed_out_path)]),
         ),
         (
             "new-start-refused-path",
             "there is no claude on PATH",
-            with_key(nowhere.display().to_string()),
+            on_path(nowhere.display().to_string()),
         ),
-        ("new-start-refused-version", "2.1.272", with_key(old_claude)),
+        ("new-start-refused-version", "2.1.272", on_path(old_claude)),
     ] {
         let repository = a_team(name);
         let before = events(&repository, &[]).len();

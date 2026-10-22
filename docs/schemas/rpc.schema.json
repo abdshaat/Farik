@@ -520,7 +520,13 @@
           "$ref": "#/$defs/projectCreateFolderRequest"
         },
         {
-          "$ref": "#/$defs/accountConnectRequest"
+          "$ref": "#/$defs/accountSignInRequest"
+        },
+        {
+          "$ref": "#/$defs/accountSignInCodeRequest"
+        },
+        {
+          "$ref": "#/$defs/accountCheckRequest"
         },
         {
           "$ref": "#/$defs/sandboxBuildRequest"
@@ -583,7 +589,7 @@
           "$ref": "#/$defs/criteriaSaveRequest"
         },
         {
-          "$ref": "#/$defs/accountDisconnectRequest"
+          "$ref": "#/$defs/accountSignOutRequest"
         },
         {
           "$ref": "#/$defs/projectNoteRequest"
@@ -665,7 +671,7 @@
         },
         "result": {
           "type": "object",
-          "description": "subscribeResult for subscribe, emptyResult for unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
+          "description": "subscribeResult for subscribe, emptyResult for unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountSignInResult, which account.sign_in answers, accountCheckResult, which account.check and account.sign_in_code answer, accountSignOutResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
         }
       }
     },
@@ -1267,19 +1273,8 @@
         "paused": {
           "type": "boolean"
         },
-        "credential": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
-                "api_key",
-                "subscription_token"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "signed_in": {
+          "type": "boolean"
         },
         "port": {
           "type": "integer",
@@ -1341,7 +1336,7 @@
       "required": [
         "project_root",
         "paused",
-        "credential",
+        "signed_in",
         "take_on_error",
         "port",
         "setup_pending",
@@ -1671,8 +1666,9 @@
         }
       }
     },
-    "accountConnectRequest": {
-      "title": "Account Connect Request",
+    "accountSignInRequest": {
+      "title": "Account Sign In Request",
+      "description": "Starts Claude Code's own sign-in (claude auth login, ADR 0084) with no terminal and answers the address of its page: console is true for an Anthropic Console account, false for a Claude subscription. Any earlier sign-in is ended. Refused while the account comes from the environment.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1689,27 +1685,84 @@
           "$ref": "#/$defs/requestId"
         },
         "method": {
-          "const": "account.connect"
+          "const": "account.sign_in"
         },
         "params": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "api_key",
-                "subscription_token"
-              ]
-            },
-            "secret": {
-              "type": "string"
+            "console": {
+              "type": "boolean"
             }
           },
           "required": [
-            "kind",
-            "secret"
+            "console"
           ]
+        }
+      }
+    },
+    "accountSignInCodeRequest": {
+      "title": "Account Sign In Code Request",
+      "description": "Hands the code the sign-in page showed to the waiting sign-in, then checks the connection. The code is never kept, logged or echoed, and a refusal of these params carries no data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.sign_in_code"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "code"
+          ]
+        }
+      }
+    },
+    "accountCheckRequest": {
+      "title": "Account Check Request",
+      "description": "Checks the connection with one tiny request through Claude Code (ADR 0084).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.check"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
         }
       }
     },
@@ -1946,38 +1999,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": {
-          "oneOf": [
-            {
-              "const": "anthropic"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "signed_in": {
+          "type": "boolean"
         },
         "kind": {
           "oneOf": [
             {
               "type": "string",
               "enum": [
-                "api_key",
-                "subscription_token"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "source": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
+                "subscription",
+                "console",
                 "environment",
-                "keychain",
-                "file"
+                "other"
               ]
             },
             {
@@ -1987,17 +2020,20 @@
         },
         "environment_variable": {
           "type": "string",
-          "description": "The variable the credential comes from, when it comes from the environment: Catervas cannot remove it, so the page names it rather than offering Disconnect."
+          "description": "The variable the account comes from, when it comes from the environment: Catervas cannot sign that out, so the page names it."
         },
         "key_refused": {
           "type": "boolean",
-          "description": "True while the team is paused because the model provider refused the credential (docs/SPEC.md 5.5): the key did not work, and connecting the account again resumes the team. Left out otherwise."
+          "description": "True while the team is paused because the model provider refused the credential (docs/SPEC.md 5.5): signing in again, or a working check, resumes the team. Left out otherwise."
+        },
+        "kept_key_removed": {
+          "type": "boolean",
+          "description": "True from the first start of this version, when Catervas removed, unread, the key it used to keep (ADR 0084), until the daemon stops. Left out otherwise."
         }
       },
       "required": [
-        "provider",
-        "kind",
-        "source"
+        "signed_in",
+        "kind"
       ]
     },
     "projectOpenResult": {
@@ -2024,25 +2060,44 @@
         "project_root"
       ]
     },
-    "accountConnectResult": {
+    "accountSignInResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "stored_in": {
+        "url": {
           "type": "string",
-          "enum": [
-            "keychain",
-            "file"
-          ]
-        },
-        "taking_on": {
-          "type": "boolean",
-          "description": "True when a project that waited on the credential is now being taken on, so the daemon restarts on it."
+          "description": "The address of Claude's sign-in page, on one of Anthropic's hosts."
         }
       },
       "required": [
-        "stored_in",
-        "taking_on"
+        "url"
+      ]
+    },
+    "accountCheckResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "working",
+            "key_refused",
+            "limit_reached",
+            "not_signed_in",
+            "failed"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "description": "Claude Code's words, only with failed."
+        },
+        "taking_on": {
+          "type": "boolean",
+          "description": "In setup mode, true when a project that waited on the account is now being taken on, so the daemon restarts on it."
+        }
+      },
+      "required": [
+        "outcome"
       ]
     },
     "browserPullRequest": {
@@ -4663,7 +4718,7 @@
     },
     "procurementMailboxConnectRequest": {
       "title": "Procurement Mailbox Connect Request",
-      "description": "Connects the procurement mailbox (docs/SPEC.md 6.6, 6.10; ADR 0039): Catervas logs in to both servers over TLS with the certificate checked, sending nothing, then keeps the password in the OS keychain (or, without one, a private file) and records mailbox.connected. provider is gmail, icloud, fastmail (whose servers Catervas knows and uses in place of imap and smtp), other (the servers given) or microsoft, which is refused mailbox_provider_unsupported before any connection, as is an address at outlook.com, hotmail.com, live.com or msn.com. folder defaults to INBOX, signature to none and disclose_ai to true. A refusal of these params carries no data, as account.connect's does; a refusal of the mailbox is mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server or mailbox_settings_invalid, each in Catervas's words, never quoting the password. Connecting again replaces all of it. Answers emptyResult.",
+      "description": "Connects the procurement mailbox (docs/SPEC.md 6.6, 6.10; ADR 0039): Catervas logs in to both servers over TLS with the certificate checked, sending nothing, then keeps the password in the OS keychain (or, without one, a private file) and records mailbox.connected. provider is gmail, icloud, fastmail (whose servers Catervas knows and uses in place of imap and smtp), other (the servers given) or microsoft, which is refused mailbox_provider_unsupported before any connection, as is an address at outlook.com, hotmail.com, live.com or msn.com. folder defaults to INBOX, signature to none and disclose_ai to true. A refusal of these params carries no data, as account.sign_in_code's does; a refusal of the mailbox is mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server or mailbox_settings_invalid, each in Catervas's words, never quoting the password. Connecting again replaces all of it. Answers emptyResult.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -5251,9 +5306,9 @@
         }
       }
     },
-    "accountDisconnectRequest": {
-      "title": "Account Disconnect Request",
-      "description": "Deletes the AI account's credential from every store that holds it and, when one did, pauses the team. A credential from the environment cannot be removed: nothing is deleted, and the answer names its variable.",
+    "accountSignOutRequest": {
+      "title": "Account Sign Out Request",
+      "description": "Signs Claude Code out (claude auth logout) and, when the team was running, pauses it. An account from the environment cannot be signed out: nothing runs, and the answer names its variable.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -5270,7 +5325,7 @@
           "$ref": "#/$defs/requestId"
         },
         "method": {
-          "const": "account.disconnect"
+          "const": "account.sign_out"
         },
         "params": {
           "type": "object",
@@ -5409,31 +5464,20 @@
         "models"
       ]
     },
-    "accountDisconnectResult": {
+    "accountSignOutResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "removed_from": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "keychain",
-              "file"
-            ]
-          }
-        },
         "paused": {
           "type": "boolean",
-          "description": "Whether this call paused the team: true only when a credential was removed and the team was running. A team already paused stays paused and answers false."
+          "description": "Whether this call paused the team: true only when Claude Code was signed out and the team was running. A team already paused stays paused and answers false."
         },
         "environment_variable": {
           "type": "string",
-          "description": "The variable the credential comes from, when it comes from the environment and so could not be removed."
+          "description": "The variable the account comes from, when it comes from the environment and so could not be signed out."
         }
       },
       "required": [
-        "removed_from",
         "paused"
       ]
     },
@@ -5702,7 +5746,7 @@
     },
     "connectorToolsRequest": {
       "title": "Connector Tools Request",
-      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.connect's does.",
+      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.sign_in_code's does.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -5780,7 +5824,7 @@
     },
     "connectorConnectRequest": {
       "title": "Connector Connect Request",
-      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else paid, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else paid, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.sign_in_code's does; a refusal of the entry carries the team's errors, each at its field.",
       "type": "object",
       "additionalProperties": false,
       "required": [

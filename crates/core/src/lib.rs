@@ -7,6 +7,8 @@ pub mod autopilot;
 pub mod branch;
 /// Budgets and limits: session limits, the session ledger, and the budget check.
 pub mod budget;
+/// What Catervas reads of Claude Code's account, from strings (ADR 0084).
+pub mod claude_account;
 /// What claude.ai's data export says about conversations and Projects, metadata only.
 pub mod claude_export;
 /// What Claude Code's history says: one transcript line, and where each session belongs.

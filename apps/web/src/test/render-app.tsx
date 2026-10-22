@@ -77,7 +77,7 @@ export async function answerStatus(
 		await socket.reply(frame, {
 			project_root: "/home/me/corner-bakery",
 			paused,
-			credential: "api_key",
+			signed_in: true,
 			port: 7420,
 			take_on_error: null,
 			...fields,

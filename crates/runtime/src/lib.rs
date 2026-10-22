@@ -1,6 +1,10 @@
 //! Catervas's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// Claude Code's account, asked of Claude Code: signed in or not, the connection check, signing
+/// in and signing out (ADR 0084).
+#[cfg(unix)]
+pub mod account;
 /// A kit connector's allowances: the period, the count and what a connect may set.
 pub mod allowances;
 /// An attached PDF, Word or text file turned into the Markdown the owner's document is made of.
@@ -16,7 +20,7 @@ pub mod channel;
 pub mod chat;
 /// What the human may do about an escalation, in words, one choice suggested.
 pub mod choices;
-/// The Claude Code program as a runtime: its command line, credential, and version.
+/// The Claude Code program as a runtime: its command line, environment, and version.
 #[cfg(unix)]
 pub mod claude;
 /// What the first-run wizard finds on the computer, and the sandbox image it builds.
@@ -27,7 +31,7 @@ pub mod computer;
 pub mod connectors;
 /// What a session cost, and what each budget has left.
 pub mod cost;
-/// Where the model credential is kept: the environment, the keychain, or a private file.
+/// The keychain's errors, and the removal of the key an earlier version kept (ADR 0084).
 #[cfg(unix)]
 pub mod credential;
 /// Contract exit criteria, run and judged.

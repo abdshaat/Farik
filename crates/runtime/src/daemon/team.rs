@@ -9,6 +9,7 @@ use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use catervas_core::claude_account::{AccountKind, AccountStatus, CheckOutcome};
 use catervas_core::contract::Role;
 use catervas_core::criteria::validate_criteria;
 use catervas_core::governor::gates::DesignerBrowser;
@@ -30,24 +31,28 @@ use serde_json::{Value, json};
 
 use super::signed_in::Binding;
 use super::web::{Failure, INTERNAL_ERROR, NO_PROJECT, REFUSED};
-use super::{DaemonState, Kept};
+use super::{DaemonState, Kept, SetupError};
+use crate::account::SignInError;
 use crate::allowances::{asked_allowances, checked_allowances};
-use crate::claude::{CredentialKind, Secret, credential_variable};
+use crate::claude::{Secret, credential_variable};
 use crate::connectors::{ConnectorEntry, ConnectorError, ListedTool, SecretAt, list_tools};
-use crate::credential::{CredentialError, credential_of_kind, load_credential, save_credential};
+use crate::credential::CredentialError;
 use crate::pause::{key_refused, paused};
 use crate::session::session_model;
 use crate::tools::ToolDeps;
 
 /// The methods this module answers.
-pub(super) const METHODS: [&str; 21] = [
+pub(super) const METHODS: [&str; 24] = [
     "team.save",
     "merging.set",
     "autopilot.set",
     "agent.replace",
     "team.start",
     "criteria.save",
-    "account.disconnect",
+    "account.sign_in",
+    "account.sign_in_code",
+    "account.check",
+    "account.sign_out",
     "project.note",
     "connector.tools",
     "connector.connect",
@@ -308,66 +313,123 @@ fn role_skill_get(deps: &ToolDeps, params: &Value, name: &str) -> Result<Value, 
     ))
 }
 
-/// `account.status` on a daemon with a project: the credential read afresh from the environment
-/// and the stores `catervas serve` was given.
-pub(super) fn account_status(state: &DaemonState) -> Result<Value, Failure> {
+/// `account.status`: what Claude Code says (`status`, asked afresh), the variable an account from
+/// the environment comes from, and whether the key was refused or an earlier key removed.
+pub(super) fn account_status(
+    state: &DaemonState,
+    status: &AccountStatus,
+) -> Result<Value, Failure> {
     let web = web_of(state)?;
-    let mut status = match load_credential(&web.env, &web.stores) {
-        Some((credential, source)) => {
-            let mut status =
-                json!({ "provider": "anthropic", "kind": credential.kind(), "source": source });
-            if let Some(variable) = credential_variable(&web.env) {
-                status["environment_variable"] = json!(variable);
-            }
-            status
-        }
-        None => json!({ "provider": null, "kind": null, "source": null }),
-    };
+    let mut answer = json!({ "signed_in": status.signed_in, "kind": status.kind });
+    if status.kind == Some(AccountKind::Environment)
+        && let Some(variable) = credential_variable(&web.env)
+    {
+        answer["environment_variable"] = json!(variable);
+    }
     if let Some(deps) = state.deps()
         && key_refused(&deps.log).map_err(|e| internal(&e))?
     {
-        status["key_refused"] = json!(true);
+        answer["key_refused"] = json!(true);
     }
-    Ok(status)
+    if web.kept_key_removed {
+        answer["kept_key_removed"] = json!(true);
+    }
+    Ok(answer)
 }
 
-/// `account.connect` on a daemon with a project: the credential kept, as setup keeps it, and put
-/// in place for the next session; a team paused because the provider refused the old key is
-/// resumed (5.5), and one the human paused stays paused. A credential from the environment comes
-/// before any kept one, so connecting over it is refused, naming its variable.
-pub(super) async fn connect(state: &DaemonState, params: &Value) -> Result<Value, Failure> {
+/// The refusal of a sign-in step, in the daemon's words. `code` is the sign-in code just handed
+/// over, which is cut out of Claude Code's words so that it is never echoed.
+fn sign_in_words(error: &SignInError, code: &str) -> String {
+    let hide = |text: &str| {
+        if code.is_empty() {
+            text.to_string()
+        } else {
+            text.replace(code, "[code]")
+        }
+    };
+    match error {
+        SignInError::NoSignIn => {
+            "no sign-in is waiting for a code: press Sign in again".to_string()
+        }
+        SignInError::NoAddress(last) => {
+            format!("Claude Code did not give a sign-in address: {}", hide(last))
+        }
+        SignInError::Failed(last) => format!("Claude Code did not sign you in: {}", hide(last)),
+    }
+}
+
+/// `account.sign_in`: Claude Code's own login started, answering the address of its page. An
+/// account that comes from the environment is refused, naming its variable.
+async fn account_sign_in(state: &DaemonState, params: &Value) -> Result<Value, Failure> {
     let web = web_of(state)?;
-    if let Some(variable) = credential_variable(&web.env) {
+    if web.account.status().await.kind == Some(AccountKind::Environment)
+        && let Some(variable) = credential_variable(&web.env)
+    {
         return Err(Failure::new(
             REFUSED,
             format!(
-                "your AI account's key comes from {variable}, which Catervas cannot change: change \
-                 it where Catervas runs, then start Catervas again"
+                "your AI account comes from {variable}, which Catervas cannot change: remove it \
+                 where you start Catervas to sign in here"
             ),
         ));
     }
-    let kind = serde_json::from_value::<CredentialKind>(params["kind"].clone())
-        .map_err(|e| internal(&e))?;
-    let credential = credential_of_kind(kind, params["secret"].as_str().unwrap_or_default())
-        .map_err(|why| Failure::new(REFUSED, why))?;
-    let (stores, kept) = (web.stores.clone(), credential.clone());
-    let source = off_the_worker(move || {
-        save_credential(&kept, &stores).map_err(|error| Failure::new(REFUSED, words(&error)))
-    })
-    .await?;
-    if let Some(in_use) = &web.in_use {
-        *crate::locked(in_use) = credential;
+    let console = params["console"].as_bool().unwrap_or_default();
+    web.account
+        .start_sign_in(console)
+        .await
+        .map(|url| json!({ "url": url }))
+        .map_err(|error| Failure::new(REFUSED, sign_in_words(&error, "")))
+}
+
+/// `account.sign_in_code`: the code handed to the waiting login, then the check's outcome. The
+/// code is used once and echoed nowhere.
+async fn account_sign_in_code(state: &DaemonState, params: &Value) -> Result<Value, Failure> {
+    let web = web_of(state)?;
+    let code = params["code"].as_str().unwrap_or_default();
+    match web.account.finish_sign_in(code).await {
+        Ok(outcome) => answered(state, &outcome).await,
+        Err(error) => Err(Failure::new(REFUSED, sign_in_words(&error, code))),
+    }
+}
+
+/// `account.check`: the connection checked with one tiny request.
+async fn account_check(state: &DaemonState) -> Result<Value, Failure> {
+    let outcome = web_of(state)?.account.check().await;
+    answered(state, &outcome).await
+}
+
+/// A check's outcome as the page is told it. A working one resumes a team paused because the
+/// provider refused the key (5.5; one the human paused stays paused) and, in setup mode, takes on
+/// the project that waited on the account.
+async fn answered(state: &DaemonState, outcome: &CheckOutcome) -> Result<Value, Failure> {
+    let mut answer = json!({ "outcome": outcome.code() });
+    if let CheckOutcome::Failed(detail) = outcome {
+        answer["detail"] = json!(detail);
+    }
+    if *outcome != CheckOutcome::Working {
+        return Ok(answer);
     }
     if let Some(deps) = state.deps()
         && key_refused(&deps.log).map_err(|e| internal(&e))?
         && let Err(refused) = handled(state, Command::TeamResume).await
-        // The human's own Resume can land first: the key is kept and the team runs, so the
-        // connect stands.
+        // The human's own Resume can land first: the account works and the team runs, so the
+        // sign-in stands.
         && paused(&deps.log).map_err(|e| internal(&e))?
     {
         return Err(refused);
     }
-    Ok(json!({ "stored_in": source, "taking_on": false }))
+    if let Some(host) = state.host() {
+        let host = Arc::clone(host);
+        let taking_on = off_the_worker(move || {
+            host.take_on_waiting().map_err(|error| match error {
+                SetupError::Refused(sentence) => Failure::new(REFUSED, sentence),
+                SetupError::Failed(why) => Failure::new(INTERNAL_ERROR, why),
+            })
+        })
+        .await?;
+        answer["taking_on"] = json!(taking_on);
+    }
+    Ok(answer)
 }
 
 /// Where `agent`'s keys for `server` are kept in this project (ADR 0030).
@@ -2193,14 +2255,18 @@ pub(super) async fn call(
     method: &str,
     params: &Value,
 ) -> Result<Value, Failure> {
-    if method == "account.disconnect" {
-        return disconnect(state).await;
+    match method {
+        "account.sign_in" => return account_sign_in(state, params).await,
+        "account.sign_in_code" => return account_sign_in_code(state, params).await,
+        "account.check" => return account_check(state).await,
+        _ => {}
     }
     let Some(deps) = state.deps().cloned() else {
         return Err(Failure::new(NO_PROJECT, super::NO_PROJECT));
     };
     let params = params.clone();
     match method {
+        "account.sign_out" => sign_out(state).await,
         "connector.tools" => {
             let tools = Box::pin(listed(state, &deps, &params)).await?;
             Ok(json!({ "tools": tools
@@ -2406,41 +2472,29 @@ async fn handled(state: &DaemonState, command: Command) -> Result<(), Failure> {
     }
 }
 
-/// `account.disconnect`: the credential deleted from every store that holds it and, when one did,
-/// the team paused if it was running, since the driver keeps the key it already loaded. A credential from the
-/// environment cannot be removed, so nothing is, and the answer names its variable.
-async fn disconnect(state: &DaemonState) -> Result<Value, Failure> {
+/// `account.sign_out`: Claude Code signed out and, when the team was running, the team paused,
+/// since a session already running keeps the sign-in it started with. An account from the
+/// environment cannot be signed out from here, so nothing runs and the answer names its variable.
+async fn sign_out(state: &DaemonState) -> Result<Value, Failure> {
     let web = web_of(state)?;
-    if let Some(variable) = credential_variable(&web.env) {
-        return Ok(
-            json!({ "removed_from": [], "paused": false, "environment_variable": variable }),
-        );
+    if web.account.status().await.kind == Some(AccountKind::Environment)
+        && let Some(variable) = credential_variable(&web.env)
+    {
+        return Ok(json!({ "paused": false, "environment_variable": variable }));
     }
-    let stores = web.stores.clone();
-    let removed = off_the_worker(move || {
-        let mut removed = Vec::new();
-        for store in &stores {
-            match store.load() {
-                Ok(Some(_)) => {
-                    store.delete().map_err(|error| internal(&words(&error)))?;
-                    removed.push(store.source());
-                }
-                Ok(None) | Err(CredentialError::NoKeychain) => {}
-                Err(error) => return Err(internal(&words(&error))),
-            }
-        }
-        Ok(removed)
-    })
-    .await?;
+    web.account
+        .sign_out()
+        .await
+        .map_err(|why| Failure::new(REFUSED, format!("Claude Code did not sign out: {why}")))?;
     // `paused` says whether this call paused the team, not whether it is paused.
     let paused_now = match state.deps() {
-        Some(deps) if !removed.is_empty() && !paused(&deps.log).map_err(|e| internal(&e))? => {
+        Some(deps) if !paused(&deps.log).map_err(|e| internal(&e))? => {
             handled(state, Command::TeamPause).await?;
             true
         }
         _ => false,
     };
-    Ok(json!({ "removed_from": removed, "paused": paused_now }))
+    Ok(json!({ "paused": paused_now }))
 }
 
 fn words(error: &CredentialError) -> String {
@@ -2451,7 +2505,7 @@ fn words(error: &CredentialError) -> String {
 }
 
 /// A mailbox command's refusal as the browser is shown it: the code, then Catervas's words, with no
-/// data, as `account.connect`'s.
+/// data, as `account.sign_in_code`'s.
 fn mailbox_failure(refusal: &crate::procurement::MailboxRefusal) -> Failure {
     Failure::new(REFUSED, refusal.to_string())
 }
@@ -2556,11 +2610,14 @@ pub(super) mod tests {
     use catervas_protocol::command::{command_from_value, command_to_value};
     use catervas_protocol::event::event_to_value;
 
-    use crate::claude::{ClaudeCredential, Secret, SharedCredential};
+    use catervas_core::claude_account::{AccountKind, AccountStatus, CheckOutcome};
+
+    use crate::account::SignInError;
+    use crate::account::fixtures::FakeAccount;
+    use crate::claude::Secret;
     use crate::connectors::{
         ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
     };
-    use crate::credential::{CredentialStore, MemoryStore};
     use crate::daemon::ads_calls::fixtures::Ads;
     use crate::daemon::gates::tests::{call, driven, query, rpc};
     use crate::daemon::web::{BrowserSessions, ConnectCodes, WebState};
@@ -2570,39 +2627,39 @@ pub(super) mod tests {
 
     const MARKER: &str = ".catervas/local/setup-pending";
 
-    /// `harness`'s daemon with its browser routes on, its credential kept in `store`, and `env`;
-    /// answered with the credential its sessions start with.
-    fn served(
-        harness: &Harness,
-        store: &Arc<MemoryStore>,
-        env: &[(&str, &str)],
-    ) -> SharedCredential {
-        let stores: Vec<Arc<dyn CredentialStore>> = vec![Arc::clone(store) as _];
-        let in_use: SharedCredential = Arc::new(std::sync::Mutex::new(ClaudeCredential::ApiKey(
-            Secret::new("sk-ant-api-old".to_string()),
-        )));
+    /// `harness`'s daemon with its browser routes on, `env`, and a fake Claude Code account,
+    /// signed in with a subscription; answered with the fake.
+    fn served(harness: &Harness, env: &[(&str, &str)]) -> Arc<FakeAccount> {
+        let account = Arc::new(FakeAccount::new());
+        *account.status.lock().expect("the status") = AccountStatus {
+            signed_in: true,
+            kind: Some(if env.is_empty() {
+                AccountKind::Subscription
+            } else {
+                AccountKind::Environment
+            }),
+        };
         assert!(
             harness.daemon.set_web(WebState {
                 codes: ConnectCodes::default(),
                 sessions: BrowserSessions::open(None).expect("the sessions open"),
                 project_root: harness.project.repo.path.clone(),
-                credential: None,
+                account: Arc::clone(&account) as Arc<dyn crate::account::AccountPort>,
+                kept_key_removed: false,
                 port: 49_731,
                 clock: Arc::new(FixedClock::new(at())),
                 take_on_error: std::sync::Mutex::default(),
                 leaving: std::sync::Mutex::default(),
-                stores,
                 env: env
                     .iter()
                     .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
                     .collect::<BTreeMap<_, _>>(),
-                in_use: Some(Arc::clone(&in_use)),
                 templates: None,
                 #[cfg(feature = "e2e")]
                 admit_local_preview: false,
             })
         );
-        in_use
+        account
     }
 
     /// An event `agent` produced, which is work the log has seen.
@@ -5024,15 +5081,9 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn disconnects_the_account_pauses_and_connects_another() {
-        let harness = driven("team-disconnect");
-        let store = Arc::new(MemoryStore::default());
-        store
-            .save(&ClaudeCredential::ApiKey(Secret::new(
-                "sk-ant-api-x".to_string(),
-            )))
-            .expect("kept");
-        let in_use = served(&harness, &store, &[]);
+    fn signs_out_and_pauses_the_team() {
+        let harness = driven("team-sign-out");
+        let account = served(&harness, &[]);
         assert_eq!(
             query(
                 &harness.daemon,
@@ -5040,93 +5091,37 @@ pub(super) mod tests {
                 &json!({}),
                 "accountStatusResult"
             ),
-            json!({ "provider": "anthropic", "kind": "api_key", "source": "keychain" })
+            json!({ "signed_in": true, "kind": "subscription" })
         );
         assert_eq!(
             call(
                 &harness.daemon,
-                "account.disconnect",
+                "account.sign_out",
                 &json!({}),
-                "accountDisconnectResult"
+                "accountSignOutResult"
             ),
-            json!({ "removed_from": ["keychain"], "paused": true })
+            json!({ "paused": true })
         );
-        assert!(store.load().expect("reads").is_none());
-        assert_eq!(harness.project.events(&[EventKind::TeamPaused]).len(), 1);
-        assert_eq!(
-            query(
-                &harness.daemon,
-                "account.status",
-                &json!({}),
-                "accountStatusResult"
-            ),
-            json!({ "provider": null, "kind": null, "source": null })
-        );
-
-        // Another account is connected without starting Catervas again: kept, put in place for
-        // the next session, and the team stays paused until the human resumes it.
-        assert_eq!(
-            call(
-                &harness.daemon,
-                "account.connect",
-                &json!({ "kind": "api_key", "secret": "sk-ant-api-new" }),
-                "accountConnectResult",
-            ),
-            json!({ "stored_in": "keychain", "taking_on": false })
-        );
-        let new = ClaudeCredential::ApiKey(Secret::new("sk-ant-api-new".to_string()));
-        assert_eq!(store.load().expect("reads"), Some(new.clone()));
-        assert_eq!(*in_use.lock().expect("not poisoned"), new);
-        assert_eq!(
-            query(
-                &harness.daemon,
-                "account.status",
-                &json!({}),
-                "accountStatusResult"
-            ),
-            json!({ "provider": "anthropic", "kind": "api_key", "source": "keychain" })
-        );
-        assert!(paused(&harness.project.deps.log).expect("reads"));
-
-        // On a team already paused, disconnecting pauses nothing, and says so.
-        assert_eq!(
-            call(
-                &harness.daemon,
-                "account.disconnect",
-                &json!({}),
-                "accountDisconnectResult"
-            ),
-            json!({ "removed_from": ["keychain"], "paused": false })
+        assert!(
+            account
+                .calls
+                .lock()
+                .expect("the calls")
+                .contains(&"sign_out".to_string())
         );
         assert_eq!(harness.project.events(&[EventKind::TeamPaused]).len(), 1);
 
-        // A key from the environment cannot be removed; the answer names where it is, and so
-        // does the account's status, before anyone tries.
-        let harness = driven("team-disconnect-env");
-        let store = Arc::new(MemoryStore::default());
-        served(&harness, &store, &[("ANTHROPIC_API_KEY", "sk-ant-api-y")]);
-        assert_eq!(
-            query(
-                &harness.daemon,
-                "account.status",
-                &json!({}),
-                "accountStatusResult"
-            ),
-            json!({
-                "provider": "anthropic", "kind": "api_key", "source": "environment",
-                "environment_variable": "ANTHROPIC_API_KEY",
-            })
-        );
+        // On a team already paused, signing out pauses nothing, and says so.
         assert_eq!(
             call(
                 &harness.daemon,
-                "account.disconnect",
+                "account.sign_out",
                 &json!({}),
-                "accountDisconnectResult"
+                "accountSignOutResult"
             ),
-            json!({ "removed_from": [], "paused": false, "environment_variable": "ANTHROPIC_API_KEY" })
+            json!({ "paused": false })
         );
-        assert!(harness.project.events(&[EventKind::TeamPaused]).is_empty());
+        assert_eq!(harness.project.events(&[EventKind::TeamPaused]).len(), 1);
     }
 
     /// Appends a `team.paused` with `body`, as Catervas or the human would.
@@ -5150,10 +5145,9 @@ pub(super) mod tests {
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn connects_the_account_again_and_resumes_a_team_paused_for_its_key() {
-        let harness = driven("team-reconnect");
-        let store = Arc::new(MemoryStore::default());
-        let in_use = served(&harness, &store, &[]);
+    fn signs_in_checks_and_resumes_a_team_paused_for_its_key() {
+        let harness = driven("team-sign-in");
+        let account = served(&harness, &[]);
         let status = || {
             query(
                 &harness.daemon,
@@ -5169,49 +5163,80 @@ pub(super) mod tests {
         );
         assert_eq!(status()["key_refused"], json!(true));
 
+        let started = call(
+            &harness.daemon,
+            "account.sign_in",
+            &json!({ "console": true }),
+            "accountSignInResult",
+        );
+        assert_eq!(
+            started,
+            json!({ "url": "https://claude.com/cai/oauth/authorize?x=1" })
+        );
         let answer = call(
             &harness.daemon,
-            "account.connect",
-            &json!({ "kind": "subscription_token", "secret": "sk-ant-oat01-new" }),
-            "accountConnectResult",
+            "account.sign_in_code",
+            &json!({ "code": "c" }),
+            "accountCheckResult",
         );
-
-        assert_eq!(
-            answer,
-            json!({ "stored_in": "keychain", "taking_on": false })
+        assert_eq!(answer, json!({ "outcome": "working" }));
+        let calls = account.calls.lock().expect("the calls").clone();
+        assert!(
+            calls.contains(&"start_sign_in(true)".to_string()),
+            "{calls:?}"
         );
-        let new = ClaudeCredential::OauthToken(Secret::new("sk-ant-oat01-new".to_string()));
-        assert_eq!(store.load().expect("reads"), Some(new.clone()));
-        assert_eq!(*in_use.lock().expect("not poisoned"), new);
-        // The page is told the kind the sessions now run on.
-        assert_eq!(
-            query(
-                &harness.daemon,
-                "serve.status",
-                &json!({}),
-                "serveStatusResult"
-            )["credential"],
-            json!("subscription_token")
+        assert!(
+            calls.contains(&"finish_sign_in(c)".to_string()),
+            "{calls:?}"
         );
+        assert_eq!(harness.project.events(&[EventKind::TeamResumed]).len(), 1);
         assert!(!paused(&harness.project.deps.log).expect("reads"));
         assert_eq!(status().get("key_refused"), None);
 
-        // A pause the human made is theirs to end: connecting again keeps it.
+        // A check that finds the key still refused does not resume the team.
+        paused_with(
+            &harness,
+            &json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
+        );
+        *account.finish.lock().expect("the answer") = Ok(CheckOutcome::KeyRefused);
+        let refused = call(
+            &harness.daemon,
+            "account.sign_in_code",
+            &json!({ "code": "d" }),
+            "accountCheckResult",
+        );
+        assert_eq!(refused, json!({ "outcome": "key_refused" }));
+        assert!(paused(&harness.project.deps.log).expect("reads"));
+
+        // A pause the human made is theirs to end: a working check keeps it.
         paused_with(&harness, &json!({ "by": "human" }));
+        *account.check.lock().expect("the answer") = CheckOutcome::Working;
         call(
             &harness.daemon,
-            "account.connect",
-            &json!({ "kind": "subscription_token", "secret": "sk-ant-oat01-newer" }),
-            "accountConnectResult",
+            "account.check",
+            &json!({}),
+            "accountCheckResult",
         );
         assert!(paused(&harness.project.deps.log).expect("reads"));
+
+        // A failed check is told in Claude Code's words.
+        *account.check.lock().expect("the answer") = CheckOutcome::Failed("Overloaded".to_string());
+        assert_eq!(
+            call(
+                &harness.daemon,
+                "account.check",
+                &json!({}),
+                "accountCheckResult"
+            ),
+            json!({ "outcome": "failed", "detail": "Overloaded" })
+        );
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn keeps_a_connect_whose_resume_the_human_beat() {
-        // The human's Resume lands between the connect's look at the pause and its own resume.
-        let harness = Harness::new("team-reconnect-race", |_| {});
+    fn keeps_a_sign_in_whose_resume_the_human_beat() {
+        // The human's Resume lands between the check's look at the pause and its own resume.
+        let harness = Harness::new("team-sign-in-race", |_| {});
         let orchestrator = Arc::new(harness.orchestrator(harness.recorded(Vec::new())));
         let handler: crate::daemon::CommandHandler = Arc::new(move |command| {
             let orchestrator = Arc::clone(&orchestrator);
@@ -5226,46 +5251,111 @@ pub(super) mod tests {
             })
         });
         assert!(harness.daemon.set_command_handler(handler));
-        let store = Arc::new(MemoryStore::default());
-        served(&harness, &store, &[]);
+        served(&harness, &[]);
         paused_with(
             &harness,
             &json!({ "by": "catervas", "reason": "credential_refused", "detail": "401" }),
         );
 
-        let reply = rpc(
-            &harness.daemon,
-            "account.connect",
-            &json!({ "kind": "api_key", "secret": "sk-ant-api-new" }),
-        );
+        let reply = rpc(&harness.daemon, "account.check", &json!({}));
 
-        assert_eq!(
-            reply["result"],
-            json!({ "stored_in": "keychain", "taking_on": false }),
-            "{reply}"
-        );
+        assert_eq!(reply["result"], json!({ "outcome": "working" }), "{reply}");
         assert!(!paused(&harness.project.deps.log).expect("reads"));
     }
 
     #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
-    fn refuses_to_connect_over_a_key_from_the_environment() {
-        let harness = driven("team-reconnect-env");
-        let store = Arc::new(MemoryStore::default());
-        served(&harness, &store, &[("ANTHROPIC_API_KEY", "sk-ant-api-y")]);
+    fn refuses_to_sign_in_over_a_key_from_the_environment() {
+        let harness = driven("team-sign-in-env");
+        let account = served(&harness, &[("ANTHROPIC_API_KEY", "sk-ant-api-y")]);
+        assert_eq!(
+            query(
+                &harness.daemon,
+                "account.status",
+                &json!({}),
+                "accountStatusResult"
+            ),
+            json!({
+                "signed_in": true, "kind": "environment",
+                "environment_variable": "ANTHROPIC_API_KEY",
+            })
+        );
         let reply = rpc(
             &harness.daemon,
-            "account.connect",
-            &json!({ "kind": "api_key", "secret": "sk-ant-api-z" }),
+            "account.sign_in",
+            &json!({ "console": false }),
         );
         assert_eq!(reply["error"]["code"], json!(-32005), "{reply}");
-        assert!(
-            reply["error"]["message"]
-                .as_str()
-                .is_some_and(|said| said.contains("ANTHROPIC_API_KEY")),
+        assert_eq!(
+            reply["error"]["message"],
+            json!(
+                "your AI account comes from ANTHROPIC_API_KEY, which Catervas cannot change: \
+                 remove it where you start Catervas to sign in here"
+            ),
             "{reply}"
         );
-        assert!(store.load().expect("reads").is_none());
+        assert_eq!(
+            call(
+                &harness.daemon,
+                "account.sign_out",
+                &json!({}),
+                "accountSignOutResult"
+            ),
+            json!({ "paused": false, "environment_variable": "ANTHROPIC_API_KEY" })
+        );
+        let calls = account.calls.lock().expect("the calls").clone();
+        assert!(
+            !calls.iter().any(|call| call.starts_with("start_sign_in")),
+            "{calls:?}"
+        );
+        assert!(!calls.contains(&"sign_out".to_string()), "{calls:?}");
+        assert!(harness.project.events(&[EventKind::TeamPaused]).is_empty());
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn says_each_sign_in_refusal_in_words_and_never_echoes_the_code() {
+        let harness = driven("team-sign-in-words");
+        let account = served(&harness, &[]);
+        *account.finish.lock().expect("the answer") = Err(SignInError::NoSignIn);
+        let reply = rpc(
+            &harness.daemon,
+            "account.sign_in_code",
+            &json!({ "code": "secret-code-123" }),
+        );
+        assert_eq!(
+            reply["error"]["message"],
+            json!("no sign-in is waiting for a code: press Sign in again")
+        );
+        *account.finish.lock().expect("the answer") =
+            Err(SignInError::Failed("bad secret-code-123".to_string()));
+        let reply = rpc(
+            &harness.daemon,
+            "account.sign_in_code",
+            &json!({ "code": "secret-code-123" }),
+        );
+        assert_eq!(
+            reply["error"]["message"],
+            json!("Claude Code did not sign you in: bad [code]")
+        );
+        assert!(!reply.to_string().contains("secret-code-123"), "{reply}");
+        *account.address.lock().expect("the answer") =
+            Err(SignInError::NoAddress("Opening browser...".to_string()));
+        let reply = rpc(
+            &harness.daemon,
+            "account.sign_in",
+            &json!({ "console": false }),
+        );
+        assert_eq!(
+            reply["error"]["message"],
+            json!("Claude Code did not give a sign-in address: Opening browser...")
+        );
+        *account.sign_out.lock().expect("the answer") = Err("no way".to_string());
+        let reply = rpc(&harness.daemon, "account.sign_out", &json!({}));
+        assert_eq!(
+            reply["error"]["message"],
+            json!("Claude Code did not sign out: no way")
+        );
     }
 
     #[test]
@@ -5661,7 +5751,7 @@ pub(super) mod tests {
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn reports_setup_pending() {
         let harness = driven("team-pending");
-        served(&harness, &Arc::new(MemoryStore::default()), &[]);
+        served(&harness, &[]);
         let pending = || {
             query(
                 &harness.daemon,

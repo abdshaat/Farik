@@ -2,15 +2,17 @@
 //! for as long as it drives, and a command typed anywhere else is sent to that process's daemon,
 //! or handled here, under the lock, when nothing drives.
 
+use std::collections::BTreeMap;
 use std::fs::{File, TryLockError};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
 
+use catervas_core::claude_account::AccountKind;
 use catervas_protocol::command::{Command, command_to_value, reply_from_value};
-use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
-use catervas_runtime::credential::{Source, load_credential};
+use catervas_runtime::account::{AccountPort, ClaudeAccount};
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, credential_variable};
 use catervas_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
 use catervas_runtime::daemon::{
     DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve, serve_held,
@@ -342,8 +344,20 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.catervas
     you gave a connector, which they can also read from a running connector's /proc/<pid>/environ. \
     The governor still checks every path and permission it is asked about.";
 
-/// The variables of the environment a Claude Code session is given besides its credential.
-const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
+/// The variables of the environment a Claude Code session is given, each copied only when set:
+/// Claude Code finds its own sign-in (`CLAUDE_CONFIG_DIR` says where), and a key the user set
+/// passes through unread (ADR 0084).
+const SESSION_ENV: [&str; 9] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "TERM",
+    "TMPDIR",
+    "CLAUDE_CONFIG_DIR",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
 
 /// What a start is told besides the project: how the process differs from `run`'s.
 #[derive(Clone, Copy, Default)]
@@ -356,6 +370,18 @@ pub(crate) struct StartOptions<'l> {
     pub(crate) web: bool,
 }
 
+/// The AI account a start found Claude Code signed in with.
+#[derive(Clone, Copy)]
+pub(crate) struct AccountSeen {
+    /// The kind of sign-in.
+    pub(crate) kind: AccountKind,
+    /// The variable it comes from, when it comes from the user's environment.
+    pub(crate) variable: Option<&'static str>,
+}
+
+/// What a start is refused with while Claude Code is not signed in.
+pub(crate) const NOT_SIGNED_IN: &str = "Claude Code is not signed in: sign in on the AI account page of the web app, or run claude auth login, or set ANTHROPIC_API_KEY where you start Catervas";
+
 /// A process driving the project: its lock, its served daemon, its orchestrator, and where it
 /// hears Ctrl-C.
 pub(crate) struct Driver {
@@ -365,8 +391,8 @@ pub(crate) struct Driver {
     pub(crate) daemon: Arc<DaemonState>,
     /// One `()` per interrupt.
     pub(crate) interrupts: UnboundedReceiver<()>,
-    /// The credential it chose and where it came from, when the engine is Claude Code.
-    pub(crate) credential: Option<(CredentialKind, Source)>,
+    /// The Claude Code account it found signed in, when the engine is Claude Code.
+    pub(crate) account: Option<AccountSeen>,
     /// Whether it runs in no-sandbox mode.
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
@@ -493,23 +519,22 @@ async fn start_listening(
     if settings.sandbox == Sandbox::None {
         let _ = writeln!(io.stderr, "{NO_SANDBOX_WARNING}");
     }
-    let claude = match &io.engine {
+    let (claude, account) = match &io.engine {
         Engine::Claude => {
-            let found = load_credential(&io.env, &(io.credential_stores)()).ok_or(
-                "no credential for Claude Code: connect your AI account in the browser catervas \
-                 serve opens, or set ANTHROPIC_API_KEY to an API key, or \
-                 CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
-            )?;
             let path = on_path("claude", io)
                 .ok_or("Claude Code is not installed: there is no claude on PATH")?;
-            Some((found, path))
+            let status = crate::start::account(io).status().await;
+            if !status.signed_in {
+                return Err(NOT_SIGNED_IN.to_string());
+            }
+            let seen = status.kind.map(|kind| AccountSeen {
+                kind,
+                variable: credential_variable(&session_env(io)),
+            });
+            (Some(path), seen)
         }
-        Engine::Given(_) => None,
+        Engine::Given(_) => (None, None),
     };
-    let credential = claude
-        .as_ref()
-        .map(|((credential, source), _)| (credential.kind(), *source));
-    let claude = claude.map(|((credential, _), path)| (Arc::new(Mutex::new(credential)), path));
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
         let _ = writeln!(
@@ -524,11 +549,7 @@ async fn start_listening(
     tools.transitions.set_sandbox(settings.sandbox);
     let (sandboxes, previews) = told_factories(&tools, settings.sandbox, sandbox_image(io)).await?;
     let daemon = connected_daemon(&tools, io);
-    let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
-    let web = options
-        .web
-        .then(|| web(&project.root, io, in_use))
-        .transpose()?;
+    let web = options.web.then(|| web(&project.root, io)).transpose()?;
     let daemon_file = Some(project.root.join(DAEMON_FILE));
     let handle = if let Some(listener) = options.listener {
         serve_held(listener, daemon_file, Arc::clone(&daemon)).await
@@ -583,7 +604,7 @@ async fn start_listening(
         orchestrator,
         daemon,
         interrupts: tokio::sync::mpsc::unbounded_channel().1,
-        credential,
+        account,
         sandbox: settings.sandbox,
         recovered,
         connect_code,
@@ -686,11 +707,7 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
 /// credential the sessions start with, shared so that connecting the account again replaces it.
 /// The sessions are kept in the state folder, made here when it is not there yet, or in memory
 /// when there is none.
-pub(crate) fn web(
-    root: &Path,
-    io: &CliIo<'_>,
-    in_use: Option<SharedCredential>,
-) -> Result<(WebState, String), String> {
+pub(crate) fn web(root: &Path, io: &CliIo<'_>) -> Result<(WebState, String), String> {
     let state = state_dir(&io.env);
     let file = match &state {
         Some(directory) => {
@@ -706,19 +723,13 @@ pub(crate) fn web(
         codes,
         sessions,
         project_root: root.to_path_buf(),
-        credential: in_use.as_ref().map(|credential| {
-            credential
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .kind()
-        }),
+        account: account(io),
+        kept_key_removed: io.kept_key_removed,
         port: 0,
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
         leaving: std::sync::Mutex::default(),
-        stores: (io.credential_stores)(),
         env: io.env.clone(),
-        in_use,
         templates: state.map(|directory| Templates::new(directory.join("templates"))),
         #[cfg(feature = "e2e")]
         admit_local_preview: io.admit_local_preview,
@@ -726,18 +737,45 @@ pub(crate) fn web(
     Ok((web, code))
 }
 
+/// What the browser routes ask of Claude Code's account (ADR 0084): the `claude` found on `PATH`,
+/// run with the environment a session gets, and the check run in an empty folder of its own in
+/// the state folder.
+pub(crate) fn account(io: &CliIo<'_>) -> Arc<dyn AccountPort> {
+    let check_dir = state_dir(&io.env).map_or_else(
+        || std::env::temp_dir().join("catervas-account-check"),
+        |directory| directory.join("account-check"),
+    );
+    Arc::new(ClaudeAccount::new(
+        on_path("claude", io).unwrap_or_else(|| PathBuf::from("claude")),
+        session_env(io),
+        check_dir,
+    ))
+}
+
+/// The environment a `claude` program is run in: `SESSION_ENV`'s variables, each only when set.
+fn session_env(io: &CliIo<'_>) -> BTreeMap<String, String> {
+    SESSION_ENV
+        .iter()
+        .filter_map(|name| {
+            io.env
+                .get(*name)
+                .map(|value| ((*name).to_string(), value.clone()))
+        })
+        .collect()
+}
+
 /// The adapter sessions start through: the engine's factory's, or Claude Code's once its version
 /// passes.
 fn adapter(
     project: &Project,
     io: &CliIo<'_>,
-    claude: Option<(SharedCredential, PathBuf)>,
+    claude: Option<PathBuf>,
     daemon: &Arc<DaemonState>,
     handle: &DaemonHandle,
 ) -> Result<Arc<dyn RuntimeAdapter>, String> {
     match (&io.engine, claude) {
         (Engine::Given(factory), _) => Ok(factory(Arc::clone(daemon))),
-        (Engine::Claude, Some((credential, claude_path))) => {
+        (Engine::Claude, Some(claude_path)) => {
             let config = ClaudeConfig {
                 claude_path,
                 hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("catervas")),
@@ -755,17 +793,9 @@ fn adapter(
                     })
                     .unwrap_or_default(),
                 team_file: project.root.join(".catervas/team.yaml"),
-                env: SESSION_ENV
-                    .iter()
-                    .filter_map(|name| {
-                        io.env
-                            .get(*name)
-                            .map(|value| ((*name).to_string(), value.clone()))
-                    })
-                    .collect(),
+                env: session_env(io),
             };
-            let adapter =
-                ClaudeAdapter::new(credential, config).map_err(|error| error.to_string())?;
+            let adapter = ClaudeAdapter::new(config).map_err(|error| error.to_string())?;
             Ok(Arc::new(adapter))
         }
         (Engine::Claude, None) => {

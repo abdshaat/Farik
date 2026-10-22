@@ -707,9 +707,8 @@ describe("today", () => {
 		});
 		// A key that works adds no row.
 		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
+			signed_in: true,
+			kind: "subscription",
 		});
 		expect(
 			await screen.findByRole("heading", { name: "Waiting on you (6)" }),
@@ -1031,9 +1030,8 @@ describe("today", () => {
 	it("says_the_key_did_not_work_and_links_to_settings", async () => {
 		const { container, s } = await today({});
 		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
+			signed_in: true,
+			kind: "subscription",
 			key_refused: true,
 		});
 		expect(
@@ -1042,12 +1040,15 @@ describe("today", () => {
 		const list = screen.getByRole("list", { name: en.waitingGroupSetUp });
 		const [row] = within(list).getAllByRole("listitem") as HTMLElement[];
 		expect(
+			within(row as HTMLElement).getByText("Your AI account’s key was refused"),
+		).toBeTruthy();
+		expect(
 			within(row as HTMLElement).getByText(
-				"Your AI account’s key did not work",
+				"The team is paused until you sign in again.",
 			),
 		).toBeTruthy();
 		const link = within(row as HTMLElement).getByRole("link", {
-			name: en.waitingKeyConnect,
+			name: "Sign in again in Settings",
 		});
 		expect(link.getAttribute("href")).toBe("/settings/account");
 		await expectNoAxeViolations(container);

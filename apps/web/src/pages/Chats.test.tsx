@@ -777,7 +777,7 @@ describe("chats", () => {
 			],
 			[
 				{ because: "key_refused" },
-				"Mira cannot answer: your AI provider refused the key. Check the key in Settings",
+				"Mira cannot answer: your AI account’s key was refused. Sign in again in Settings. Open Settings",
 				"/settings/account",
 			],
 			[{ because: "no_answer" }, "Mira could not answer. Ask again."],

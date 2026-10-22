@@ -166,7 +166,7 @@ pub(crate) fn forget(state_dir: &Path, root: &Path) -> io::Result<()>;
 
 `git merge origin/docs/claude-code-signs-in` (pull request #92) into this branch with a merge commit, resolving any conflict in `docs/SPEC.md`'s revision list by keeping every revision in number order. Then run `cargo xtask check`; it must pass before Task 2.
 
-- [ ] `merge: claude code keeps the ai account (#92) into phase/10-many-teams`
+- [x] `merge: claude code keeps the ai account (#92) into phase/10-many-teams`
 
 ### Task 2: Places for agents across teams, and the shared sleep and day
 

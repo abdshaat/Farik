@@ -6,7 +6,6 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use catervas_runtime::credential::load_credential;
 use catervas_runtime::daemon::{DaemonState, PortChoice, SetupHost, candidates, serve_held};
 use catervas_runtime::orchestrator::{TickRules, TickScope};
 use serde_json::json;
@@ -57,7 +56,7 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
             Ok(receiver) => io.interrupts = Interrupts::Channel(receiver),
             Err(error) => return refuse(io, false, &error),
         }
-        let mut mode = found(io);
+        let mut mode = found(io).await;
         // Bound once and held until serve ends: the wizard's daemon and the driver's each listen
         // on it in turn, so the port the browser's tab is on is never free for another process to
         // take while one stops and the next starts.
@@ -118,16 +117,16 @@ pub(crate) fn serve(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32
 }
 
 /// Where `serve` starts: the project it is run in, else the one `state.json` remembers, else the
-/// wizard. A project found with no credential for Claude Code starts on the wizard, chosen.
-fn found(io: &CliIo<'_>) -> Mode {
+/// wizard. A project found while Claude Code is not signed in starts on the wizard, chosen.
+async fn found(io: &CliIo<'_>) -> Mode {
     let project = |root: PathBuf| root.join(".catervas/team.yaml").exists().then_some(root);
     let root = repository_root(&io.cwd).ok().and_then(project).or_else(|| {
         state_dir(&io.env)
             .and_then(|directory| last_project(&directory))
             .and_then(project)
     });
-    let no_account = matches!(io.engine, Engine::Claude)
-        && load_credential(&io.env, &(io.credential_stores)()).is_none();
+    let no_account =
+        matches!(io.engine, Engine::Claude) && !crate::start::account(io).status().await.signed_in;
     match root {
         Some(root) if no_account => Mode::Setup {
             waiting: Some(root),
@@ -163,14 +162,13 @@ async fn set_up(
         env: io.env.clone(),
         home: home_of(io),
         clock: Arc::clone(&io.clock),
-        stores: (io.credential_stores)(),
         chosen,
         waiting,
         leaving: leaving.clone(),
         secrets: Arc::clone(&io.connector_secrets),
     });
     let bound = port_of(held)?;
-    let (mut web, code) = web(Path::new(""), io, None)?;
+    let (mut web, code) = web(Path::new(""), io)?;
     web.port = bound;
     web.take_on_error = std::sync::Mutex::new(take_on_error);
     web.leaving = std::sync::Mutex::new(leaving.clone());

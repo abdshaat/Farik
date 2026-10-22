@@ -54,6 +54,22 @@ pub(crate) fn claude_desktop_dirs(env: &BTreeMap<String, String>, os: &str) -> V
     dir.into_iter().collect()
 }
 
+/// What the command line says when it removes the key an earlier version kept.
+const KEPT_KEY_REMOVED: &str = "Catervas no longer keeps your AI account's key, so it removed the one it kept. \
+    Sign in through Claude Code: in the web app, or with claude auth login.";
+
+/// Removes, unread, the key an earlier version kept (ADR 0084) and says so once on standard
+/// error: a start that finds nothing kept says nothing.
+pub(crate) fn forget_kept_key(io: &mut CliIo<'_>) {
+    let Some(directory) = state_dir(&io.env) else {
+        return;
+    };
+    if catervas_runtime::credential::forget_kept_key(&directory, io.forget_keychain) {
+        io.kept_key_removed = true;
+        crate::say(&mut io.stderr, KEPT_KEY_REMOVED);
+    }
+}
+
 /// Home: `HOME` when it is set and not empty, else where the command was run. A project folder's
 /// member repositories, and the folders the first-run wizard browses, are relative to it.
 pub(crate) fn home_of(io: &CliIo<'_>) -> PathBuf {
