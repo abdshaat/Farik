@@ -58,10 +58,12 @@ pub fn branches() -> Value {
 
 pub fn pulls() -> Value {
     json!([
-        {"number": 12, "title": "Fix the login", "draft": true, "updated_at": "2026-10-20T09:00:00Z",
-         "head": {"ref": "claude/fix-login"}},
-        {"number": 13, "title": "Someone else's", "draft": false, "updated_at": "2026-10-19T09:00:00Z",
-         "head": {"ref": "feature/other"}}
+        {"number": 12, "title": "Fix the login", "draft": true, "created_at": "2026-10-20T08:00:00Z",
+         "updated_at": "2026-10-20T09:00:00Z", "head": {"ref": "claude/fix-login"}},
+        {"number": 13, "title": "Someone else's", "draft": false, "created_at": "2026-10-19T08:00:00Z",
+         "updated_at": "2026-10-19T09:00:00Z", "head": {"ref": "feature/other"}},
+        {"number": 9, "title": "Last month's", "draft": false, "created_at": "2026-09-30T08:00:00Z",
+         "updated_at": "2026-10-01T09:00:00Z", "head": {"ref": "feature/old"}}
     ])
 }
 

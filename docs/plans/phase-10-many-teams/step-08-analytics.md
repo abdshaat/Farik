@@ -116,7 +116,7 @@ Tests (`crates/runtime/src/daemon/analytics.rs`):
   - `analytics.mine` answers the team's part with cycle time.
   - The schema holds.
 
-- [ ] `feat(runtime): analytics for all teams and each`
+- [x] `feat(runtime): analytics for all teams and each`
 
 ### Task 4: The screens
 

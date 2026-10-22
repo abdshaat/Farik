@@ -196,32 +196,24 @@ pub fn commits_of(root: &Path, branch: &str, window: &Window) -> CommitSplit {
     }
 }
 
+/// Events for a test that reads a team's log.
 #[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use catervas_protocol::event::{NewEvent, event_from_value, fixtures::an_event_wire};
-    use catervas_store::{IN_MEMORY, open_event_log, open_projections};
-    use chrono::TimeZone;
+pub(crate) mod fixtures {
+    use catervas_protocol::event::{
+        EventKind, NewEvent, event_from_value, fixtures::an_event_wire,
+    };
+    use catervas_store::Projections;
+    use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
 
-    use super::*;
-
-    fn at(day: u32, hour: u32, minute: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(2026, 10, day, hour, minute, 0)
-            .single()
-            .expect("a valid time")
-    }
-
-    fn week() -> Window {
-        Window {
-            from: at(19, 0, 0),
-            until: at(26, 0, 0),
-            utc_offset_secs: 0,
-        }
-    }
-
-    fn append(projections: &Projections, kind: EventKind, when: DateTime<Utc>, extra: &Value) {
+    /// Appends an event of `kind` at `when`, the fixture's own wire with the fields of `extra`
+    /// laid over it (`body` merged field by field), and projects it.
+    pub(crate) fn append(
+        projections: &Projections,
+        kind: EventKind,
+        when: DateTime<Utc>,
+        extra: &Value,
+    ) {
         let mut wire = an_event_wire(kind);
         wire["recorded_at"] = json!(when.to_rfc3339());
         for (key, value) in extra.as_object().expect("an object") {
@@ -243,6 +235,32 @@ mod tests {
             })
             .expect("appends");
         projections.apply(&appended).expect("projects");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::fixtures::append;
+    use catervas_store::{IN_MEMORY, open_event_log, open_projections};
+    use chrono::TimeZone;
+    use serde_json::json;
+
+    use super::*;
+
+    fn at(day: u32, hour: u32, minute: u32) -> DateTime<Utc> {
+        Utc.with_ymd_and_hms(2026, 10, day, hour, minute, 0)
+            .single()
+            .expect("a valid time")
+    }
+
+    fn week() -> Window {
+        Window {
+            from: at(19, 0, 0),
+            until: at(26, 0, 0),
+            utc_offset_secs: 0,
+        }
     }
 
     fn task(projections: &Projections, id: &str, title: &str) {

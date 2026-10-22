@@ -235,7 +235,7 @@ impl Reminders {
 
     /// The kept digest, or one computed at once by the computer the daily timer gave, off the async
     /// workers.
-    fn current(&self) -> Result<Digest, String> {
+    pub(super) fn current(&self) -> Result<Digest, String> {
         if let Some(digest) = self.kept() {
             return Ok(digest);
         }
@@ -272,49 +272,52 @@ fn sentence_failure(why: &str) -> Failure {
 
 /// The root of the project of each team this serve drives, with the roots of its member
 /// repositories, and its name.
-struct TeamRoots {
-    slug: String,
-    name: String,
-    roots: Vec<PathBuf>,
+pub(super) struct TeamRoots {
+    pub(super) slug: String,
+    pub(super) name: String,
+    pub(super) roots: Vec<PathBuf>,
 }
 
 fn canonical(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// The project and member roots of the team `slug` that `state` drives, and its name.
+pub(super) fn roots_of(slug: &str, state: &DaemonState) -> Option<TeamRoots> {
+    let deps = state.deps()?;
+    let root = state.web().map_or_else(
+        || deps.files.root().to_path_buf(),
+        |web| web.project_root.clone(),
+    );
+    let mut roots = vec![canonical(&root)];
+    if let Ok(Some(repos)) = deps.files.read_repos() {
+        roots.extend(
+            repos
+                .repos
+                .iter()
+                .map(|repo| canonical(Path::new(repo.path.as_str()))),
+        );
+    }
+    let name = deps
+        .files
+        .read_team()
+        .map_or_else(|_| slug.to_string(), |team| team.name.to_string());
+    Some(TeamRoots {
+        slug: slug.to_string(),
+        name,
+        roots,
+    })
+}
+
 fn team_roots(hub: &Hub) -> Vec<TeamRoots> {
     hub.driven()
         .into_iter()
-        .filter_map(|(slug, state)| {
-            let deps = state.deps()?;
-            let root = state.web().map_or_else(
-                || deps.files.root().to_path_buf(),
-                |web| web.project_root.clone(),
-            );
-            let mut roots = vec![canonical(&root)];
-            if let Ok(Some(repos)) = deps.files.read_repos() {
-                roots.extend(
-                    repos
-                        .repos
-                        .iter()
-                        .map(|repo| canonical(Path::new(repo.path.as_str()))),
-                );
-            }
-            let name = deps
-                .files
-                .read_team()
-                .map_or_else(|_| slug.as_str().to_string(), |team| team.name.to_string());
-            Some(TeamRoots {
-                slug: slug.as_str().to_string(),
-                name,
-                roots,
-            })
-        })
+        .filter_map(|(slug, state)| roots_of(slug.as_str(), &state))
         .collect()
 }
 
 /// What a driven team has waited on the owner for.
-fn team_fact(slug: &str, state: &DaemonState) -> Option<TeamFact> {
+pub(super) fn team_fact(slug: &str, state: &DaemonState) -> Option<TeamFact> {
     let deps = state.deps()?;
     deps.projections.catch_up().ok()?;
     let team = deps.files.read_team().ok()?;
@@ -465,7 +468,7 @@ fn compute(hub: &Hub, refresh_github: bool) -> Result<Digest, String> {
 }
 
 /// The kept digest, or one computed now.
-fn digest_of(hub: &Hub) -> Result<Digest, Failure> {
+pub(super) fn digest_of(hub: &Hub) -> Result<Digest, Failure> {
     if let Some(digest) = hub.reminders.kept() {
         return Ok(digest);
     }
@@ -809,7 +812,7 @@ pub async fn run_daily(hub: Arc<Hub>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, Mutex};
@@ -830,14 +833,14 @@ mod tests {
     use crate::orchestrator::fixtures::Harness;
 
     /// The time the fake host starts at: a minute before the reminder.
-    fn start() -> DateTime<Utc> {
+    pub(in crate::daemon) fn start() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 10, 21, 8, 59, 0)
             .single()
             .expect("a time")
     }
 
     /// A host whose clock follows tokio's, and which records the notifications it was asked for.
-    struct Fake {
+    pub(in crate::daemon) struct Fake {
         dir: PathBuf,
         began: tokio::time::Instant,
         settings: Mutex<ReminderSettings>,
@@ -846,7 +849,7 @@ mod tests {
     }
 
     impl Fake {
-        fn new(name: &str) -> Arc<Self> {
+        pub(in crate::daemon) fn new(name: &str) -> Arc<Self> {
             let dir = std::env::temp_dir()
                 .join(format!("catervas-reminders-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);

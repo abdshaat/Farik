@@ -591,6 +591,12 @@
           "$ref": "#/$defs/remindersMineRequest"
         },
         {
+          "$ref": "#/$defs/analyticsGetRequest"
+        },
+        {
+          "$ref": "#/$defs/analyticsMineRequest"
+        },
+        {
           "$ref": "#/$defs/computerSetRequest"
         },
         {
@@ -3553,6 +3559,144 @@
             "time": { "type": "string" }
           }
         }
+      }
+    },
+    "analyticsPeriod": {
+      "enum": ["week", "month"],
+      "description": "The period an answer covers: the week of now, Monday to Sunday, or the calendar month of now, in the computer's local time."
+    },
+    "analyticsGetRequest": {
+      "title": "Analytics Get Request",
+      "description": "Analytics for every team side by side (docs/SPEC.md 4.4, F17; ADR 0059): usage split between the owner's own Claude Code sessions in each team's projects and the team's Catervas agents, counted once per reply; the workflow; and the blockers. An answer is kept for 60 seconds. Answers analyticsGetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "analytics.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["period"],
+          "properties": { "period": { "$ref": "#/$defs/analyticsPeriod" } }
+        }
+      }
+    },
+    "analyticsMineRequest": {
+      "title": "Analytics Mine Request",
+      "description": "One team's part of the analytics, with its task cycle time and throughput, for its Costs page's Activity tab. Answered on the team's socket (/t/<team>/rpc). Answers analyticsMineResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "analytics.mine" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["period"],
+          "properties": { "period": { "$ref": "#/$defs/analyticsPeriod" } }
+        }
+      }
+    },
+    "analyticsTeamUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "name", "owner_usd", "agents_usd", "unpriced_replies"],
+      "description": "A team's usage in the period, in US dollars: owner_usd is what the owner's own Claude Code sessions in the team's project and member repositories used, priced by the shipped price table, one reply once; agents_usd is what the team's Catervas agents spent, from its log; unpriced_replies counts the owner's replies on a model the table has no price for, whose tokens cost nothing here.",
+      "properties": {
+        "slug": { "type": "string" },
+        "name": { "type": "string" },
+        "owner_usd": { "type": "number", "minimum": 0 },
+        "agents_usd": { "type": "number", "minimum": 0 },
+        "unpriced_replies": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "analyticsWorkflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "active_hours", "commits", "used_most", "per_day"],
+      "description": "sessions are the owner's with a reply in the period plus the team's agent sessions started; active_hours the owner's replies less than five minutes apart plus the agents' session durations, to a tenth; commits those on the integration branch of each root, by the owner and by Catervas's identity (catervas@localhost); pull_requests those created in the period, from GitHub when connected, else the team's own pull_request.opened events, left out when neither knows; used_most the owner's three most used tools; per_day the sessions on each local day of the period.",
+      "properties": {
+        "sessions": { "type": "integer", "minimum": 0 },
+        "active_hours": { "type": "number", "minimum": 0 },
+        "commits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "team"],
+          "properties": {
+            "owner": { "type": "integer", "minimum": 0 },
+            "team": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "pull_requests": { "type": "integer", "minimum": 0 },
+        "used_most": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "calls"],
+            "properties": {
+              "label": { "type": "string" },
+              "calls": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "per_day": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["day", "sessions"],
+            "properties": {
+              "day": { "type": "string", "format": "date" },
+              "sessions": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "analyticsBlocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "count", "examples"],
+      "description": "One kind of blocker with how many there are and up to three of them named in words. Only kinds with something to show are listed, in this order: waiting_on_you, schedules (failing, silent or turned off), deploys (failed), blocked (tasks blocked over three days), forgotten (sessions), denials (tool calls refused in the period).",
+      "properties": {
+        "kind": { "enum": ["waiting_on_you", "schedules", "deploys", "blocked", "forgotten", "denials"] },
+        "count": { "type": "integer", "minimum": 1 },
+        "examples": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "analyticsGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["period", "billing", "teams", "watched_usd", "claude_ai_conversations", "workflow", "blockers"],
+      "description": "billing is api when the account is a subscription, so that the amounts are what the same use would cost on Claude's API, and spent otherwise. watched_usd is the owner's usage in projects no team holds. claude_ai_conversations counts the conversations of the owner's claude.ai export active in the period; the export carries no usage figures.",
+      "properties": {
+        "period": { "$ref": "#/$defs/analyticsPeriod" },
+        "billing": { "enum": ["api", "spent"] },
+        "teams": { "type": "array", "items": { "$ref": "#/$defs/analyticsTeamUsage" } },
+        "watched_usd": { "type": "number", "minimum": 0 },
+        "claude_ai_conversations": { "type": "integer", "minimum": 0 },
+        "workflow": { "$ref": "#/$defs/analyticsWorkflow" },
+        "blockers": { "type": "array", "items": { "$ref": "#/$defs/analyticsBlocker" } }
+      }
+    },
+    "analyticsMineResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["period", "billing", "team", "workflow", "blockers", "cycle_days", "throughput"],
+      "description": "The team's part of analyticsGetResult. cycle_days is the mean days from a task's first in_progress to accepted for tasks accepted in the period, null when none were; throughput is how many were.",
+      "properties": {
+        "period": { "$ref": "#/$defs/analyticsPeriod" },
+        "billing": { "enum": ["api", "spent"] },
+        "team": { "$ref": "#/$defs/analyticsTeamUsage" },
+        "workflow": { "$ref": "#/$defs/analyticsWorkflow" },
+        "blockers": { "type": "array", "items": { "$ref": "#/$defs/analyticsBlocker" } },
+        "cycle_days": { "type": ["number", "null"], "minimum": 0 },
+        "throughput": { "type": "integer", "minimum": 0 }
       }
     },
     "computerSetRequest": {

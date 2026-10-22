@@ -32,7 +32,7 @@ use super::setup::list_folders;
 use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
-use super::{board, documents, finding, gates, hub, reminders, repos, team, templates};
+use super::{analytics, board, documents, finding, gates, hub, reminders, repos, team, templates};
 use catervas_core::claude_account::AccountStatus;
 
 use crate::account::AccountPort;
@@ -748,10 +748,15 @@ fn known_method(method: &str) -> bool {
         || hub::METHODS.contains(&method)
         || finding::METHODS.contains(&method)
         || reminders::METHODS.contains(&method)
+        || analytics::METHODS.contains(&method)
 }
 
 /// The response to one text frame. A `subscribe` sets `sent` to its `from_seq`, or to the head of
 /// the log without one, and an `unsubscribe` clears it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "a table of the methods a socket answers, one arm each"
+)]
 pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Option<u64>) -> Value {
     let Ok(request) = serde_json::from_str::<Value>(text) else {
         return failure(
@@ -825,6 +830,9 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
         }
         method if reminders::METHODS.contains(&method) => {
             reminders::call(state, method, params).await
+        }
+        method if analytics::METHODS.contains(&method) => {
+            analytics::call(state, method, params).await
         }
         "query" => {
             // Claude Code is asked on the async workers; the store and the files are read off

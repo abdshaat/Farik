@@ -266,6 +266,70 @@ impl MachineIndex {
     }
 }
 
+/// Rows for a test of something that reads the index (`docs/standards/code.md`: fixtures are
+/// public so that other crates' tests can use them).
+pub mod fixtures {
+    use chrono::{DateTime, Utc};
+
+    use crate::machine::{MachineIndex, stamp};
+
+    /// A session placed `place` (`owner`, `catervas`, ...) in the project at `root`.
+    ///
+    /// # Panics
+    ///
+    /// When the index refuses the row, which is the fixture's own bug.
+    pub fn seed_session(index: &MachineIndex, id: &str, place: &str, root: &str) {
+        index
+            .connection
+            .execute(
+                "INSERT INTO sessions (session_id, place, project_root, first_at) VALUES (?1, ?2, ?3, ?4)",
+                (id, place, root, stamp(DateTime::UNIX_EPOCH)),
+            )
+            .expect("a session");
+    }
+
+    /// A reply of `session` at `at`, with `input_tokens` input tokens and no others.
+    ///
+    /// # Panics
+    ///
+    /// When the index refuses the row, which is the fixture's own bug.
+    pub fn seed_reply(
+        index: &MachineIndex,
+        key: &str,
+        session: &str,
+        model: &str,
+        at: DateTime<Utc>,
+        input_tokens: i64,
+    ) {
+        index
+            .connection
+            .execute(
+                "INSERT INTO replies (reply_key, session_id, model, at, input_tokens, output_tokens,
+                                      cache_read_tokens, cache_write_tokens)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, 0)",
+                (key, session, model, stamp(at), input_tokens),
+            )
+            .expect("a reply");
+    }
+
+    /// A claude.ai conversation last updated at `updated_at`.
+    ///
+    /// # Panics
+    ///
+    /// When the index refuses the row, which is the fixture's own bug.
+    pub fn seed_conversation(index: &MachineIndex, uuid: &str, updated_at: DateTime<Utc>) {
+        index
+            .connection
+            .execute(
+                "INSERT INTO claude_conversations
+                     (uuid, account, updated_at, messages, seen_in_export_at, first_imported_at)
+                 VALUES (?1, 'x', ?2, 2, ?2, ?2)",
+                (uuid, stamp(updated_at)),
+            )
+            .expect("a conversation");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

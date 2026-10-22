@@ -107,6 +107,8 @@ pub struct Hub {
     pub(super) finding: Arc<super::finding::Finding>,
     /// The daily reminder every page of the computer asks about (step 07).
     pub reminders: Arc<super::reminders::Reminders>,
+    /// The 60-second cache of analytics (step 08).
+    pub analytics: Arc<super::analytics::Analytics>,
 }
 
 impl Hub {
@@ -203,6 +205,11 @@ impl Hub {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         teams.retain(|(name, _)| *name != slug);
         state.set_reminders(slug.as_str(), Arc::clone(&self.reminders));
+        state.set_analytics(
+            slug.as_str(),
+            Arc::clone(&self.analytics),
+            Arc::clone(&self.finding),
+        );
         teams.push((slug, state));
     }
 

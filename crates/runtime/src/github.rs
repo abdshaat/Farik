@@ -448,6 +448,39 @@ impl GithubClient {
     }
 }
 
+impl GithubClient {
+    /// How many pull requests of `repo` were created from `from` up to `until`, among the newest
+    /// 100 (`GET /repos/{full}/pulls?state=all&per_page=100`).
+    ///
+    /// # Errors
+    ///
+    /// [`GithubError`].
+    pub async fn pull_requests_created(
+        &self,
+        token: &Secret,
+        repo: &str,
+        from: DateTime<Utc>,
+        until: DateTime<Utc>,
+    ) -> Result<u64, GithubError> {
+        let repo = valid_full_name(repo).ok_or_else(|| failed("that is not a repository"))?;
+        let rows = self
+            .get(
+                token,
+                &format!("/repos/{repo}/pulls?state=all&per_page=100"),
+            )
+            .await?;
+        let created = rows
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|row| row["created_at"].as_str().and_then(github_time))
+            .filter(|at| *at >= from && *at < until)
+            .count();
+        Ok(u64::try_from(created).unwrap_or(u64::MAX))
+    }
+}
+
 /// How long one call to GitHub may take.
 const TIMEOUT: Duration = Duration::from_secs(15);
 /// The most of an answer Catervas reads.
@@ -687,6 +720,33 @@ pub fn read_runs_into_index(
         read += 1;
     }
     Ok(read)
+}
+
+/// How many pull requests were created from `from` up to `until` in all of `repos`, each counted
+/// among its newest 100.
+///
+/// # Errors
+///
+/// [`GithubError`] when GitHub refuses any of them, since a count with a repository missing would
+/// be too low.
+pub fn count_pull_requests(
+    api: &str,
+    token: &Secret,
+    repos: &[String],
+    from: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> Result<u64, GithubError> {
+    let client = GithubClient::new_at(api)?;
+    block_on(async {
+        let mut total = 0;
+        for repo in repos {
+            total += client
+                .pull_requests_created(token, repo, from, until)
+                .await?;
+        }
+        Ok::<_, GithubError>(total)
+    })
+    .map_err(|why| failed(&why))?
 }
 
 /// One run of `git clone`: its arguments, and the environment it is given beside the process's own.
@@ -955,5 +1015,47 @@ mod tests {
                 "{wanted} in {paths:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn counts_the_pull_requests_created_in_a_period() {
+        let fixture = Fixture::start("ghp_invented", now()).await;
+        let client = GithubClient::new_at(&fixture.address).expect("a client");
+        let token = Secret::new("ghp_invented".to_string());
+        let day = |d: u32| {
+            DateTime::parse_from_rfc3339(&format!("2026-10-{d:02}T00:00:00Z"))
+                .expect("a time")
+                .with_timezone(&Utc)
+        };
+        let counted = client
+            .pull_requests_created(&token, "octo/shop", day(19), day(26))
+            .await
+            .expect("a count");
+        assert_eq!(counted, 2, "numbers 12 and 13; 9 was made the month before");
+        let paths: Vec<String> = fixture.requests().into_iter().map(|r| r.path).collect();
+        assert!(
+            paths.contains(&"/repos/octo/shop/pulls?state=all&per_page=100".to_string()),
+            "{paths:?}"
+        );
+        let (api, repos) = (fixture.address.clone(), vec!["octo/shop".to_string()]);
+        let summed = tokio::task::spawn_blocking(move || {
+            count_pull_requests(
+                &api,
+                &Secret::new("ghp_invented".to_string()),
+                &repos,
+                day(1) - chrono::Duration::days(10),
+                day(26),
+            )
+        })
+        .await
+        .expect("it ran")
+        .expect("a sum");
+        assert_eq!(summed, 3, "the month before counts in a wider period");
+        assert!(matches!(
+            client
+                .pull_requests_created(&token, "not a repository", day(19), day(26))
+                .await,
+            Err(GithubError::Failed(_))
+        ));
     }
 }

@@ -328,7 +328,11 @@ impl MachineIndex {
     }
 
     /// The repository on GitHub the project at `root` is a copy of, when the index knows both.
-    fn github_repo_of(&self, root: &str) -> Result<Option<String>, StoreError> {
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn github_repo_of(&self, root: &str) -> Result<Option<String>, StoreError> {
         match self.connection.query_row(
             "SELECT repo.full_name FROM projects JOIN github_repos repo
                  ON repo.remote_key = projects.remote

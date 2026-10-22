@@ -44,6 +44,7 @@ use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
 pub(crate) mod ads_calls;
+pub mod analytics;
 mod app;
 mod board;
 mod documents;
@@ -274,6 +275,8 @@ pub struct DaemonState {
     /// The name in an address of the team this state drives, and what the hub keeps of the daily
     /// reminder, once the hub has added the team (step 07).
     team_reminders: OnceLock<(String, Arc<reminders::Reminders>)>,
+    /// What the hub keeps for the team's analytics, once the hub has added the team (step 08).
+    team_analytics: OnceLock<(String, Arc<analytics::Analytics>, Arc<finding::Finding>)>,
 }
 
 /// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
@@ -374,6 +377,7 @@ impl DaemonState {
             hub: OnceLock::new(),
             closing: OnceLock::new(),
             team_reminders: OnceLock::new(),
+            team_analytics: OnceLock::new(),
         }
     }
 
@@ -410,6 +414,7 @@ impl DaemonState {
             hub: OnceLock::new(),
             closing: OnceLock::new(),
             team_reminders: OnceLock::new(),
+            team_analytics: OnceLock::new(),
         }
     }
 
@@ -446,6 +451,26 @@ impl DaemonState {
         self.team_reminders
             .set((slug.to_string(), reminders))
             .is_ok()
+    }
+
+    /// Gives a team's state the cache of analytics and the way to look through the computer's
+    /// history that the hub keeps.
+    pub(crate) fn set_analytics(
+        &self,
+        slug: &str,
+        analytics: Arc<analytics::Analytics>,
+        finding: Arc<finding::Finding>,
+    ) -> bool {
+        self.team_analytics
+            .set((slug.to_string(), analytics, finding))
+            .is_ok()
+    }
+
+    /// What the hub gave this team for its analytics, once it has added the team.
+    pub(crate) fn analytics_handle(
+        &self,
+    ) -> Option<&(String, Arc<analytics::Analytics>, Arc<finding::Finding>)> {
+        self.team_analytics.get()
     }
 
     /// The name in an address of the team this state drives, when the hub added it.
