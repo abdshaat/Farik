@@ -31,6 +31,8 @@ pub mod folder_docs;
 pub mod git;
 /// Finding the owner's jobs in their repositories, on this computer and in Claude Code's records.
 pub mod jobs;
+/// The files proofs of linking are read from, and the owner's answers about pairs.
+pub mod linking;
 /// The team's documents kept on this computer.
 pub mod local_documents;
 /// The machine-level index of the owner's Claude Code history, apart from every project's log.

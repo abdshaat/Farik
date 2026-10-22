@@ -67,6 +67,9 @@ pub struct Reply {
 /// The tools that read or write one file, named by `input.file_path`.
 pub const FILE_TOOLS: [&str; 4] = ["Read", "Write", "Edit", "MultiEdit"];
 
+/// The tools that change a file, a subset of `FILE_TOOLS`.
+pub const WRITE_TOOLS: [&str; 3] = ["Write", "Edit", "MultiEdit"];
+
 /// The extensions that make a file a spreadsheet, compared without case.
 pub const SPREADSHEET_EXTENSIONS: [&str; 3] = ["xlsx", "xls", "csv"];
 
@@ -83,7 +86,14 @@ pub struct ToolUse {
     pub cron: Option<CronCall>,
     /// Whether a file tool named a file with a spreadsheet extension. The path is never kept.
     pub touches_spreadsheet: bool,
+    /// The root of the project a `Write`, `Edit` or `MultiEdit` call changed a file under, as the
+    /// resolver given to `read_line_with` names it. The path is handed to the resolver and never
+    /// kept; `None` for every other call, and when the resolver knows no root for the path.
+    pub writes_under: Option<String>,
 }
+
+/// Names the root of the project a file path is under, when it is under one.
+pub type RootOf<'a> = &'a dyn Fn(&str) -> Option<String>;
 
 /// The schedule fields of a `CronCreate` call. Its prompt is never read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,7 +127,7 @@ fn is_spreadsheet_path(path: &str) -> bool {
     })
 }
 
-fn tool_use_of(block: &Value) -> Option<ToolUse> {
+fn tool_use_of(block: &Value, root_of: RootOf<'_>) -> Option<ToolUse> {
     if text(block, "type")? != "tool_use" {
         return None;
     }
@@ -144,15 +154,24 @@ fn tool_use_of(block: &Value) -> Option<ToolUse> {
             .get("input")
             .and_then(|input| text(input, "file_path"))
             .is_some_and(is_spreadsheet_path);
+    let writes_under = if WRITE_TOOLS.contains(&name.as_str()) {
+        block
+            .get("input")
+            .and_then(|input| text(input, "file_path"))
+            .and_then(root_of)
+    } else {
+        None
+    };
     Some(ToolUse {
         id,
         name,
         cron,
         touches_spreadsheet,
+        writes_under,
     })
 }
 
-fn reply_of(line: &Value) -> Option<Reply> {
+fn reply_of(line: &Value, root_of: RootOf<'_>) -> Option<Reply> {
     let message = line.get("message")?;
     let model = text(message, "model").filter(|model| *model != "<synthetic>")?;
     let key = owned(message, "id").or_else(|| owned(line, "requestId"))?;
@@ -162,7 +181,12 @@ fn reply_of(line: &Value) -> Option<Reply> {
         tools: message
             .get("content")
             .and_then(Value::as_array)
-            .map(|blocks| blocks.iter().filter_map(tool_use_of).collect())
+            .map(|blocks| {
+                blocks
+                    .iter()
+                    .filter_map(|block| tool_use_of(block, root_of))
+                    .collect()
+            })
             .unwrap_or_default(),
         model: model.to_string(),
         usage: Usage {
@@ -174,7 +198,7 @@ fn reply_of(line: &Value) -> Option<Reply> {
     })
 }
 
-fn turn_of(line: &Value, is_assistant: bool) -> Option<Turn> {
+fn turn_of(line: &Value, is_assistant: bool, root_of: RootOf<'_>) -> Option<Turn> {
     let at = DateTime::parse_from_rfc3339(text(line, "timestamp")?)
         .ok()?
         .with_timezone(&Utc);
@@ -185,7 +209,11 @@ fn turn_of(line: &Value, is_assistant: bool) -> Option<Turn> {
         git_branch: owned(line, "gitBranch"),
         version: owned(line, "version"),
         entrypoint: owned(line, "entrypoint"),
-        reply: if is_assistant { reply_of(line) } else { None },
+        reply: if is_assistant {
+            reply_of(line, root_of)
+        } else {
+            None
+        },
     })
 }
 
@@ -194,6 +222,13 @@ fn turn_of(line: &Value, is_assistant: bool) -> Option<Turn> {
 /// name, `CronCreate`'s schedule fields and a file tool's extension; no text field is ever read.
 #[must_use]
 pub fn read_line(line: &str) -> TranscriptLine {
+    read_line_with(line, &|_| None)
+}
+
+/// As `read_line`, handing the path of each `Write`, `Edit` and `MultiEdit` call to `root_of`,
+/// which names the project root it is under; only that root is kept (`ToolUse::writes_under`).
+#[must_use]
+pub fn read_line_with(line: &str, root_of: RootOf<'_>) -> TranscriptLine {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
         return TranscriptLine::Unreadable;
     };
@@ -201,7 +236,7 @@ pub fn read_line(line: &str) -> TranscriptLine {
         return TranscriptLine::Unreadable;
     };
     match kind {
-        "user" | "attachment" | "assistant" => turn_of(&value, kind == "assistant")
+        "user" | "attachment" | "assistant" => turn_of(&value, kind == "assistant", root_of)
             .map_or(TranscriptLine::Unreadable, TranscriptLine::Turn),
         "ai-title" => {
             let (Some(session_id), Some(title)) =
@@ -968,7 +1003,8 @@ mod tests {
                 id: "toolu_01B".to_string(),
                 name: "Bash".to_string(),
                 cron: None,
-                touches_spreadsheet: false
+                touches_spreadsheet: false,
+                writes_under: None,
             }]
         );
         assert_eq!(
@@ -981,7 +1017,8 @@ mod tests {
                     is_recurring: true,
                     is_durable: false
                 }),
-                touches_spreadsheet: false
+                touches_spreadsheet: false,
+                writes_under: None,
             }]
         );
         let call = |recurring, durable| CronCreateLine {

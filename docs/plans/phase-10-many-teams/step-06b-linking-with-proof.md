@@ -150,7 +150,7 @@ Tests:
   - A transcript with an `Edit` of `/home/me/a/x.rs` and a `Read` of `/home/me/b/y.rs` gives `session_roots_written` of `a` only.
   - No table holds `x.rs`.
 
-- [ ] `feat(store): read committed manifests and the roots a session wrote`
+- [x] `feat(store): read committed manifests and the roots a session wrote`
 
 ### Task 3: Pairs, answers and groups
 

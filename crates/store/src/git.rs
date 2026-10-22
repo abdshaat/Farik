@@ -779,6 +779,27 @@ impl Git {
             .collect())
     }
 
+    /// Every file `rev` holds, at any depth, with its size in bytes, in git's order. A symbolic
+    /// link and a submodule are not files and are left out.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing, as in a repository with no commit.
+    pub fn tree_sizes(&self, rev: &str) -> Result<Vec<(String, u64)>, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&["--literal-pathspecs", "ls-tree", "-r", "-l", "-z", rev])?;
+        Ok(listed
+            .split('\0')
+            .filter_map(|entry| {
+                let (meta, path) = entry.split_once('\t')?;
+                let mut meta = meta.split_whitespace();
+                let mode = meta.next()?;
+                let size = meta.nth(2)?.parse().ok()?;
+                (mode.starts_with("100")).then(|| (path.to_string(), size))
+            })
+            .collect())
+    }
+
     /// The last commit of `rev`'s history that changed `path`: with `first_parent`, along the
     /// first parents alone, so that a merge is the commit that brought the change; without, by
     /// git's history simplification, so that it is the commit that made it.

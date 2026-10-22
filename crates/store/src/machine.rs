@@ -141,6 +141,8 @@ pub(crate) struct FileRead<'a> {
     pub replies: Vec<ReplyBatch>,
     pub crons: Vec<SessionCronBatch>,
     pub tool_calls: Vec<ToolCallBatch>,
+    /// `(session id, root)`: the roots a session changed a file under.
+    pub roots_written: Vec<(String, String)>,
 }
 
 /// One recurring job, as `machine.db` keeps it. Its key is `(origin, file, name)`.
@@ -557,6 +559,12 @@ fn write_crons_and_calls(
                 stamp(cron.at),
                 stamp(now),
             ),
+        )?;
+    }
+    for (session_id, root) in &file.roots_written {
+        transaction.execute(
+            "INSERT OR IGNORE INTO session_roots_written (session_id, root) VALUES (?1, ?2)",
+            (session_id, root),
         )?;
     }
     for call in &file.tool_calls {
@@ -2032,13 +2040,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7, 8]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7, 8]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -2064,12 +2072,14 @@ mod tests {
                 "hand_projects",
                 "hand_routines",
                 "jobs",
+                "links",
                 "moved",
                 "projects",
                 "replies",
                 "reply_copies",
                 "separations",
                 "session_links",
+                "session_roots_written",
                 "sessions",
                 "tool_calls",
                 "transcript_files"
@@ -2513,7 +2523,7 @@ mod tests {
         let mut index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions").last(),
-            Some(&8)
+            Some(&9)
         );
         let c = &index.connection;
         seed_project(c, "/home/me/shop", true);

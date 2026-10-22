@@ -85,6 +85,43 @@ pub struct Proof {
     pub sentence: String,
 }
 
+/// The largest file read for proofs; a larger one is skipped.
+pub const MAX_FILE_BYTES: u64 = 256 * 1024;
+
+/// The most files read for one project.
+pub const MAX_FILES: usize = 300;
+
+/// Folders that are never walked, at any depth.
+pub const NEVER_WALKED: [&str; 4] = ["node_modules", "vendor", "target", ".git"];
+
+/// Whether the file at `path` (relative to a project's root) is one proofs are read from: the
+/// manifests, workflows and deploy config the plan names, within their depths, and nothing in a
+/// folder that is never walked.
+#[must_use]
+pub fn is_read_for_proof(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    if parts.iter().any(|part| NEVER_WALKED.contains(part)) {
+        return false;
+    }
+    let dirs = parts.len() - 1;
+    let name = base_name(path);
+    if name == ".gitmodules" {
+        return dirs == 0;
+    }
+    if is_workflow(path) {
+        return true;
+    }
+    if is_cluster_file(path) {
+        return dirs <= 4;
+    }
+    let known = matches!(
+        name,
+        "package.json" | "Cargo.toml" | "go.mod" | "vercel.json" | "netlify.toml" | "CNAME"
+    ) || is_compose(path)
+        || has_extension(name, &["tf"]);
+    known && dirs <= 3
+}
+
 /// How many characters of a line a proof's end keeps.
 pub const TEXT_LIMIT: usize = 160;
 

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use catervas_core::claude_history::{
     Folder, HandProjectRefusal, KnownRoot, Place, ProjectKey, SessionPlace, TranscriptLine,
     check_hand_project, copies_among, match_hand_project, normalise_remote, once_per_reply,
-    place_folders, place_session, read_line,
+    place_folders, place_session, read_line_with,
 };
 use catervas_core::claude_services::server_segment;
 use chrono::{DateTime, Utc};
@@ -180,16 +180,42 @@ struct Chunk {
     replies: BTreeMap<String, ReplyBatch>,
     crons: BTreeMap<(String, String), SessionCronBatch>,
     tool_calls: BTreeMap<String, ToolCallBatch>,
+    roots_written: BTreeSet<(String, String)>,
 }
 
-fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
+/// The root of the project a file is under: the longest root the index already holds that contains
+/// it, else the nearest folder above it that holds a `.git` folder, canonical. The path is looked
+/// at and dropped; only the root is ever kept.
+fn root_of_path(roots: &[String], path: &str) -> Option<String> {
+    let path = Path::new(path);
+    if !path.is_absolute() {
+        return None;
+    }
+    if let Some(root) = roots
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.len())
+    {
+        return Some(root.clone());
+    }
+    path.ancestors()
+        .skip(1)
+        .take(32)
+        .find(|folder| folder.join(".git").is_dir())
+        .and_then(|folder| folder.canonicalize().ok())
+        .map(|folder| folder.to_string_lossy().into_owned())
+}
+
+fn read_chunk(bytes: &[u8], mut chunk: Chunk, roots: &[String]) -> Chunk {
     // A line still being written has no newline yet; it is read next time.
     let Some(end) = bytes.iter().rposition(|byte| *byte == b'\n') else {
         return chunk;
     };
     chunk.read_to += (end + 1) as u64;
     for raw in bytes[..end].split(|byte| *byte == b'\n') {
-        match read_line(&String::from_utf8_lossy(raw)) {
+        match read_line_with(&String::from_utf8_lossy(raw), &|path| {
+            root_of_path(roots, path)
+        }) {
             TranscriptLine::Turn(turn) => {
                 chunk.turns += 1;
                 if let Some(reply) = turn.reply {
@@ -205,6 +231,13 @@ fn read_chunk(bytes: &[u8], mut chunk: Chunk) -> Chunk {
                                     cron: call.cron.clone(),
                                     at: turn.at,
                                 });
+                        }
+                    }
+                    for tool in &reply.tools {
+                        if let Some(root) = &tool.writes_under {
+                            chunk
+                                .roots_written
+                                .insert((turn.session_id.clone(), root.clone()));
                         }
                     }
                     for tool in &reply.tools {
@@ -309,6 +342,11 @@ pub fn read_transcripts_while(
         return Ok(summary);
     };
     let before = index.session_count()?;
+    let roots: Vec<String> = index
+        .stored_roots()?
+        .into_iter()
+        .map(|stored| stored.root)
+        .collect();
     let files = candidates(&projects)?;
     let files_total = files.len() as u64;
     for (number, path) in files.into_iter().enumerate() {
@@ -357,7 +395,7 @@ pub fn read_transcripts_while(
         if file.seek(SeekFrom::Start(start)).is_err() || file.read_to_end(&mut bytes).is_err() {
             continue;
         }
-        let chunk = read_chunk(&bytes, chunk);
+        let chunk = read_chunk(&bytes, chunk, &roots);
         summary.files += 1;
         index.record_file(
             &FileRead {
@@ -372,6 +410,7 @@ pub fn read_transcripts_while(
                 replies: chunk.replies.into_values().collect(),
                 crons: chunk.crons.into_values().collect(),
                 tool_calls: chunk.tool_calls.into_values().collect(),
+                roots_written: chunk.roots_written.into_iter().collect(),
             },
             now,
         )?;
@@ -1095,7 +1134,7 @@ mod tests {
     #[test]
     fn merges_a_replys_tools_from_every_line() {
         let tools = |text: &str| -> Vec<Vec<String>> {
-            read_chunk(text.as_bytes(), Chunk::default())
+            read_chunk(text.as_bytes(), Chunk::default(), &[])
                 .replies
                 .values()
                 .map(|reply| reply.tools.iter().map(|tool| tool.id.clone()).collect())
@@ -1250,6 +1289,60 @@ mod tests {
         let marker = b"NEVER-KEPT-TEXT";
         assert!(!bytes.windows(marker.len()).any(|window| window == marker));
         assert!(!setup.rows(TOOL_CALLS).is_empty());
+    }
+
+    /// An `assistant` line with one file tool call on `path`.
+    fn a_file_tool_line(session: &str, id: &str, tool: &str, path: &Path) -> String {
+        serde_json::json!({
+            "type": "assistant", "sessionId": session, "cwd": CWD,
+            "timestamp": "2026-10-12T09:30:00.000Z", "version": "2.1.296", "entrypoint": "cli",
+            "message": {
+                "id": format!("msg_{id}"), "model": "claude-opus-5-5",
+                "content": [{"type": "tool_use", "id": id, "name": tool,
+                             "input": {"file_path": path, "content": "NEVER-KEPT-TEXT"}}],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn keeps_the_root_a_session_wrote_not_the_path() {
+        let setup = Setup::new("keeps-the-root-a-session-wrote");
+        let repos = setup.temp.root.join("repos");
+        for name in ["a", "b"] {
+            std::fs::create_dir_all(repos.join(name).join(".git")).expect("a repository");
+        }
+        let (a, b) = (
+            repos.join("a").canonicalize().expect("a"),
+            repos.join("b").canonicalize().expect("b"),
+        );
+        let lines = [
+            a_file_tool_line(SESSION, "toolu_w", "Edit", &a.join("src/secret_plan_x.rs")),
+            a_file_tool_line(SESSION, "toolu_r", "Read", &b.join("src/secret_plan_y.rs")),
+        ];
+        std::fs::write(setup.transcript(SESSION), lines.join("\n") + "\n").expect("a transcript");
+        setup.read();
+
+        // The root of the file the session changed, and not the root of the one it only read.
+        assert_eq!(
+            setup.rows("SELECT printf('%s|%s', session_id, root) FROM session_roots_written"),
+            vec![format!("{SESSION}|{}", a.display())]
+        );
+        // Reading again changes nothing, and no file in the index holds either path.
+        setup.read();
+        assert_eq!(
+            setup.rows("SELECT count(*) || '' FROM session_roots_written"),
+            vec!["1".to_string()]
+        );
+        for name in [setup.db(), setup.db().with_extension("db-wal")] {
+            let Ok(bytes) = std::fs::read(name) else {
+                continue;
+            };
+            for marker in [&b"secret_plan_x"[..], b"secret_plan_y"] {
+                assert!(!bytes.windows(marker.len()).any(|window| window == marker));
+            }
+        }
     }
 
     #[test]
