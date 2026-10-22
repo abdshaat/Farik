@@ -264,7 +264,7 @@ Files: `discover.rs` (`DiscoverArgs`, the lines and JSON); `lib.rs` (`Discover`'
 
 `docs/design/many-teams.md` 2c: the fingerprint is time, model and usage, no text hash; a link needs three shared replies covering one session's start; sources derived; folding by remote stays 06b's. 2b: the first export fixture's shape is inferred and the founder's own export becomes the second; projects by hand from `catervas discover --add-project`, routines in step 06.
 
-- [ ] `docs(spec): record claude.ai's export and one record across sources`
+- [x] `docs(spec): record claude.ai's export and one record across sources`
 
 ## Verification
 

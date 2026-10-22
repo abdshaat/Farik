@@ -146,10 +146,10 @@ The teams share only the user, the computer, the AI account and an optional spen
 ## 2b. People who use Claude only on the web
 
 Catervas still needs the `claude` program to run a team (the first run installs and signs it in, as today), but such a person has no history on the computer. Their routes, all started by them:
-- **claude.ai's export.** Journey C guides the request; the owner drops the zip; Catervas reads it on the computer with the same tolerance as the transcripts (its files are undocumented, so a fixture is kept for each export shape seen, the founder's own first) and keeps the same metadata only: each conversation's title, dates and message count, and each claude.ai Project's name, description and file names when the export has them. A newer export updates the earlier one (section 2c).
+- **claude.ai's export.** Journey C guides the request; the owner drops the zip; Catervas reads it on the computer with the same tolerance as the transcripts (its files are undocumented, so a fixture is kept for each export shape seen, the founder's own first) and keeps the same metadata only: each conversation's title, dates and message count, and each claude.ai Project's name, description and file names when the export has them. A newer export updates the earlier one (section 2c). Step 04 reads it with `catervas discover --claude-export <file>` from the `.zip` alone; the shape of its files (`conversations.json`, `projects.json`, `users.json`) is inferred, since Anthropic documents none, and the founder's own export becomes the second fixture.
 - **GitHub.** The owner's repositories with recent pushes, their branches named `claude/…` and pull requests opened from Claude Code on the web, and their scheduled workflows and deployments. A repository not on the computer can be watched, or copied to the computer on the owner's click.
 - **Teleported sessions.** A Claude Code on the web session the owner pulls with `claude --teleport` lands in the local store and is read like any other.
-- **By hand.** A project or routine can be added with a name, a folder or repository, and a schedule.
+- **By hand.** A project or routine can be added with a name, a folder or repository, and a schedule. Projects by hand come from `catervas discover --add-project <name> --folder <path> | --repo <address>` (step 04) and join the found project they name; routines by hand wait for step 06.
 
 What stays out: conversations' text, anything read from claude.ai by Catervas itself, and any use of the subscription's token beyond the `claude` program.
 
@@ -168,11 +168,11 @@ The same session, project or job can reach Catervas more than once: from the loc
   | Folder | its real path, links resolved |
   | Job | its repository, file and name, or its scheduler and unit |
 
-- **One row per key**, with the set of sources it came from (local, teleported, export, GitHub, by hand) and when each saw it. Fields that change (a title, an update time) come from the newest source; fields read from content come from the richest (the local transcript over an export).
+- **One row per key**, with the set of sources it came from (local, teleported, export, GitHub, by hand) and when each saw it. The sources are derived from the rows each time, never stored as a set, so a stopped scan cannot leave them wrong. Fields that change (a title, an update time) come from the newest source; fields read from content come from the richest (the local transcript over an export).
 - **Tokens and costs are counted once per reply**, by its message id, so a resumed session, a fork or a copy never doubles usage.
-- **A copy with a new id** (a teleported session may be one) is matched by a fingerprint of its replies (time to the second and a hash of the text), merged only when the match is one-to-one; otherwise both are kept and marked "maybe the same", and their replies are still counted once by fingerprint.
+- **A copy with a new id** (a teleported session may be one) is matched by a fingerprint of its replies: the time to the second, the model and the four token counts. No text is hashed, since that would need the reader to open the text and would keep a guessable digest of a short reply. Two sessions are linked only when they share at least three fingerprints under different reply keys and the shared ones cover every reply of one of them from its start, which keeps two agents started in the same second from linking by one identical first reply. A linked pair in which neither is in another link merges (the later start is the copy); otherwise both are kept and marked "maybe the same", and their replies are still counted once by fingerprint. If teleporting rewrites times or usage nothing merges and both count, the safe failure.
 - **Re-imports** update by key. A thing missing from a newer export is marked "not in the latest export", not deleted.
-- **A folder and a GitHub repository with the same remote** are one project. A claude.ai Project and a repository are never merged by name; they can only be linked, with proof (section 4).
+- **A folder and a GitHub repository with the same remote** are one project (folding two folders by one remote, and "These are different", stay with step 06b). A claude.ai Project and a repository are never merged by name; they can only be linked, with proof (section 4).
 
 ## 2d. Services used through Claude
 
