@@ -97,25 +97,130 @@ pub(crate) fn make_state_dir(directory: &Path) -> Result<(), String> {
     std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700)).map_err(unmade)
 }
 
-/// Writes `state.json`, `{ "last_project": "<root>" }`, in `directory`, made with mode 0700 when it
-/// is not there, and readable by its owner alone.
+/// What `state.json` holds: every team's project, the one served last, and the computer's two
+/// limits (ADR 0059).
+#[derive(Debug, Default, Clone, PartialEq)]
+pub(crate) struct ServeState {
+    /// The project remembered last.
+    pub(crate) last_project: Option<PathBuf>,
+    /// Every team's project, in the order they were taken on.
+    pub(crate) projects: Vec<PathBuf>,
+    /// How many agent sessions run at once across the teams, when it is limited.
+    pub(crate) agents_at_once: Option<usize>,
+    /// The most the teams together spend on a UTC day, when it is capped.
+    pub(crate) daily_cap_usd: Option<f64>,
+}
+
+/// What `state.json` in `directory` holds; an unreadable or absent file reads as empty. A file
+/// with only `last_project`, as earlier versions wrote it, lists that project as the one team.
+pub(crate) fn read_state(directory: &Path) -> ServeState {
+    let Ok(text) = std::fs::read_to_string(directory.join("state.json")) else {
+        return ServeState::default();
+    };
+    let Ok(state) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return ServeState::default();
+    };
+    let path = |value: &serde_json::Value| value.as_str().map(PathBuf::from);
+    let last_project = path(&state["last_project"]);
+    let mut projects: Vec<PathBuf> = state["projects"]
+        .as_array()
+        .map(|listed| listed.iter().filter_map(path).collect())
+        .unwrap_or_default();
+    if state["projects"].is_null()
+        && let Some(last) = &last_project
+    {
+        projects.push(last.clone());
+    }
+    ServeState {
+        last_project,
+        projects,
+        agents_at_once: state["agents_at_once"]
+            .as_u64()
+            .and_then(|limit| usize::try_from(limit).ok()),
+        daily_cap_usd: state["daily_cap_usd"].as_f64(),
+    }
+}
+
+/// Writes `state` as `state.json` in `directory`, made with mode 0700 when it is not there, and
+/// readable by its owner alone.
+///
+/// # Errors
+///
+/// A sentence saying what could not be made or written.
+pub(crate) fn write_state(directory: &Path, state: &ServeState) -> Result<(), String> {
+    make_state_dir(directory)?;
+    let file = directory.join("state.json");
+    let mut text = serde_json::Map::new();
+    if let Some(last) = &state.last_project {
+        text.insert("last_project".to_string(), last.to_string_lossy().into());
+    }
+    text.insert(
+        "projects".to_string(),
+        state
+            .projects
+            .iter()
+            .map(|root| root.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .into(),
+    );
+    if let Some(limit) = state.agents_at_once {
+        text.insert("agents_at_once".to_string(), limit.into());
+    }
+    if let Some(cap) = state.daily_cap_usd {
+        text.insert("daily_cap_usd".to_string(), cap.into());
+    }
+    catervas_runtime::write_private(
+        &file,
+        serde_json::Value::Object(text).to_string().as_bytes(),
+    )
+    .map_err(|error| format!("{} cannot be written: {error}", file.display()))
+}
+
+/// `root`, followed through its links when it can be, else as given.
+fn canonical(root: &Path) -> PathBuf {
+    std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
+}
+
+/// Adds `root` to the projects `state.json` lists, once, and makes it the last project.
 ///
 /// # Errors
 ///
 /// A sentence saying what could not be made or written.
 pub(crate) fn remember(directory: &Path, root: &Path) -> Result<(), String> {
-    make_state_dir(directory)?;
-    let file = directory.join("state.json");
-    let text = serde_json::json!({ "last_project": root.to_string_lossy() }).to_string();
-    catervas_runtime::write_private(&file, text.as_bytes())
-        .map_err(|error| format!("{} cannot be written: {error}", file.display()))
+    let mut state = read_state(directory);
+    let root = canonical(root);
+    if !state.projects.contains(&root) {
+        state.projects.push(root.clone());
+    }
+    state.last_project = Some(root);
+    write_state(directory, &state)
+}
+
+/// Takes `root` out of the projects `state.json` lists; the last project too, when it was that.
+///
+/// # Errors
+///
+/// A sentence saying what could not be written.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "serve forgets a team it removes, from the next task on"
+    )
+)]
+pub(crate) fn forget(directory: &Path, root: &Path) -> Result<(), String> {
+    let mut state = read_state(directory);
+    let root = canonical(root);
+    state.projects.retain(|listed| *listed != root);
+    if state.last_project.as_ref() == Some(&root) {
+        state.last_project = state.projects.last().cloned();
+    }
+    write_state(directory, &state)
 }
 
 /// The project `state.json` in `directory` remembers, when it says one.
 pub(crate) fn last_project(directory: &Path) -> Option<PathBuf> {
-    let text = std::fs::read_to_string(directory.join("state.json")).ok()?;
-    let state: serde_json::Value = serde_json::from_str(&text).ok()?;
-    state["last_project"].as_str().map(PathBuf::from)
+    read_state(directory).last_project
 }
 
 #[cfg(test)]
@@ -123,7 +228,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::path::PathBuf;
 
-    use super::{claude_desktop_dirs, claude_dir, claude_json, state_dir};
+    use super::{
+        ServeState, claude_desktop_dirs, claude_dir, claude_json, forget, read_state, remember,
+        state_dir,
+    };
 
     fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
@@ -190,5 +298,45 @@ mod tests {
                 "{os}"
             );
         }
+    }
+
+    /// A state folder of its own under the system's temporary folder.
+    fn a_state_dir(name: &str) -> PathBuf {
+        let directory =
+            std::env::temp_dir().join(format!("catervas-state-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        directory
+    }
+
+    #[test]
+    fn remembers_every_team_and_reads_an_old_state() {
+        let directory = a_state_dir("remembers");
+        std::fs::create_dir_all(&directory).expect("made");
+        std::fs::write(directory.join("state.json"), r#"{"last_project":"/x"}"#).expect("written");
+        assert_eq!(read_state(&directory).projects, [PathBuf::from("/x")]);
+
+        remember(&directory, &PathBuf::from("/y")).expect("remembers");
+        remember(&directory, &PathBuf::from("/x")).expect("remembers");
+        let state = read_state(&directory);
+        assert_eq!(state.projects, [PathBuf::from("/x"), PathBuf::from("/y")]);
+        assert_eq!(state.last_project, Some(PathBuf::from("/x")));
+
+        forget(&directory, &PathBuf::from("/x")).expect("forgets");
+        assert_eq!(read_state(&directory).projects, [PathBuf::from("/y")]);
+
+        std::fs::write(
+            directory.join("state.json"),
+            r#"{"projects":["/a"],"agents_at_once":3,"daily_cap_usd":12.5}"#,
+        )
+        .expect("written");
+        remember(&directory, &PathBuf::from("/b")).expect("remembers");
+        let state = read_state(&directory);
+        assert_eq!(state.agents_at_once, Some(3));
+        assert_eq!(state.daily_cap_usd, Some(12.5));
+        assert_eq!(state.projects, [PathBuf::from("/a"), PathBuf::from("/b")]);
+
+        std::fs::write(directory.join("state.json"), "not json").expect("written");
+        assert_eq!(read_state(&directory), ServeState::default());
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

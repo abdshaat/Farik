@@ -202,7 +202,7 @@ Tests (in `state.rs`):
 
 The existing serve tests `remembers_the_project_it_serves` and `reopens_the_last_project` must still pass.
 
-- [ ] `feat(cli): remember every team's project in state.json`
+- [x] `feat(cli): remember every team's project in state.json`
 
 ### Task 4: The hub's routes
 

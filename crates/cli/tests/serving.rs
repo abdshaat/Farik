@@ -149,7 +149,10 @@ fn remembers_the_project_it_serves() {
     let root = repository.path.canonicalize().expect("the root");
     assert_eq!(
         written,
-        json!({ "last_project": root.display().to_string() })
+        json!({
+            "last_project": root.display().to_string(),
+            "projects": [root.display().to_string()],
+        })
     );
 
     let stopped = run(&repository.path, &["stop"]);
