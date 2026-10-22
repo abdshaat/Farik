@@ -108,7 +108,7 @@ Tests (`pages/find/finding.test.tsx`):
   - **Stop** sends `finding.stop`. `Done` shows **See what you work on**.
   - With `none`, the check goes to `/setup/where`.
 
-- [ ] `feat(web): offer to find projects and show the scan`
+- [x] `feat(web): offer to find projects and show the scan`
 
 ### Task 2: Here's what you work on
 

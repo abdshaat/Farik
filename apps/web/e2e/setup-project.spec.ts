@@ -43,6 +43,10 @@ test("a first run checks the computer, signs in through Claude Code, and takes t
 		await screenshots(page, "setup-computer");
 		await page.getByRole("button", { name: "Continue without Docker" }).click();
 
+		// There is no Claude Code history here, so the owner says where Claude is used first.
+		await expect(page).toHaveURL(/\/setup\/where$/);
+		await page.getByRole("button", { name: /I'm new to Claude/ }).click();
+
 		await expect(page).toHaveURL(/\/setup\/account$/);
 		await page.evaluate(() => {
 			// The page tries to open Claude's sign-in page in a new tab: the journey only records it.

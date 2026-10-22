@@ -16,7 +16,7 @@ export const TEAM = "shop";
 
 /** Whether `path` is one the computer's pages or the setup's first steps own, not a team's. */
 const HUB_ONLY =
-	/^\/(connect|teams|computer|setup\/(computer|account|project))/;
+	/^\/(connect|teams|computer|find|setup\/(computer|account|project|where))/;
 /** The setup's later steps talk to the team just taken on, through the current team's socket. */
 const CURRENT =
 	/^\/setup\/(scan|team|permissions|spending|finish|advanced|ready)/;

@@ -6,6 +6,8 @@ import { daemonSaid } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
+import { FindOffer } from "../find/FindOffer.tsx";
+import { useFindingStatus, useOffer } from "../find/finding.ts";
 import styles from "./setup.module.css";
 import { keepNoSandbox, Wizard } from "./Wizard.tsx";
 
@@ -97,12 +99,23 @@ export function SetupComputer() {
 		return () => clearTimeout(timer);
 	}, [data, preparing]);
 
+	// Claude Code history on this computer is offered once: not while a scan has run or is running.
+	const offer = useOffer();
+	const { status: finding } = useFindingStatus();
+	const [skipped, setSkipped] = useState(false);
+	const offered =
+		offer === "claude_code" &&
+		finding?.phase === "idle" &&
+		!finding.indexExists &&
+		!skipped;
+
 	const basics = data?.claude.state === "ready" && data.git.state === "ready";
 	const docker = data?.docker.state === "ready";
 	const boxed = docker && data?.sandboxImage.state === "ready";
 	const onward = (without: boolean) => {
 		keepNoSandbox(without);
-		navigate("/setup/account");
+		// Without Claude Code history, the owner says where Claude is used first (journey C).
+		navigate(offer === "none" ? "/setup/where" : "/setup/account");
 	};
 	const prepare = async () => {
 		if (!client) return;
@@ -209,6 +222,7 @@ export function SetupComputer() {
 					</Row>
 				)}
 			</ul>
+			{offered && <FindOffer onSkip={() => setSkipped(true)} />}
 			{data && !boxed && <p className={styles.warn}>{t("noDockerWarning")}</p>}
 			<div className={styles.foot}>
 				<Button onClick={again}>{t("checkAgain")}</Button>

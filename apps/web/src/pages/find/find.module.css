@@ -1,0 +1,98 @@
+/* The pages that find the owner's projects: they sit in the setup's panels (docs/design/mockups/ManyFindOffer). */
+.card {
+	display: grid;
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+	padding: var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+}
+.card h2,
+.card h3,
+.card p,
+.card ul {
+	margin: 0;
+}
+.card h2 {
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+.card h3 {
+	font-weight: 600;
+}
+.card ul {
+	padding-left: var(--catervas-space-4);
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+.muted {
+	color: var(--catervas-color-ink-muted);
+}
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+}
+.strip {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+	margin: 0;
+	max-width: 720px;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-working);
+	background: var(--catervas-color-surface);
+}
+.counts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-5);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.count {
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+.reading {
+	margin: 0;
+	font-family: var(--catervas-type-code-family);
+}
+.prompt {
+	color: var(--catervas-color-action);
+}
+.options {
+	display: grid;
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+}
+.option {
+	display: grid;
+	gap: var(--catervas-space-1);
+	justify-items: start;
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	text-align: left;
+	font: inherit;
+	color: inherit;
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	cursor: pointer;
+}
+.option strong {
+	font-weight: 600;
+}
+.option span {
+	color: var(--catervas-color-ink-muted);
+}
+.alert {
+	margin: 0;
+	max-width: 720px;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+}

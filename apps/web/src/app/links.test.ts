@@ -17,7 +17,7 @@ describe("links", () => {
 	it("keeps_every_team_link_inside_its_team", () => {
 		// A page of a team reaches `Link`, `NavLink`, `Navigate` and `useNavigate` through
 		// `app/teams.tsx`, which puts `/t/<team>` before an absolute address; the router's own would
-		// leave the team. Setup, All teams and This computer are not a team's.
+		// leave the team. Setup, finding projects, All teams and This computer are not a team's.
 		const files = [
 			...sources(join(SRC, "pages")),
 			...sources(join(SRC, "shell")),
@@ -25,6 +25,7 @@ describe("links", () => {
 		].filter(
 			(file) =>
 				!relative(SRC, file).startsWith(join("pages", "setup")) &&
+				!relative(SRC, file).startsWith(join("pages", "find")) &&
 				!/(AllTeams|ThisComputer)\.tsx$/.test(file),
 		);
 		const router = /import\s*(type\s*)?\{([^}]*)\}\s*from\s*"react-router"/g;
