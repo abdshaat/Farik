@@ -120,6 +120,7 @@ describe("here's what you work on", () => {
 
 		// One row each: the name, its jobs, last worked and services, with the suggested choice.
 		expect(await screen.findByText("Here's what you work on")).toBeTruthy();
+		await screen.findByText("tidepool-web", { selector: "strong" });
 		const web = within(rowOf("tidepool-web"));
 		expect(web.getByText("Today · GitHub, Vercel")).toBeTruthy();
 		expect(

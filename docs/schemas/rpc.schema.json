@@ -576,6 +576,9 @@
           "$ref": "#/$defs/findingOfferRequest"
         },
         {
+          "$ref": "#/$defs/findingCatalogRequest"
+        },
+        {
           "$ref": "#/$defs/findingStartRequest"
         },
         {
@@ -3274,6 +3277,34 @@
         }
       }
     },
+    "findingCatalogRequest": {
+      "title": "Finding Catalog Request",
+      "description": "The services the owner can say they use with Claude, in the catalog's order: what the page shows to tap, and the ids finding.declare_services takes (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingCatalogResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.catalog"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
     "findingStartRequest": {
       "title": "Finding Start Request",
       "description": "Starts the scan of the Claude Code history in the background, the owner's consent (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingStartResult; started is false, with nothing else done, while a scan runs. Refused with -32005 and finding_paused while finding is paused.",
@@ -3943,6 +3974,47 @@
         },
         "sessions_dir_exists": {
           "type": "boolean"
+        }
+      }
+    },
+    "findingCatalogResult": {
+      "description": "Each service has its catalog id, the name it is shown under, and its kind: bookkeeping, spreadsheets, payments, selling, marketing, code or other.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "services"
+      ],
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "bookkeeping",
+                  "spreadsheets",
+                  "payments",
+                  "selling",
+                  "marketing",
+                  "code",
+                  "other"
+                ]
+              }
+            }
+          }
         }
       }
     },

@@ -132,7 +132,7 @@ Tests (`pages/find/WebOnly.test.tsx`):
   - On `/find/services`, tapping Zoho Books and Excel and pressing **Continue** sends `finding.declare_services { ids: ["zoho_books","microsoft_365"] }`.
   - "I'll do it later" leaves the export card on All teams.
 
-- [ ] `feat(web): bring claude.ai's history and the services you use`
+- [x] `feat(web): bring claude.ai's history and the services you use`
 
 ### Task 4: This computer's finding section, and All teams' offer
 

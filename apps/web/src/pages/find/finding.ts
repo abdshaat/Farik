@@ -193,3 +193,90 @@ export function findingSaid(e: unknown, other: keyof typeof en): string {
 
 /** When the owner last opened the found list, kept in this browser: what is newer is "new". */
 export const FOUND_SEEN = "catervas.foundSeen";
+
+/** Kept in this browser while the owner chose "I'll do it later" and no export was brought in. */
+export const EXPORT_PENDING = "catervas.exportPending";
+
+/** What `POST /hub/export` read: the counts of the conversations and Projects brought in. */
+export type ExportSummary = { conversations: number; projects: number };
+
+/** The refusal words of `POST /hub/export`, and the sentence each is read as. */
+const EXPORT_WORDS: Record<string, keyof typeof en> = {
+	not_an_export: "exportNotAnExport",
+	damaged: "exportDamaged",
+	unsupported: "exportUnsupported",
+	encrypted: "exportEncrypted",
+	nothing_dated: "exportNothingDated",
+	export_too_large: "exportTooLarge",
+};
+
+/**
+ * Posts a claude.ai export to the hub, the file itself as the body (it is read on this computer),
+ * and answers what came in, or the code the hub refused it with.
+ */
+export function useExportUpload(): {
+	send: (file: File) => Promise<void>;
+	busy: boolean;
+	summary: ExportSummary | undefined;
+	/** The words for why the file was refused; none until it is. */
+	refused: keyof typeof en | undefined;
+} {
+	const [busy, setBusy] = useState(false);
+	const [summary, setSummary] = useState<ExportSummary>();
+	const [refused, setRefused] = useState<keyof typeof en>();
+	const send = async (file: File) => {
+		setBusy(true);
+		setSummary(undefined);
+		setRefused(undefined);
+		try {
+			const answer = await fetch("/hub/export", {
+				method: "POST",
+				body: file,
+				credentials: "same-origin",
+				headers: { "Content-Type": "application/zip" },
+			});
+			if (answer.ok) {
+				const read = (await answer.json()) as ExportSummary;
+				setSummary({
+					conversations: read.conversations,
+					projects: read.projects,
+				});
+				// The export is in: the card that waited for it is done.
+				keep(EXPORT_PENDING, undefined);
+			} else {
+				const body = (await answer.json().catch(() => ({}))) as {
+					error?: string;
+				};
+				setRefused(EXPORT_WORDS[body.error ?? ""] ?? "exportFailed");
+			}
+		} catch {
+			setRefused("exportFailed");
+		} finally {
+			setBusy(false);
+		}
+	};
+	return { send, busy, summary, refused };
+}
+
+/** A service the owner can tap, from `finding.catalog`. */
+export type CatalogService = { id: string; name: string; kind: string };
+
+/** The services of the catalog, asked once. */
+export function useCatalog(): CatalogService[] | undefined {
+	const { client } = useHub();
+	const [services, setServices] = useState<CatalogService[]>();
+	useEffect(() => {
+		if (!client) return;
+		let live = true;
+		client.call("finding.catalog", {}).then(
+			(answer) =>
+				live &&
+				setServices((answer as { services: CatalogService[] }).services),
+			() => {},
+		);
+		return () => {
+			live = false;
+		};
+	}, [client]);
+	return services;
+}

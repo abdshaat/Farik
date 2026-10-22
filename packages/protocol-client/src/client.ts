@@ -36,6 +36,7 @@ export type MethodName =
 	| "teams.remove"
 	| "computer.set"
 	| "finding.offer"
+	| "finding.catalog"
 	| "finding.start"
 	| "finding.stop"
 	| "finding.status"

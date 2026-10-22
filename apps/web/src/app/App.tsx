@@ -8,8 +8,10 @@ import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Files } from "../pages/Files.tsx";
+import { ExportDrop } from "../pages/find/ExportDrop.tsx";
 import { Found } from "../pages/find/Found.tsx";
 import { Scanning } from "../pages/find/Scanning.tsx";
+import { Services } from "../pages/find/Services.tsx";
 import { WhereClaude } from "../pages/find/WhereClaude.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
@@ -76,6 +78,8 @@ export function App() {
 			<Route path="/setup/where" element={<WhereClaude />} />
 			<Route path="/find/scanning" element={<Scanning />} />
 			<Route path="/find/found" element={<Found />} />
+			<Route path="/find/export" element={<ExportDrop />} />
+			<Route path="/find/services" element={<Services />} />
 			{/* The steps after the project talk to the team just taken on, the current one. */}
 			<Route element={<CurrentScope />}>
 				<Route path="/setup/scan" element={<SetupScan />} />

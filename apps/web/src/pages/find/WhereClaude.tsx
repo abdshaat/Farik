@@ -23,6 +23,14 @@ export function WhereClaude() {
 				<button
 					type="button"
 					className={styles.option}
+					onClick={() => navigate("/find/export")}
+				>
+					<strong>{t("whereWeb")}</strong>
+					<span>{t("whereWebNote")}</span>
+				</button>
+				<button
+					type="button"
+					className={styles.option}
 					onClick={() => navigate("/setup/account")}
 				>
 					<strong>{t("whereNew")}</strong>

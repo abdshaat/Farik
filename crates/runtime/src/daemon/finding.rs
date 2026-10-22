@@ -210,8 +210,9 @@ impl Finding {
 }
 
 /// The methods the hub answers for finding (docs/schemas/rpc.schema.json).
-pub(super) const METHODS: [&str; 17] = [
+pub(super) const METHODS: [&str; 18] = [
     "finding.offer",
+    "finding.catalog",
     "finding.start",
     "finding.stop",
     "finding.status",
@@ -266,6 +267,7 @@ pub(super) fn call(hub: &Hub, method: &str, params: &Value) -> Result<Value, Fai
     let host = host_of(hub)?;
     match method {
         "finding.offer" => Ok(offer(host.as_ref())),
+        "finding.catalog" => Ok(catalog()),
         "finding.start" => start(hub),
         "finding.stop" => {
             hub.finding.stop();
@@ -321,6 +323,16 @@ fn offer(host: &dyn FindingHost) -> Value {
     json!({
         "history": if holds_transcript(&projects) { "claude_code" } else { "none" },
         "sessions_dir_exists": projects.is_dir(),
+    })
+}
+
+/// `finding.catalog`: the services the owner can say they use with Claude, in the catalog's order.
+fn catalog() -> Value {
+    json!({
+        "services": CATALOG
+            .iter()
+            .map(|entry| json!({ "id": entry.id, "name": entry.name, "kind": entry.kind.as_wire() }))
+            .collect::<Vec<_>>(),
     })
 }
 
@@ -1223,6 +1235,8 @@ mod tests {
     use chrono::{DateTime, Utc};
     use serde_json::{Value, json};
 
+    use catervas_core::claude_services::catalog::CATALOG;
+
     use super::{FindingHost, FindingProgress, call, rescan_daily};
     use crate::daemon::hub::{Hub, IdleStatus, IdleTeam, TeamSlug};
 
@@ -1327,6 +1341,42 @@ mod tests {
 
     fn refused(hub: &Hub, method: &str, params: &Value) -> String {
         call(hub, method, params).expect_err("a refusal").message
+    }
+
+    #[test]
+    fn lists_the_services_the_owner_can_tap() {
+        let fake = Fake::new("catalog");
+        let hub = Hub::default();
+        hub.set_finder(fake);
+
+        let answer = asked(&hub, "finding.catalog", &json!({}));
+        let services = answer["services"].as_array().expect("a list of services");
+        assert_eq!(
+            services.len(),
+            CATALOG.len(),
+            "every service of the catalog"
+        );
+        assert_eq!(
+            services[0],
+            json!({
+                "id": CATALOG[0].id,
+                "name": CATALOG[0].name,
+                "kind": CATALOG[0].kind.as_wire(),
+            }),
+            "in the catalog's order"
+        );
+        assert!(
+            services.contains(
+                &json!({ "id": "zoho_books", "name": "Zoho Books", "kind": "bookkeeping" })
+            ),
+            "{services:?}"
+        );
+        // What the page taps is what finding.declare_services takes.
+        let ids: Vec<&str> = services
+            .iter()
+            .map(|s| s["id"].as_str().expect("an id"))
+            .collect();
+        asked(&hub, "finding.declare_services", &json!({ "ids": ids }));
     }
 
     #[test]

@@ -8,6 +8,7 @@ import { t } from "../../strings/t.ts";
 import { FolderBrowser } from "../setup/FolderBrowser.tsx";
 import { Wizard } from "../setup/Wizard.tsx";
 import { AddProjectDialog } from "./AddProjectDialog.tsx";
+import { ExportCard } from "./ExportCard.tsx";
 import styles from "./find.module.css";
 import {
 	type Choice,
@@ -272,6 +273,9 @@ export function Found() {
 					<p>{t("foundNothingLead")}</p>
 					<p>{t("foundNothingWeb")}</p>
 					<div className={styles.actions}>
+						<Button onClick={() => navigate("/find/export")}>
+							{t("foundIUseClaudeAi")}
+						</Button>
 						<Button onClick={() => navigate("/setup/account")}>
 							{t("foundSetUpOne")}
 						</Button>
@@ -294,6 +298,7 @@ export function Found() {
 						</li>
 					</ul>
 					<p>{t("foundPicked")}</p>
+					<ExportCard />
 					{list && items(list.main, "main")}
 					{list && list.explored.length > 0 && (
 						<Tucked label={t("foundExplored", { count: list.explored.length })}>
