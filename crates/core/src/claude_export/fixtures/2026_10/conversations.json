@@ -1,0 +1,131 @@
+[
+  {
+    "uuid": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "name": "Plan the shop launch",
+    "summary": "NEVER-KEPT-TEXT",
+    "created_at": "2026-09-03T10:00:00.000000Z",
+    "updated_at": "2026-10-02T08:00:00.000000Z",
+    "account": {
+      "uuid": "ffffffff-ffff-4fff-8fff-ffffffffffff"
+    },
+    "chat_messages": [
+      {
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "sender": "human",
+        "text": "NEVER-KEPT-TEXT",
+        "content": [
+          {
+            "type": "text",
+            "text": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "attachments": [
+          {
+            "file_name": "NEVER-KEPT-TEXT",
+            "extracted_content": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "files": []
+      },
+      {
+        "uuid": "00000000-0000-4000-8000-000000000002",
+        "sender": "human",
+        "text": "NEVER-KEPT-TEXT",
+        "content": [
+          {
+            "type": "text",
+            "text": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "attachments": [
+          {
+            "file_name": "NEVER-KEPT-TEXT",
+            "extracted_content": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "files": []
+      },
+      {
+        "uuid": "00000000-0000-4000-8000-000000000003",
+        "sender": "human",
+        "text": "NEVER-KEPT-TEXT",
+        "content": [
+          {
+            "type": "text",
+            "text": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "attachments": [
+          {
+            "file_name": "NEVER-KEPT-TEXT",
+            "extracted_content": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "name": "",
+    "created_at": "2026-10-05T12:00:00Z",
+    "updated_at": "2026-10-05T12:00:00Z",
+    "chat_messages": [],
+    "a_field_from_later": {
+      "nested": [
+        "NEVER-KEPT-TEXT"
+      ]
+    }
+  },
+  {
+    "name": "NEVER-KEPT-TEXT",
+    "created_at": "2026-10-04T12:00:00Z",
+    "updated_at": "2026-10-04T12:00:00Z",
+    "chat_messages": [
+      {
+        "uuid": "00000000-0000-4000-8000-000000000004",
+        "sender": "human",
+        "text": "NEVER-KEPT-TEXT",
+        "content": [
+          {
+            "type": "text",
+            "text": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "attachments": [
+          {
+            "file_name": "NEVER-KEPT-TEXT",
+            "extracted_content": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "files": []
+      }
+    ]
+  },
+  {
+    "uuid": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "name": 42,
+    "created_at": "not a date",
+    "updated_at": null,
+    "chat_messages": [
+      {
+        "uuid": "00000000-0000-4000-8000-000000000005",
+        "sender": "human",
+        "text": "NEVER-KEPT-TEXT",
+        "content": [
+          {
+            "type": "text",
+            "text": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "attachments": [
+          {
+            "file_name": "NEVER-KEPT-TEXT",
+            "extracted_content": "NEVER-KEPT-TEXT"
+          }
+        ],
+        "files": []
+      }
+    ]
+  }
+]

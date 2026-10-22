@@ -7,6 +7,8 @@ pub mod autopilot;
 pub mod branch;
 /// Budgets and limits: session limits, the session ledger, and the budget check.
 pub mod budget;
+/// What claude.ai's data export says about conversations and Projects, metadata only.
+pub mod claude_export;
 /// What Claude Code's history says: one transcript line, and where each session belongs.
 pub mod claude_history;
 /// Which services the owner reaches through Claude's connectors: names from settings, tool calls, the catalog.

@@ -182,7 +182,7 @@ Files: `claude_export.rs`, `fixtures.rs`, the three `.json`, written by hand, ev
 - `keeps_no_export_text` (guard): no record's `Debug` holds `NEVER-KEPT-TEXT` or `never-kept@example.invalid`.
 - `reads_an_export_leniently`: `chat_messages` `"x"` is 0 messages; `docs` `{}` no names; a uuid of 65 characters or `"  "` is none; a 300-character name is cut to `TITLE_LIMIT`, a 3000-character description to `DESCRIPTION_LIMIT`; `account_of(&[])` is `""`; `export_content_at` of undated records is none and uses `created_at` where `updated_at` is none. RED.
 
-- [ ] `feat(core): read claude.ai's export for metadata`
+- [x] `feat(core): read claude.ai's export for metadata`
 
 ### Task 2: Keys, copies and projects by hand in core
 
