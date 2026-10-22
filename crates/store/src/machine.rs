@@ -1791,6 +1791,25 @@ impl MachineIndex {
         })
     }
 
+    /// The titles of the latest `limit` sessions worked in the project at `root`, newest first.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn session_titles(&self, root: &str, limit: usize) -> Result<Vec<String>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT title FROM sessions
+             WHERE project_root = ?1 AND title IS NOT NULL AND title != ''
+             ORDER BY last_at DESC, session_id LIMIT ?2",
+        )?;
+        let titles = statement
+            .query_map((root, i64::try_from(limit).unwrap_or(i64::MAX)), |row| {
+                row.get(0)
+            })?
+            .collect::<Result<Vec<String>, _>>()?;
+        Ok(titles)
+    }
+
     /// Keeps the owner's choice for the project `key`, replacing an earlier one.
     ///
     /// # Errors

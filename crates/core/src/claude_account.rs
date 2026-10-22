@@ -59,6 +59,70 @@ pub const CHECK_ARGS: [&str; 15] = [
     "json",
 ];
 
+/// The command line after the program of one question put to the owner's Claude Code on standard
+/// input, in the lean shape ADR 0084 records for the check: Haiku, one turn, no tools, no
+/// settings and no servers.
+#[must_use]
+pub fn ask_args(system_prompt: &str) -> Vec<String> {
+    [
+        "-p",
+        "--model",
+        "haiku",
+        "--max-turns",
+        "1",
+        "--tools",
+        "",
+        "--system-prompt",
+        system_prompt,
+        "--strict-mcp-config",
+        "--setting-sources",
+        "",
+        "--output-format",
+        "json",
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect()
+}
+
+/// What a question put to Claude Code answered.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    /// What it said.
+    pub result: String,
+    /// The `total_cost_usd` it reported, 0 when it reported none.
+    pub cost_usd: f64,
+}
+
+/// Reads what `claude -p … --output-format json` printed.
+///
+/// # Errors
+///
+/// Claude Code's words when it answered with an error, else a sentence saying it gave no answer.
+pub fn parse_answer(stdout: &str) -> Result<Answer, String> {
+    let value: serde_json::Value = serde_json::from_str(stdout.trim())
+        .map_err(|_| "Claude Code gave no answer".to_string())?;
+    let result = value
+        .get("result")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    if value.get("is_error").and_then(serde_json::Value::as_bool) != Some(false) {
+        return Err(if result.is_empty() {
+            "Claude Code gave no answer".to_string()
+        } else {
+            result
+        });
+    }
+    Ok(Answer {
+        result,
+        cost_usd: value
+            .get("total_cost_usd")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(0.0),
+    })
+}
+
 impl CheckOutcome {
     /// The outcome's name on the wire.
     #[must_use]

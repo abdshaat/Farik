@@ -48,6 +48,8 @@ const DRAIN_LIMIT: Duration = Duration::from_secs(1);
 const CHECK_LIMIT: Duration = Duration::from_secs(60);
 /// The most of a program's output that is read.
 const OUTPUT_LIMIT: u64 = 1 << 20;
+/// What `parse_answer` says of output that is no answer.
+const NO_ANSWER: &str = "Claude Code gave no answer";
 /// The longest of standard error that a failed check keeps.
 const DETAIL_LIMIT: usize = 200;
 
@@ -295,6 +297,68 @@ impl ClaudeAccount {
                 Err(SignInError::Failed(last))
             }
         }
+    }
+
+    /// Puts one question to Claude Code: `prompt` on its standard input, `system_prompt` as its
+    /// system prompt, with Haiku and no tools (`catervas_core::claude_account::ask_args`). Answers
+    /// what it said and what it cost.
+    ///
+    /// # Errors
+    ///
+    /// Claude Code's words when it answered with an error, or a sentence saying it could not be
+    /// run or did not answer in time.
+    pub async fn ask(
+        &self,
+        prompt: &str,
+        system_prompt: &str,
+        limit: Duration,
+    ) -> Result<catervas_core::claude_account::Answer, String> {
+        std::fs::create_dir_all(&self.check_dir).map_err(|error| error.to_string())?;
+        let mut child = self
+            .command(&self.check_dir)
+            .args(catervas_core::claude_account::ask_args(system_prompt))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("Claude Code could not be started: {error}"))?;
+        let (Some(pid), Some(mut stdin), Some(stdout), Some(stderr)) = (
+            child.id(),
+            child.stdin.take(),
+            child.stdout.take(),
+            child.stderr.take(),
+        ) else {
+            return Err("Claude Code could not be started".to_string());
+        };
+        let (mut stdout, mut stderr) = (stdout.take(OUTPUT_LIMIT), stderr.take(OUTPUT_LIMIT));
+        let work = async {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let written = async {
+                // A program that exits before it has read everything refuses the write; its
+                // output says why.
+                let _ = stdin.write_all(prompt.as_bytes()).await;
+                drop(stdin);
+            };
+            let ((), _, _, _) = tokio::join!(
+                written,
+                child.wait(),
+                stdout.read_to_end(&mut out),
+                stderr.read_to_end(&mut err)
+            );
+            (out, err)
+        };
+        let Ok((out, err)) = tokio::time::timeout(limit, work).await else {
+            kill_group(pid);
+            let _ = child.wait().await;
+            return Err("Claude Code did not answer in time".to_string());
+        };
+        catervas_core::claude_account::parse_answer(&String::from_utf8_lossy(&out)).map_err(|why| {
+            if why == NO_ANSWER {
+                first_characters(&String::from_utf8_lossy(&err), &why)
+            } else {
+                why
+            }
+        })
     }
 
     /// Runs `claude auth logout`.

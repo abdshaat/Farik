@@ -319,7 +319,7 @@ impl Finding {
 }
 
 /// The methods the hub answers for finding (docs/schemas/rpc.schema.json).
-pub(super) const METHODS: [&str; 33] = [
+pub(super) const METHODS: [&str; 35] = [
     "finding.offer",
     "finding.catalog",
     "finding.start",
@@ -351,6 +351,8 @@ pub(super) const METHODS: [&str; 33] = [
     "proposal.edit",
     "proposal.move_out",
     "proposal.revert",
+    "proposal.names_estimate",
+    "proposal.names",
     "proposal.create",
     "teams.undo",
 ];

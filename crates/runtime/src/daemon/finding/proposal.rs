@@ -3,13 +3,17 @@
 //! adding a project to a team that exists, and taking a made team back until it first starts.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use catervas_core::claude_services::catalog::CATALOG;
 use catervas_core::finding::Choice;
+use catervas_core::pricing::{Usage, compute_cost_usd, prices::PRICE_TABLE};
 use catervas_core::proposal::{Card, CardKind, LinkedGroup, ProjectKind, ProposalProject, propose};
+use catervas_core::scrub::scrub;
 use catervas_protocol::event::EventKind;
+use catervas_store::Git;
 use catervas_store::files::ProjectFiles;
 use catervas_store::linking::{Answer, confirmed_groups, evaluate};
 use catervas_store::machine::{MachineIndex, ProposalEdit};
@@ -26,12 +30,14 @@ use crate::templates::{Templates, is_builtin};
 use crate::tools::ToolDeps;
 
 /// The methods of this module.
-pub(super) const METHODS: [&str; 7] = [
+pub(super) const METHODS: [&str; 9] = [
     "linking.reject",
     "proposal.get",
     "proposal.edit",
     "proposal.move_out",
     "proposal.revert",
+    "proposal.names_estimate",
+    "proposal.names",
     "proposal.create",
     "teams.undo",
 ];
@@ -39,6 +45,14 @@ pub(super) const METHODS: [&str; 7] = [
 /// How long a made team is given to start being driven, and a removed one to stop.
 const DRIVE_WAIT: Duration = Duration::from_secs(60);
 
+/// The longest a name from Claude is, and a purpose.
+const NAME_FROM_CLAUDE: usize = 40;
+const PURPOSE_FROM_CLAUDE: usize = 120;
+/// The most output tokens the price of the names run is worked out for.
+const MAX_OUTPUT_TOKENS: u64 = 400;
+/// How many lines of a README Claude is shown, and how many session titles.
+const README_LINES: usize = 40;
+const SESSION_TITLES: usize = 20;
 /// The longest a name is, and a purpose.
 const NAME_LIMIT: usize = 100;
 const PURPOSE_LIMIT: usize = 200;
@@ -60,6 +74,8 @@ pub(super) fn call(
                 .map_err(|e| internal(&e))?;
             Ok(json!({}))
         }
+        "proposal.names_estimate" => names_estimate(hub, host),
+        "proposal.names" => names(hub, host, params),
         "proposal.create" => create(hub, host, params),
         "linking.reject" => reject(host, params),
         _ => undo(hub, host, params),
@@ -715,6 +731,180 @@ fn add_projects(hub: &Hub, host: &dyn FindingHost, card: &Card) -> Result<Vec<St
             .map_err(|e| e.to_string())?;
     }
     Ok(added)
+}
+
+/// The first lines of the README at `HEAD` of the repository at `folder`.
+fn readme_head(folder: &str) -> Option<String> {
+    let git = Git::open(PathBuf::from(folder));
+    ["README.md", "readme.md", "README"]
+        .iter()
+        .find_map(|name| git.file_at("HEAD", name).ok())
+        .map(|text| {
+            text.lines()
+                .take(README_LINES)
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
+}
+
+/// What Claude is told about the cards, with every key scrubbed from it.
+fn names_prompt(host: &dyn FindingHost, index: &MachineIndex, built: &Built) -> String {
+    let mut allowed: Vec<String> = catervas_roles::BUILTIN_TEAMS
+        .iter()
+        .map(|(slug, _)| (*slug).to_string())
+        .collect();
+    allowed.extend(saved_templates(host));
+    let mut text = format!(
+        "Give each team below a short name (at most {NAME_FROM_CLAUDE} characters), a purpose in \
+         one sentence (at most {PURPOSE_FROM_CLAUDE} characters) and the template that suits it, \
+         one of: {}.\nAnswer with a JSON list and nothing else: \
+         [{{\"id\": \"...\", \"name\": \"...\", \"purpose\": \"...\", \"template\": \"...\"}}].\n",
+        allowed.join(", ")
+    );
+    for card in &built.cards {
+        let _ = write!(text, "\nTeam {}\n", card.id);
+        let folders: Vec<String> = card
+            .projects
+            .iter()
+            .map(|project| {
+                project
+                    .folder
+                    .as_deref()
+                    .and_then(|folder| Path::new(folder).file_name())
+                    .map_or_else(
+                        || project.name.clone(),
+                        |name| name.to_string_lossy().into_owned(),
+                    )
+            })
+            .collect();
+        let _ = writeln!(text, "Folders: {}", folders.join(", "));
+        for project in &card.projects {
+            if let Some(readme) = project.folder.as_deref().and_then(readme_head) {
+                let _ = writeln!(text, "README of {}:\n{readme}", project.name);
+            }
+            let titles = project
+                .folder
+                .as_deref()
+                .and_then(|folder| index.session_titles(folder, SESSION_TITLES).ok())
+                .unwrap_or_default();
+            if !titles.is_empty() {
+                let _ = writeln!(
+                    text,
+                    "Recent sessions in {}: {}",
+                    project.name,
+                    titles.join("; ")
+                );
+            }
+        }
+        if !card.jobs.is_empty() {
+            let _ = writeln!(text, "Jobs: {}", card.jobs.join(", "));
+        }
+    }
+    scrub(&text)
+}
+
+/// `proposal.names_estimate`.
+fn names_estimate(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
+    let index = open_index(host)?;
+    let built = build(hub, host, &index)?;
+    let input_tokens = u64::try_from(names_prompt(host, &index, &built).chars().count())
+        .unwrap_or(u64::MAX)
+        .div_ceil(4);
+    let usd = compute_cost_usd(
+        &Usage {
+            input_tokens,
+            output_tokens: MAX_OUTPUT_TOKENS,
+            ..Usage::default()
+        },
+        "claude-haiku-4-5",
+        &PRICE_TABLE,
+    )
+    .map_err(|_| internal(&"the price table has no price for Haiku"))?;
+    Ok(json!({ "usd": usd, "input_tokens": input_tokens }))
+}
+
+/// The list of objects in what Claude said, which may be wrapped in words or a code fence.
+fn names_in(said: &str) -> Option<Vec<Value>> {
+    let (from, to) = (said.find('[')?, said.rfind(']')?);
+    serde_json::from_str(said.get(from..=to)?).ok()
+}
+
+/// `text` cut to `limit` characters.
+fn cut(text: &str, limit: usize) -> String {
+    text.trim()
+        .chars()
+        .take(limit)
+        .collect::<String>()
+        .trim_end()
+        .to_string()
+}
+
+/// `proposal.names`.
+fn names(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Failure> {
+    if params["confirmed"].as_bool() != Some(true) {
+        return Err(refusal(
+            "confirmation_needed",
+            "asking Claude costs money; ask again with confirmed set",
+        ));
+    }
+    let mut index = open_index(host)?;
+    let built = build(hub, host, &index)?;
+    let prompt = names_prompt(host, &index, &built);
+    let asked = host
+        .ask_names(&prompt)
+        .map_err(|why| refusal("names_failed", &why))?;
+    let list = names_in(&asked.result).ok_or_else(|| {
+        refusal(
+            "names_failed",
+            "Claude Code's answer was not a list of names",
+        )
+    })?;
+    let saved = saved_templates(host);
+    let mut kept = Vec::new();
+    for each in &list {
+        // Only these four keys are read: Claude never makes or changes a link.
+        let Some(card) = each["id"]
+            .as_str()
+            .and_then(|id| built.cards.iter().find(|card| card.id == id))
+        else {
+            continue;
+        };
+        let name = each["name"]
+            .as_str()
+            .map(|name| cut(name, NAME_FROM_CLAUDE))
+            .filter(|name| !name.is_empty());
+        let purpose = each["purpose"]
+            .as_str()
+            .map(|text| cut(text, PURPOSE_FROM_CLAUDE))
+            .filter(|text| !text.is_empty());
+        let template = each["template"]
+            .as_str()
+            .filter(|template| is_builtin(template) || saved.iter().any(|slug| slug == template))
+            .map(str::to_string);
+        if name.is_none() && purpose.is_none() && template.is_none() {
+            continue;
+        }
+        index
+            .put_edit(
+                &card.id,
+                &ProposalEdit {
+                    name: name.clone(),
+                    template: template.clone(),
+                    purpose: purpose.clone(),
+                    from_claude: true,
+                },
+            )
+            .map_err(|e| internal(&e))?;
+        let mut entry = json!({ "id": card.id, "name": name.unwrap_or_else(|| card.name.clone()) });
+        if let Some(purpose) = purpose {
+            entry["purpose"] = json!(purpose);
+        }
+        if let Some(template) = template {
+            entry["template"] = json!(template);
+        }
+        kept.push(entry);
+    }
+    Ok(json!({ "cost_usd": asked.cost_usd, "cards": kept }))
 }
 
 /// `proposal.create`.

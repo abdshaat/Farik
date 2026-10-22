@@ -151,7 +151,7 @@ Tests (`crates/cli/src/finding.rs`, with a fake `claude` that records its standa
   - The cards' names and purposes come from its answer, and a link-like key in the answer changes nothing.
   - The cost shown is the answer's `total_cost_usd`.
 
-- [ ] `feat(cli): suggest names with claude, scrubbed and priced first`
+- [x] `feat(cli): suggest names with claude, scrubbed and priced first`
 
 ### Task 5: The screens, Repositories and suggested connections
 

@@ -3288,3 +3288,208 @@ fn adds_a_linked_project_to_the_team_it_works_with() {
     let (ran, _, err) = serving.interrupted();
     assert_eq!(ran.code, 130, "{err}");
 }
+
+/// A directory holding a `claude` that is signed in, and for `-p` records its arguments in
+/// `args.txt` (one line a run) and its standard input in `stdin.txt`, then prints `answer.json`
+/// (or, once `fail` is made beside it, an error), and the `PATH` that finds it first.
+fn a_recording_claude(name: &str) -> (std::path::PathBuf, String) {
+    let directory = scratch(name);
+    let source = directory.join("claude.txt");
+    std::fs::write(
+        &source,
+        "#!/bin/sh\n\
+         d=\"$(dirname \"$0\")\"\n\
+         if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n\
+           echo '{\"loggedIn\": true, \"authMethod\": \"oauth_token\"}'; exit 0\n\
+         fi\n\
+         if [ \"$1\" = -p ]; then\n\
+           echo \"$@\" >> \"$d/args.txt\"\n\
+           cat > \"$d/stdin.txt\"\n\
+           if [ -f \"$d/fail\" ]; then\n\
+             echo '{\"type\":\"result\",\"is_error\":true,\"result\":\"Credit balance is too low\"}'; exit 1\n\
+           fi\n\
+           cat \"$d/answer.json\"; exit 0\n\
+         fi\n\
+         echo '2.1.300 (Claude Code)'\n",
+    )
+    .expect("written");
+    let program = directory.join("claude");
+    let copied = std::process::Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    (directory, path)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one test of the estimate, the one run, what it was shown and what it changed"
+)]
+fn asks_claude_for_names_with_nothing_secret() {
+    let (home, state) = a_home_with_repos("proposal-names", &["api", "web", "solo"]);
+    // A README with a key in it, committed.
+    let api = home.join("api");
+    std::fs::write(
+        api.join("README.md"),
+        "# api\nAn invented shop api.\nAPI_KEY=sk-test-123\n",
+    )
+    .expect("a readme");
+    git_in(&api, &["add", "README.md"]);
+    git_in(&api, &["commit", "-m", "Say what it is"]);
+    let (claude, path) = a_recording_claude("proposal-names-claude");
+    let mut env = setup_env(&home, &state);
+    env.insert("PATH".to_string(), path);
+    let serving = serving_in(&home, env, true);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    assert_eq!(hub("finding.start", json!({}))["result"]["started"], true);
+    until("the scan is done", || {
+        hub("finding.status", json!({}))["result"]["phase"] == "done"
+    });
+    said_yes(&state, &home.join("api"), &home.join("web"));
+    hub("finding.declare_services", json!({ "ids": ["zoho_books"] }));
+
+    let estimate = hub("proposal.names_estimate", json!({}));
+    let usd = estimate["result"]["usd"].as_f64().expect("a price");
+    assert!(usd > 0.0 && usd < 0.10, "{estimate}");
+    assert!(
+        estimate["result"]["input_tokens"].as_u64().unwrap_or(0) > 0,
+        "{estimate}"
+    );
+
+    let refused = hub("proposal.names", json!({ "confirmed": false }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("confirmation_needed")),
+        "{refused}"
+    );
+    assert!(
+        !claude.join("args.txt").exists(),
+        "nothing ran without the owner's yes"
+    );
+
+    let proposed = hub("proposal.get", json!({}));
+    let cards = proposed["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(cards.len(), 3, "{proposed}");
+    let id_of = |name: &str| -> String {
+        cards
+            .iter()
+            .find(|card| card["name"] == name)
+            .and_then(|card| card["id"].as_str())
+            .unwrap_or_else(|| panic!("{name} in {proposed}"))
+            .to_string()
+    };
+    let (pair, solo, books) = (id_of("api"), id_of("solo"), id_of("Bookkeeping"));
+    let answer = json!([
+        { "id": pair, "name": "Shop", "purpose": "Sells things online", "template": "online-store",
+          "link": ["a", "b"], "projects": ["x"] },
+        { "id": solo, "name": "N".repeat(60), "purpose": "P".repeat(200), "template": "no-such-team" },
+        { "id": "not-a-card", "name": "Ghost" },
+    ]);
+    let wrapped = json!({
+        "type": "result", "subtype": "success", "is_error": false,
+        "result": format!("Here you go:\n```json\n{answer}\n```"), "total_cost_usd": 0.02,
+    });
+    std::fs::write(claude.join("answer.json"), wrapped.to_string()).expect("an answer");
+
+    let names = hub("proposal.names", json!({ "confirmed": true }));
+    assert_eq!(names["result"]["cost_usd"], 0.02, "{names}");
+    let calls = std::fs::read_to_string(claude.join("args.txt")).expect("one run");
+    assert_eq!(calls.lines().count(), 1, "{calls}");
+    assert!(calls.contains("--model haiku"), "{calls}");
+    let seen = std::fs::read_to_string(claude.join("stdin.txt")).expect("its input");
+    for wanted in ["api", "web", "solo", "An invented project"] {
+        assert!(seen.contains(wanted), "{wanted} in {seen}");
+    }
+    assert!(
+        !seen.contains("sk-test-123") && !seen.contains("API_KEY"),
+        "{seen}"
+    );
+
+    let after = hub("proposal.get", json!({}));
+    let cards = after["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        cards.len(),
+        3,
+        "a link-like key in the answer changes nothing: {after}"
+    );
+    let card = |id: &str| {
+        cards
+            .iter()
+            .find(|card| card["id"] == id)
+            .expect("a card")
+            .clone()
+    };
+    let shop = card(&pair);
+    assert_eq!(
+        (
+            shop["name"].as_str(),
+            shop["purpose"].as_str(),
+            shop["template"].as_str()
+        ),
+        (
+            Some("Shop"),
+            Some("Sells things online"),
+            Some("online-store")
+        )
+    );
+    assert_eq!(shop["from_claude"], true);
+    assert_eq!(shop["projects"].as_array().map(Vec::len), Some(2), "{shop}");
+    let lone = card(&solo);
+    assert_eq!(
+        lone["name"].as_str().map(|name| name.chars().count()),
+        Some(40),
+        "{lone}"
+    );
+    assert_eq!(
+        lone["purpose"].as_str().map(|text| text.chars().count()),
+        Some(120),
+        "{lone}"
+    );
+    assert_eq!(
+        lone["template"], "software-product",
+        "a template not in the list is ignored"
+    );
+    assert_eq!(card(&books)["from_claude"], false);
+
+    // Keep the folder name reverts one card.
+    hub("proposal.revert", json!({ "id": pair }));
+    let reverted = hub("proposal.get", json!({}));
+    let kept = reverted["result"]["cards"]
+        .as_array()
+        .and_then(|all| all.iter().find(|card| card["id"] == json!(pair)))
+        .expect("the card");
+    assert_eq!(
+        (kept["name"].as_str(), kept["from_claude"].clone()),
+        (Some("api"), json!(false))
+    );
+
+    // A run that fails says so in Claude Code's words, and changes nothing.
+    std::fs::write(claude.join("fail"), "").expect("a failure");
+    let failed = hub("proposal.names", json!({ "confirmed": true }));
+    let said = failed["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        said.starts_with("names_failed") && said.contains("Credit balance is too low"),
+        "{failed}"
+    );
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}

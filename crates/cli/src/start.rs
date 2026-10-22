@@ -770,11 +770,15 @@ pub(crate) fn account(io: &CliIo<'_>) -> Arc<dyn AccountPort> {
 
 /// The environment a `claude` program is run in: `SESSION_ENV`'s variables, each only when set.
 fn session_env(io: &CliIo<'_>) -> BTreeMap<String, String> {
+    session_env_of(&io.env)
+}
+
+/// `env` cut down to `SESSION_ENV`'s variables.
+pub(crate) fn session_env_of(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     SESSION_ENV
         .iter()
         .filter_map(|name| {
-            io.env
-                .get(*name)
+            env.get(*name)
                 .map(|value| ((*name).to_string(), value.clone()))
         })
         .collect()

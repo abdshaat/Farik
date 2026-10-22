@@ -10,8 +10,8 @@ use catervas_protocol::clock::Clock;
 use catervas_runtime::computer::program_output;
 use catervas_runtime::connectors::ConnectorSecrets;
 use catervas_runtime::daemon::{
-    FindingHost, FindingProgress, MadeProject, MemberRequest, PlanKind, SETUP_PENDING, SetupHost,
-    TeamPlan, apply_to_new_team,
+    FindingHost, FindingProgress, MadeProject, MemberRequest, NamesRun, PlanKind, SETUP_PENDING,
+    SetupHost, TeamPlan, apply_to_new_team,
 };
 use catervas_runtime::github::{GithubPlaces, load_connection, read_into_index};
 use catervas_store::claude_history::{
@@ -187,6 +187,11 @@ impl CliFinder {
         write_state(&self.state, &state)
     }
 }
+
+/// What Claude Code is told it is when it names the teams, and how long it is given.
+const NAMES_SYSTEM_PROMPT: &str =
+    "You name teams of people and AI agents for the work they do. Answer with JSON only.";
+const ASK_LIMIT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// How long a removed team is waited for to let go of its folder.
 const RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
@@ -422,6 +427,28 @@ impl FindingHost for CliFinder {
                 Err(why)
             }
         }
+    }
+
+    fn ask_names(&self, prompt: &str) -> Result<NamesRun, String> {
+        let account = catervas_runtime::account::ClaudeAccount::new(
+            catervas_runtime::computer::on_path("claude", &self.env)
+                .unwrap_or_else(|| PathBuf::from("claude")),
+            crate::start::session_env_of(&self.env),
+            self.state.join("account-check"),
+        );
+        let asking = account.ask(prompt, NAMES_SYSTEM_PROMPT, ASK_LIMIT);
+        let answer = match tokio::runtime::Handle::try_current() {
+            Ok(handle) => handle.block_on(asking),
+            Err(_) => tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| error.to_string())?
+                .block_on(asking),
+        }?;
+        Ok(NamesRun {
+            result: answer.result,
+            cost_usd: answer.cost_usd,
+        })
     }
 
     fn remove_made(&self, root: &Path, created: &[PathBuf]) -> Result<Option<String>, String> {

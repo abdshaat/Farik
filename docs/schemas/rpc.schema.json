@@ -666,6 +666,12 @@
           "$ref": "#/$defs/proposalRevertRequest"
         },
         {
+          "$ref": "#/$defs/proposalNamesEstimateRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalNamesRequest"
+        },
+        {
           "$ref": "#/$defs/proposalCreateRequest"
         },
         {
@@ -4170,6 +4176,37 @@
         }
       }
     },
+    "proposalNamesEstimateRequest": {
+      "title": "Proposal Names Estimate Request",
+      "description": "What asking Claude for better names would cost, worked out from the length of the prompt and the price table's Haiku rates for at most 400 output tokens, shown to the owner first (docs/SPEC.md 8.6). Answers proposalNamesEstimateResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.names_estimate" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "proposalNamesRequest": {
+      "title": "Proposal Names Request",
+      "description": "Asks the owner's Claude Code once, with Haiku and no tools, for a name, a purpose and a template for each card (docs/SPEC.md 8.6; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. The prompt holds only folder names, the first 40 lines of each README at HEAD, the titles of the last 20 sessions and the jobs' names, each scrubbed of keys first. The answer is stored as edits marked from_claude; a name over 40 characters or a purpose over 120 is cut, a template that is not in the list is ignored, and nothing Claude says changes a link. A run that fails is -32005 and names_failed with Claude Code's words. Answers proposalNamesResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.names" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed"],
+          "properties": { "confirmed": { "type": "boolean" } }
+        }
+      }
+    },
     "findingRow": {
       "type": "object",
       "additionalProperties": false,
@@ -4821,6 +4858,30 @@
               "team": { "type": "string" },
               "team_name": { "type": "string" }
             }
+          }
+        }
+      }
+    },
+    "proposalNamesEstimateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usd", "input_tokens"],
+      "properties": { "usd": { "type": "number", "minimum": 0 }, "input_tokens": { "type": "integer", "minimum": 0 } }
+    },
+    "proposalNamesResult": {
+      "description": "cost_usd is the total_cost_usd Claude Code reported; cards are the names kept, by card id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cost_usd", "cards"],
+      "properties": {
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name"],
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "purpose": { "type": "string" }, "template": { "type": "string" } }
           }
         }
       }
