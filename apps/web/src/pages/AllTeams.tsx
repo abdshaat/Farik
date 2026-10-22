@@ -1,7 +1,7 @@
 import { connect } from "@catervas/protocol-client";
-import { Button } from "@catervas/ui";
+import { Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { useHub, useSocketFactory } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import type { TeamRow } from "../app/teams.ts";
@@ -11,6 +11,7 @@ import { t } from "../strings/t.ts";
 import styles from "./AllTeams.module.css";
 import { AllTeamsFinding } from "./find/AllTeamsFinding.tsx";
 import { ExportCard } from "./find/ExportCard.tsx";
+import { findingSaid, useFoundList } from "./find/finding.ts";
 import { dollars } from "./Gate.tsx";
 
 /** What a team's badge says. */
@@ -28,7 +29,11 @@ export function AllTeams() {
 	const { list, again } = useTeamList();
 	const hub = useHub();
 	const factory = useSocketFactory();
+	const navigate = useNavigate();
+	const created = (useLocation().state as { created?: number } | null)?.created;
+	const { list: found, again: lookAgain } = useFoundList(undefined);
 	const [asking, setAsking] = useState<string>();
+	const [undoing, setUndoing] = useState<string>();
 	const [said, setSaid] = useState<Record<string, string>>({});
 	const [busy, setBusy] = useState<string>();
 
@@ -39,14 +44,18 @@ export function AllTeams() {
 			else next[slug] = words;
 			return next;
 		});
-	// Resumes the team on a socket of its own, which closes after: the page has no connection to it.
-	const start = async (slug: string) => {
+	// Sends `command` to the team on a socket of its own, which closes after: the page has no
+	// connection to it.
+	const send = async (
+		slug: string,
+		command: "team_resume" | "catervafication_start",
+	) => {
 		setBusy(slug);
 		say(slug, undefined);
 		const url = `ws://${location.host}/t/${slug}/rpc`;
 		const client = connect(url, factory(url));
 		try {
-			const reply = await client.command({ command: "team_resume", body: {} });
+			const reply = await client.command({ command, body: {} });
 			if ("error" in reply)
 				say(
 					slug,
@@ -60,6 +69,34 @@ export function AllTeams() {
 			again();
 		}
 	};
+	const start = (slug: string) => send(slug, "team_resume");
+	const undo = async (slug: string) => {
+		setBusy(slug);
+		say(slug, undefined);
+		try {
+			const answer = (await hub.client?.call("teams.undo", { slug })) as
+				| { left?: string }
+				| undefined;
+			setUndoing(undefined);
+			if (answer?.left) say(slug, answer.left);
+		} catch (e) {
+			say(slug, findingSaid(e, "refuseOther"));
+		} finally {
+			setBusy(undefined);
+			again();
+			lookAgain();
+		}
+	};
+	const choose = async (key: string, choice: "team" | "ignore") => {
+		try {
+			await hub.client?.call("finding.choose", { key, choice });
+		} catch {}
+		if (choice === "team") navigate("/find/teams");
+		else lookAgain();
+	};
+	const watched = (found?.main ?? []).filter(
+		(row) => (row.choice ?? row.suggested) === "watch" && !row.alreadyTeam,
+	);
 	const remove = async (slug: string) => {
 		setBusy(slug);
 		say(slug, undefined);
@@ -84,6 +121,13 @@ export function AllTeams() {
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("allTeams")}</h1>
 			{asleep && <p role="status">{t("teamsAsleep", { time: asleep })}</p>}
+			{created !== undefined && created > 0 && (
+				<p role="status">
+					{created === 1
+						? t("teamsCreatedOne")
+						: t("teamsCreated", { count: created })}
+				</p>
+			)}
 			<AllTeamsFinding />
 			<ExportCard />
 			{list?.teams.length === 0 && <p>{t("teamsNone")}</p>}
@@ -111,16 +155,57 @@ export function AllTeams() {
 							<li>{t("teamsToday", { amount: dollars(team.todayUsd) })}</li>
 							<li>{t("teamsMonth", { amount: dollars(team.monthUsd) })}</li>
 						</ul>
-						{team.status === "paused" && (
-							<div>
-								<Button
-									busy={busy === team.slug}
-									onClick={() => start(team.slug)}
-								>
-									{t("teamStart")}
-								</Button>
-							</div>
-						)}
+						{team.status === "paused" &&
+							(undoing === team.slug ? (
+								<div>
+									<p>{t("teamsUndoConfirm", { name: team.name })}</p>
+									<Button
+										busy={busy === team.slug}
+										onClick={() => undo(team.slug)}
+									>
+										{t("teamsUndoYes")}
+									</Button>{" "}
+									<Button onClick={() => setUndoing(undefined)}>
+										{t("agentCancel")}
+									</Button>
+								</div>
+							) : (
+								<div className={styles.actions}>
+									<Button
+										busy={busy === team.slug}
+										onClick={() => start(team.slug)}
+									>
+										{t("teamStart")}
+									</Button>
+									{team.undoable && (
+										<>
+											<Button
+												disabled={busy === team.slug}
+												onClick={() => send(team.slug, "catervafication_start")}
+											>
+												{t("teamsDocument")}
+											</Button>
+											<InfoTip
+												id={`document-${team.slug}`}
+												label={t("teamsDocumentMore")}
+											>
+												<ul>
+													<li>{t("teamsDocumentRead")}</li>
+													<li>{t("teamsDocumentApprove")}</li>
+													<li>{t("teamsDocumentThen")}</li>
+												</ul>
+											</InfoTip>
+											<Button
+												kind="quiet"
+												disabled={busy === team.slug}
+												onClick={() => setUndoing(team.slug)}
+											>
+												{t("teamsUndo")}
+											</Button>
+										</>
+									)}
+								</div>
+							))}
 						{team.status === "missing" &&
 							(asking === team.slug ? (
 								<div>
@@ -146,6 +231,28 @@ export function AllTeams() {
 					</article>
 				))}
 			</div>
+			{watched.length > 0 && (
+				<section aria-labelledby="watched-heading" className={styles.waiting}>
+					<h2 id="watched-heading">{t("teamsWatchedTitle")}</h2>
+					<ul>
+						<li>{t("teamsWatchedReminders")}</li>
+						<li>{t("teamsWatchedNothing")}</li>
+					</ul>
+					<ul>
+						{watched.map((row) => (
+							<li key={row.key}>
+								<span>{row.name}</span>{" "}
+								<Button kind="quiet" onClick={() => choose(row.key, "ignore")}>
+									{t("teamsNotMine")}
+								</Button>{" "}
+								<Button onClick={() => choose(row.key, "team")}>
+									{t("teamsMakeATeam")}
+								</Button>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
 			{waiting.length > 0 && (
 				<section aria-labelledby="waiting-heading" className={styles.waiting}>
 					<h2 id="waiting-heading">{t("teamsWaitingTitle")}</h2>

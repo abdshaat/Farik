@@ -174,6 +174,7 @@ export function Today() {
 		team: Team;
 		kits?: RoleKit[];
 		hiddenSuggestions?: { agent: string; server: string }[];
+		foundServices?: { agent: string; server: string; name: string }[];
 		requestedConnections?: { agent: string; server: string; why: string }[];
 	}>("team.get", {});
 	// What agents made on other services, for a call that waits past its allowance.
@@ -432,6 +433,7 @@ export function Today() {
 					kits={team.kits ?? []}
 					hidden={team.hiddenSuggestions ?? []}
 					requested={team.requestedConnections ?? []}
+					found={team.foundServices ?? []}
 				/>
 			)}
 			<ChannelPreview agents={agents} />

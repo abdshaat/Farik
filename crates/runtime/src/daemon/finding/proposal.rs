@@ -323,7 +323,7 @@ fn get(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
         .join(catervas_store::machine::MACHINE_DB)
         .exists()
     {
-        return Ok(json!({ "cards": [] }));
+        return Ok(json!({ "cards": [], "templates": templates_json(host) }));
     }
     let index = open_index(host)?;
     let built = build(hub, host, &index)?;
@@ -345,6 +345,7 @@ fn get(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
         .collect();
     Ok(json!({
         "cards": built.cards.iter().map(|card| card_json(host, &built, card)).collect::<Vec<_>>(),
+        "templates": templates_json(host),
     }))
 }
 
@@ -360,6 +361,23 @@ fn saved_templates(host: &dyn FindingHost) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The teams a card can start from: the ready-made ones, then the owner's saved ones.
+fn templates_json(host: &dyn FindingHost) -> Vec<Value> {
+    let mut all: Vec<Value> = crate::templates::builtins()
+        .into_iter()
+        .map(|(slug, template)| json!({ "slug": slug, "name": template.name.to_string() }))
+        .collect();
+    if let Ok(listing) = Templates::new(host.state_dir().join("templates")).list() {
+        all.extend(
+            listing
+                .templates
+                .into_iter()
+                .map(|(slug, template)| json!({ "slug": slug, "name": template.name.to_string() })),
+        );
+    }
+    all
 }
 
 /// `proposal.edit`.

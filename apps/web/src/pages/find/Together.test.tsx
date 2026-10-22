@@ -204,9 +204,9 @@ describe("do these work together", () => {
 		await waitFor(() => expect(answered).toHaveLength(4));
 		expect(answered[3]).toEqual({ a: WATCH.key, b: API.key, answer: "no" });
 
-		// Continue leads on, to All teams until the proposal of teams is built.
+		// Continue leads on, to the proposal of teams.
 		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-		await waitFor(() => expect(where()).toBe("/teams"));
+		await waitFor(() => expect(where()).toBe("/find/teams"));
 	});
 
 	it("says_so_when_the_files_no_longer_prove_it", async () => {

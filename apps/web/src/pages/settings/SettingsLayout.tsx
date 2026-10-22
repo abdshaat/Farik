@@ -31,6 +31,11 @@ export const SECTIONS: readonly Section[] = [
 	},
 	{ path: "work", name: "sectionWork", summary: "sectionWorkSummary" },
 	{
+		path: "repositories",
+		name: "sectionRepositories",
+		summary: "sectionRepositoriesSummary",
+	},
+	{
 		path: "your-app",
 		name: "sectionYourApp",
 		summary: "sectionYourAppSummary",

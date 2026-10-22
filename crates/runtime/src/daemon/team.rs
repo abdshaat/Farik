@@ -116,6 +116,7 @@ pub(super) fn query(
                     .wire()
             );
             answer["kits"] = json!(kits_of(deps, &team, state.registered_apps())?);
+            answer["found_services"] = json!(found_services(deps, &team));
             answer["autopilot"] = json!(
                 catervas_store::autopilot::autopilot_on(&deps.log).map_err(|e| internal(&e))?
             );
@@ -781,6 +782,60 @@ fn at_launch(entry: &McpServerWire, apps: &[crate::registered_apps::RegisteredAp
                     && crate::registered_apps::app_for_catervas_connector(apps, command, args)
                         .is_none()
         )
+}
+
+/// The services found on this computer (`crate::connectors::FOUND_SERVICES`) that an active agent's
+/// kit offers a connector for: for each, the first active agent whose kit does and who does not hold
+/// the connector already. A file that is absent or unreadable gives none.
+fn found_services(deps: &ToolDeps, team: &Team) -> Vec<Value> {
+    let found: Vec<Value> =
+        std::fs::read_to_string(deps.files.root().join(crate::connectors::FOUND_SERVICES))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+    let mut suggested = Vec::new();
+    for service in &found {
+        let (Some(id), Some(name)) = (service["service_id"].as_str(), service["name"].as_str())
+        else {
+            continue;
+        };
+        for agent in team
+            .agents
+            .iter()
+            .filter(|agent| agent.status == AgentStatus::Active)
+        {
+            let Ok(kit) = (deps.kits)(Role::from(agent.role)) else {
+                continue;
+            };
+            let offered = kit.connectors.iter().find_map(|connector| match connector {
+                KitConnector::Server { entry, .. }
+                    if catervas_core::claude_services::catalog::match_service(
+                        entry.name.as_str(),
+                        None,
+                        None,
+                    )
+                    .is_some_and(|known| known.id == id) =>
+                {
+                    Some(entry.name.to_string())
+                }
+                _ => None,
+            });
+            let Some(server) = offered else { continue };
+            if agent
+                .mcp_servers
+                .iter()
+                .flatten()
+                .any(|held| held.name.as_str() == server)
+            {
+                continue;
+            }
+            suggested.push(json!({
+                "agent": agent.id.as_str(), "server": server, "service_id": id, "name": name,
+            }));
+            break;
+        }
+    }
+    suggested
 }
 
 /// What `team.get` says of each role on the team whose kit has a service to connect by name: the
@@ -5873,7 +5928,18 @@ pub(super) mod tests {
         more: &Value,
         allowances: &Value,
     ) -> catervas_roles::Kit {
+        fixture_kit_named(test, "fixture", more, allowances)
+    }
+
+    /// [`fixture_kit_with`], the one service called `name`.
+    pub(crate) fn fixture_kit_named(
+        test: &str,
+        name: &str,
+        more: &Value,
+        allowances: &Value,
+    ) -> catervas_roles::Kit {
         let mut connector = fixture_server(test);
+        connector["name"] = json!(name);
         connector["title"] = json!("Fixture");
         connector["about"] = json!("A server that stands in for a service.");
         connector["why"] = json!("Lets the Developer search the fixture.");
@@ -6155,6 +6221,40 @@ pub(super) mod tests {
                 .exists()
         );
         assert_eq!(harness.project.events(&[]).len(), seen);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn suggests_connecting_a_service_found() {
+        let (harness, _) = keeping("found-services");
+        let root = harness.project.deps.files.root().to_path_buf();
+        std::fs::create_dir_all(root.join(".catervas/local")).expect("the local folder");
+        std::fs::write(
+            root.join(crate::connectors::FOUND_SERVICES),
+            json!([{ "service_id": "zoho_books", "name": "Zoho Books" }]).to_string(),
+        )
+        .expect("found-services.json");
+        let found = |harness: &Harness| {
+            query(&harness.daemon, "team.get", &json!({}), "teamGetResult")["found_services"]
+                .clone()
+        };
+        // A kit that offers Zoho Books to the Developer: the suggestion names who could use it.
+        harness.project.set_kit(fixture_kit_named(
+            "found-services",
+            "zoho-books",
+            &json!({}),
+            &json!({}),
+        ));
+        assert_eq!(
+            found(&harness),
+            json!([{
+                "agent": "dev-a", "server": "zoho-books",
+                "service_id": "zoho_books", "name": "Zoho Books",
+            }])
+        );
+        // A kit that does not offer it suggests nothing.
+        harness.project.set_kit(fixture_kit("found-services"));
+        assert_eq!(found(&harness), json!([]));
     }
 
     #[test]

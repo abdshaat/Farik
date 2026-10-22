@@ -307,3 +307,56 @@
 	justify-items: start;
 	padding: var(--catervas-space-2) 0;
 }
+
+/* "Your teams" (docs/design/mockups/ManyYourTeams). */
+.tcards {
+	display: grid;
+	gap: var(--catervas-space-4);
+	max-width: 720px;
+}
+.tcard {
+	display: grid;
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+}
+.tcard h2,
+.tcard p,
+.tcard ul {
+	margin: 0;
+}
+.thead {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+	justify-content: space-between;
+}
+.tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+	padding: 0;
+	list-style: none;
+}
+.ptag {
+	padding: 0 var(--catervas-space-2);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	overflow-wrap: anywhere;
+}
+.notes {
+	padding-left: var(--catervas-space-4);
+	display: grid;
+	gap: var(--catervas-space-1);
+	color: var(--catervas-color-ink-muted);
+}
+.field {
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+.field select {
+	min-height: 36px;
+	font: inherit;
+}

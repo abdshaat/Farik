@@ -57,3 +57,10 @@
 	margin: 0;
 	padding-left: var(--catervas-space-4);
 }
+
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+	align-items: center;
+}

@@ -347,8 +347,7 @@ export function Together() {
 			{finished && (
 				<div className={styles.foot}>
 					<Button onClick={() => navigate("/find/found")}>{t("back")}</Button>
-					{/* The proposal of teams (step 06e) comes next; until it lands, All teams. */}
-					<Button kind="primary" onClick={() => navigate("/teams")}>
+					<Button kind="primary" onClick={() => navigate("/find/teams")}>
 						{t("continue")}
 					</Button>
 				</div>

@@ -170,7 +170,7 @@ Tests:
   - **Take it out** sends `repo.remove` and then `finding.choose { choice: "watch" }`.
 - `suggests_connecting_a_service_found` (`crates/runtime/src/daemon/team.rs`): asserts that a `found-services.json` with Zoho Books and an agent whose kit offers it gives the suggestion. Without the kit offering it, there is none.
 
-- [ ] `feat(web): your teams, undo, and a repository taken out`
+- [x] `feat(web): your teams, undo, and a repository taken out`
 
 ### Task 6: The journey and the spec
 

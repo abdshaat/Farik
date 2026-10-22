@@ -619,6 +619,10 @@ pub fn keys_copied(root: &std::path::Path) -> Option<(String, usize)> {
 /// computer's own preference, so it is not in the team file that travels with the repository.
 pub const CONNECTOR_SUGGESTIONS: &str = ".catervas/local/connector-suggestions.json";
 
+/// The services the owner was found to use with Claude, `[{ service_id, name }]`, written when the
+/// team was made from the proposal (spec 4.4, 6.7): this computer's own, under the project's root.
+pub const FOUND_SERVICES: &str = ".catervas/local/found-services.json";
+
 /// Adds the agent's server to `root`'s [`CONNECTOR_SUGGESTIONS`], once, so Today stops suggesting
 /// it; makes the folder and writes the file private. A file that cannot be read is replaced.
 ///

@@ -74,13 +74,14 @@ describe("settings directory", () => {
 			[en.sectionRules, "/t/shop/settings/rules"],
 			[en.sectionSpending, "/t/shop/settings/spending"],
 			[en.sectionWork, "/t/shop/settings/work"],
+			[en.sectionRepositories, "/t/shop/settings/repositories"],
 			[en.sectionYourApp, "/t/shop/settings/your-app"],
 			[en.sectionSavedTeams, "/t/shop/settings/saved-teams"],
 			[en.sectionComputer, "/t/shop/settings/computer"],
 			[en.sectionAccount, "/t/shop/settings/account"],
 		]);
 		// The team's rules have four sections of their own, not one.
-		expect(links).toHaveLength(9);
+		expect(links).toHaveLength(10);
 		expect(links.map((a) => a.textContent)).not.toContain("Your team’s rules");
 		expect(links.map((a) => a.getAttribute("aria-current"))).toEqual(
 			SECTIONS.map((s) => (s.path === "general" ? "page" : null)),

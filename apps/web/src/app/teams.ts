@@ -19,6 +19,8 @@ export type TeamRow = {
 	todayUsd: number;
 	monthUsd: number;
 	failed?: string;
+	/** A team Catervas made from the proposal that has not started a session: Undo takes it back. */
+	undoable?: boolean;
 };
 
 /** The `teams.list` answer. */

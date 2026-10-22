@@ -119,6 +119,89 @@ describe("all teams", () => {
 		expect(screen.queryByText(/limit is reached/)).toBeNull();
 	});
 
+	it("offers_undo_until_a_team_starts", async () => {
+		const { hub, sockets } = await renderApp("/teams");
+		const h = hub as FakeSocket;
+		const table: Record<string, unknown> = {
+			"finding.status": IDLE,
+			"finding.list": {
+				...NOTHING,
+				main: [
+					row({
+						key: "/home/me/recipe-cards",
+						name: "recipe-cards",
+						suggested: "watch",
+					}),
+				],
+			},
+			"finding.choose": {},
+			"teams.undo": { removed: true },
+		};
+		answerCalls(h, table);
+		const [made, started] = teamList("fresh", "going").teams;
+		await answerQuery(h, "teams.list", {
+			...teamList("fresh", "going"),
+			teams: [
+				{ ...made, name: "Fresh", status: "paused", undoable: true },
+				{ ...started, name: "Going", status: "paused", undoable: false },
+			],
+		});
+
+		// A team made from the proposal and not started: Start, Document it first and Undo.
+		const fresh = within(card("Fresh"));
+		expect(fresh.getByRole("button", { name: "Start" })).toBeTruthy();
+		expect(
+			fresh.getByRole("button", { name: "Document it first" }),
+		).toBeTruthy();
+		expect(fresh.getByRole("button", { name: "Undo" })).toBeTruthy();
+		// One that has started is only paused.
+		const going = within(card("Going"));
+		expect(going.queryByRole("button", { name: "Undo" })).toBeNull();
+		expect(
+			going.queryByRole("button", { name: "Document it first" }),
+		).toBeNull();
+
+		// Document it first is the documenting offer, on the team's own socket.
+		fireEvent.click(fresh.getByRole("button", { name: "Document it first" }));
+		const team = await waitFor(() => {
+			const s = sockets.find((one) => one.url.endsWith("/t/fresh/rpc"));
+			if (!s) throw new Error("no socket to the team");
+			return s;
+		});
+		const documenting = await waitFor(() => {
+			const frame = team.calls("command")[0];
+			if (!frame) throw new Error("no command was sent");
+			return frame;
+		});
+		expect(documenting.params).toEqual({
+			command: { command: "catervafication_start", body: {} },
+		});
+		await team.reply(documenting, { said: "documenting", events: [5] });
+
+		// Undo asks first, then removes.
+		fireEvent.click(fresh.getByRole("button", { name: "Undo" }));
+		expect(h.calls("teams.undo")).toHaveLength(0);
+		fireEvent.click(
+			within(card("Fresh")).getByRole("button", { name: "Yes, undo" }),
+		);
+		await waitFor(() =>
+			expect(h.calls("teams.undo").map((f) => f.params)).toEqual([
+				{ slug: "fresh" },
+			]),
+		);
+
+		// The projects watched, not given a team: Make a team marks Team and goes on to the proposal.
+		const watched = within(screen.getByRole("region", { name: "Watched" }));
+		expect(watched.getByText("recipe-cards")).toBeTruthy();
+		fireEvent.click(watched.getByRole("button", { name: "Make a team" }));
+		await waitFor(() =>
+			expect(h.calls("finding.choose").map((f) => f.params)).toEqual([
+				{ key: "/home/me/recipe-cards", choice: "team" },
+			]),
+		);
+		await waitFor(() => expect(where()).toBe("/find/teams"));
+	});
+
 	it("says_when_the_account_sleeps", async () => {
 		const until = "2026-10-22T15:40:00Z";
 		const { hub } = await renderApp("/teams");

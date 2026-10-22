@@ -108,6 +108,7 @@ async function today(fields: {
 	kits?: unknown[];
 	hiddenSuggestions?: unknown[];
 	requestedConnections?: unknown[];
+	foundServices?: unknown[];
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -121,6 +122,7 @@ async function today(fields: {
 		...(fields.requestedConnections && {
 			requested_connections: fields.requestedConnections,
 		}),
+		...(fields.foundServices && { found_services: fields.foundServices }),
 	});
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
@@ -2678,6 +2680,32 @@ describe("suggested connections", () => {
 		).toBe("/t/shop/team/mira?connect=linear");
 		expect(second.textContent).toContain("Notion");
 		expect(second.textContent).toContain(KIT_NOTION.about);
+	});
+
+	it("lists_a_service_found_after_the_asked_ones", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+			foundServices: [
+				{
+					agent: "mira",
+					server: "linear",
+					service_id: "linear",
+					name: "Linear",
+				},
+			],
+		});
+		const [first, second] = items() as [HTMLElement, HTMLElement];
+		expect(first.textContent).toContain("Linear");
+		expect(first.textContent).toContain(
+			"You use Linear with Claude. Connect it for Mira?",
+		);
+		expect(
+			within(first)
+				.getByRole("link", { name: en.suggestionsConnect })
+				.getAttribute("href"),
+		).toBe("/t/shop/team/mira?connect=linear");
+		expect(second.textContent).toContain("Notion");
 	});
 
 	it("keeps_a_requested_connection_hidden_when_the_user_said_not_now", async () => {

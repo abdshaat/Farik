@@ -167,6 +167,7 @@ export function teamList(...slugs: string[]) {
 			waiting: 0,
 			today_usd: 0,
 			month_usd: 0,
+			undoable: false,
 		})),
 		current: slugs[0] ?? null,
 		account_asleep_until: null,

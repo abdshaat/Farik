@@ -1246,6 +1246,21 @@
             }
           }
         },
+        "found_services": {
+          "type": "array",
+          "description": "The services found on this computer that an active agent's kit offers a connector for (docs/SPEC.md 6.7), read from .catervas/local/found-services.json, which the proposal wrote when it made the team: one entry for each found service, with the first active agent whose kit offers it and does not hold it. Today suggests connecting each, as 'You use Zoho Books with Claude. Connect it for Finn?'.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["agent", "server", "service_id", "name"],
+            "properties": {
+              "agent": { "type": "string" },
+              "server": { "type": "string" },
+              "service_id": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          }
+        },
         "kits": {
           "type": "array",
           "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Catervas runs itself, is not listed, and nor is a role with no service.",
@@ -4833,11 +4848,20 @@
       }
     },
     "proposalGetResult": {
-      "description": "cards: id (a hash of the sorted keys of the group, stable), kind (new_team or add_to_team), projects (key, name, folder with home written ~, the services it uses through Claude), jobs (their names), why (one sentence for each reason the projects are together), name, purpose (when there is one), template (a ready-made team's or a saved team's slug), folder (a new folder's, written from home, for work done through connectors), from_claude (name or purpose came from Claude and not yet the owner's), and for add_to_team the slug and name of the team.",
+      "description": "cards: id (a hash of the sorted keys of the group, stable), kind (new_team or add_to_team), projects (key, name, folder with home written ~, the services it uses through Claude), jobs (their names), why (one sentence for each reason the projects are together), name, purpose (when there is one), template (a ready-made team's or a saved team's slug), folder (a new folder's, written from home, for work done through connectors), from_claude (name or purpose came from Claude and not yet the owner's), and for add_to_team the slug and name of the team. templates are the ready-made teams and the owner\u0027s saved teams a card can start from, by slug and name.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["cards"],
+      "required": ["cards", "templates"],
       "properties": {
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "name"],
+            "properties": { "slug": { "type": "string" }, "name": { "type": "string" } }
+          }
+        },
         "cards": {
           "type": "array",
           "items": {

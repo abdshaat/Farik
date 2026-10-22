@@ -14,11 +14,14 @@ export type Suggestion = {
 	service: KitService;
 	/** The agent's own reason, when it asked for this service (ADR 0063). */
 	why?: string;
+	/** The service as the owner uses it with Claude, when finding the owner's projects found it. */
+	found?: string;
 };
 export const SUGGESTIONS_SHOWN = 2;
 
 type Pair = { agent: string; server: string };
 type Requested = Pair & { why: string };
+type Found = Pair & { name: string };
 
 /**
  * The kit services an active agent lacks, in the team's order and each kit's order: not one the
@@ -30,6 +33,7 @@ export function suggestedConnections(
 	kits: RoleKit[],
 	hidden: Pair[],
 	requested: Requested[] = [],
+	found: Found[] = [],
 ): Suggestion[] {
 	const candidates = team.agents
 		.filter((agent) => agent.status === "active")
@@ -51,10 +55,22 @@ export function suggestedConnections(
 		);
 		return found ? [{ ...found, why: r.why }] : [];
 	});
+	// A service the owner uses with Claude comes after the asked ones: it is a guess, theirs is a request.
+	const used = found.flatMap((f) => {
+		const match = candidates.find(
+			(c) =>
+				c.agent.id === f.agent &&
+				c.service.name === f.server &&
+				!asked.some((a) => a.agent === c.agent && a.service === c.service),
+		);
+		return match ? [{ ...match, found: f.name }] : [];
+	});
+	const listed = [...asked, ...used];
 	return [
-		...asked,
+		...listed,
 		...candidates.filter(
-			(c) => !asked.some((a) => a.agent === c.agent && a.service === c.service),
+			(c) =>
+				!listed.some((a) => a.agent === c.agent && a.service === c.service),
 		),
 	];
 }
@@ -65,6 +81,7 @@ export function SuggestedConnections(props: {
 	kits: RoleKit[];
 	hidden: Pair[];
 	requested?: Requested[];
+	found?: Found[];
 }) {
 	const { client } = useConnection();
 	const [gone, setGone] = useState<Pair[]>([]);
@@ -76,6 +93,7 @@ export function SuggestedConnections(props: {
 		props.kits,
 		[...props.hidden, ...gone],
 		props.requested,
+		props.found,
 	);
 	if (all.length === 0) return null;
 	const shown = open ? all : all.slice(0, SUGGESTIONS_SHOWN);
@@ -105,7 +123,7 @@ export function SuggestedConnections(props: {
 				className={styles.rows}
 				aria-label={t("suggestionsTitle")}
 			>
-				{shown.map(({ agent, service, why }) => {
+				{shown.map(({ agent, service, why, found }) => {
 					const id = `suggestion-${agent.id}-${service.name}`;
 					return (
 						<li key={id} className={styles.row}>
@@ -115,10 +133,15 @@ export function SuggestedConnections(props: {
 								<span>
 									{why
 										? t("suggestionsAsked", { agent: agent.displayName, why })
-										: t("suggestionsLine", {
-												agent: agent.displayName,
-												about: service.about,
-											})}{" "}
+										: found
+											? t("suggestionsFound", {
+													service: found,
+													agent: agent.displayName,
+												})
+											: t("suggestionsLine", {
+													agent: agent.displayName,
+													about: service.about,
+												})}{" "}
 									<InfoTip id={`${id}-info`}>{service.why}</InfoTip>
 								</span>
 							</div>

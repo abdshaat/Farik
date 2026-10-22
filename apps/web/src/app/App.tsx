@@ -15,6 +15,7 @@ import { Scanning } from "../pages/find/Scanning.tsx";
 import { Services } from "../pages/find/Services.tsx";
 import { Together } from "../pages/find/Together.tsx";
 import { WhereClaude } from "../pages/find/WhereClaude.tsx";
+import { YourTeams } from "../pages/find/YourTeams.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { MarketingPlan } from "../pages/MarketingPlan.tsx";
@@ -29,6 +30,7 @@ import { Account } from "../pages/settings/Account.tsx";
 import { AllowedActions } from "../pages/settings/AllowedActions.tsx";
 import { Computer } from "../pages/settings/Computer.tsx";
 import { General } from "../pages/settings/General.tsx";
+import { Repositories } from "../pages/settings/Repositories.tsx";
 import { Rules } from "../pages/settings/Rules.tsx";
 import { SavedTeamsPage } from "../pages/settings/SavedTeamsPage.tsx";
 import {
@@ -84,6 +86,7 @@ export function App() {
 			<Route path="/find/github" element={<ConnectGithub />} />
 			<Route path="/find/services" element={<Services />} />
 			<Route path="/find/together" element={<Together />} />
+			<Route path="/find/teams" element={<YourTeams />} />
 			{/* The steps after the project talk to the team just taken on, the current one. */}
 			<Route element={<CurrentScope />}>
 				<Route path="/setup/scan" element={<SetupScan />} />
@@ -143,6 +146,7 @@ export function App() {
 						<Route path="rules" element={<Rules />} />
 						<Route path="spending" element={<Spending />} />
 						<Route path="work" element={<Work />} />
+						<Route path="repositories" element={<Repositories />} />
 						<Route path="your-app" element={<YourApp />} />
 						<Route path="saved-teams" element={<SavedTeamsPage />} />
 						<Route path="computer" element={<Computer />} />
