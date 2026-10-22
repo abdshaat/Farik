@@ -219,4 +219,51 @@ describe("connection", () => {
 		expect(status()).toBe("open");
 		expect(second.calls("subscribe")[0]?.params).toEqual({ from_seq: 4 });
 	});
+
+	it("notifies_in_the_browser_when_the_digest_is_due", async () => {
+		const shown: { title: string; options: NotificationOptions }[] = [];
+		vi.stubGlobal(
+			"Notification",
+			Object.assign(
+				function Notification(title: string, options: NotificationOptions) {
+					shown.push({ title, options });
+				},
+				{ permission: "granted", requestPermission: async () => "granted" },
+			),
+		);
+		vi.stubGlobal("fetch", vi.fn(fakeFetch({ "GET /session": 204 })));
+		const { factory, sockets } = socketsMade();
+		render(
+			<ConnectionProvider socketFactory={factory}>
+				<Status />
+			</ConnectionProvider>,
+		);
+		const socket = await waitFor(() => {
+			const s = sockets[0];
+			if (!s) throw new Error("no socket was opened");
+			return s;
+		});
+		act(() => socket.emit("open", {}));
+		await waitFor(() => expect(status()).toBe("open"));
+		const due = {
+			at: "2026-10-22T09:00:00Z",
+			count: 9,
+			headline: "A price check failed, and Tidepool's last deploy failed.",
+			time: "09:00",
+		};
+		act(() => socket.notify("reminders.due", due));
+		await waitFor(() => expect(shown).toHaveLength(1));
+		expect(shown[0]?.title).toBe("Catervas · 09:00");
+		expect(shown[0]?.options.body).toBe(
+			"9 things need you. A price check failed, and Tidepool's last deploy failed.",
+		);
+		// The same digest, told again, shows nothing more; the next day's does.
+		act(() => socket.notify("reminders.due", due));
+		await act(async () => {});
+		expect(shown).toHaveLength(1);
+		act(() =>
+			socket.notify("reminders.due", { ...due, at: "2026-10-23T09:00:00Z" }),
+		);
+		await waitFor(() => expect(shown).toHaveLength(2));
+	});
 });

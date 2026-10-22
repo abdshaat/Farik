@@ -13,6 +13,8 @@ import { AllTeamsFinding } from "./find/AllTeamsFinding.tsx";
 import { ExportCard } from "./find/ExportCard.tsx";
 import { findingSaid, useFoundList } from "./find/finding.ts";
 import { dollars } from "./Gate.tsx";
+import reminderStyles from "./NeedsYou.module.css";
+import { useDigest } from "./reminders.ts";
 
 /** What a team's badge says. */
 function badge(team: TeamRow): string {
@@ -32,6 +34,7 @@ export function AllTeams() {
 	const navigate = useNavigate();
 	const created = (useLocation().state as { created?: number } | null)?.created;
 	const { list: found, again: lookAgain } = useFoundList(undefined);
+	const { digest } = useDigest();
 	const [asking, setAsking] = useState<string>();
 	const [undoing, setUndoing] = useState<string>();
 	const [said, setSaid] = useState<Record<string, string>>({});
@@ -127,6 +130,27 @@ export function AllTeams() {
 						? t("teamsCreatedOne")
 						: t("teamsCreated", { count: created })}
 				</p>
+			)}
+			{digest && digest.count > 0 && (
+				<section
+					className={reminderStyles.band}
+					aria-label={t(
+						digest.count === 1 ? "needsYouBandOne" : "needsYouBand",
+						{
+							count: digest.count,
+						},
+					)}
+				>
+					<p>
+						<strong>
+							{t(digest.count === 1 ? "needsYouBandOne" : "needsYouBand", {
+								count: digest.count,
+							})}
+						</strong>{" "}
+						{digest.headline}
+					</p>
+					<Link to="/needs-you">{t("needsYouSeeAll")}</Link>
+				</section>
 			)}
 			<AllTeamsFinding />
 			<ExportCard />

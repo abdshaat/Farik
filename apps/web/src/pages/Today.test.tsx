@@ -22,6 +22,7 @@ import {
 	UNREAD_ROW,
 } from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { answerCalls } from "../test/finding.ts";
 import { CARD, docs as folderDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
 import { KIT_ADS, KIT_LINEAR, KIT_NOTION } from "../test/kits.ts";
@@ -53,6 +54,7 @@ import {
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import { APPROVED, INTERVIEWING } from "../test/productPlan.ts";
+import { DIGEST } from "../test/reminders.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -139,6 +141,24 @@ async function today(fields: {
 
 describe("today", () => {
 	afterEach(() => vi.unstubAllGlobals());
+
+	it("shows_the_team_s_part_of_what_needs_you_today", async () => {
+		const { s } = await today({});
+		const item = DIGEST.groups[0]?.items[0];
+		answerCalls(s, {
+			"reminders.mine": { at: DIGEST.at, count: 1, items: [item] },
+		});
+		const part = await screen.findByRole("region", { name: en.needsYouTitle });
+		expect(
+			within(part).getByText("Add CSV export · recipe-cards"),
+		).toBeTruthy();
+		expect(
+			within(part).getByRole("button", { name: en.needsYouCopyResume }),
+		).toBeTruthy();
+		expect(
+			within(part).getByRole("button", { name: en.needsYouDismiss }),
+		).toBeTruthy();
+	});
 
 	it("shows_what_the_team_flagged_and_did_on_its_own", async () => {
 		const at = new Date().toISOString();

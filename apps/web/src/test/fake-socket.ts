@@ -44,6 +44,12 @@ export class FakeSocket implements SocketLike {
 			}),
 		});
 	}
+	/** Pushes a notification (a frame with a method and no id) the way the daemon does. */
+	notify(method: string, params: object) {
+		this.emit("message", {
+			data: JSON.stringify({ jsonrpc: "2.0", method, params }),
+		});
+	}
 	/** Answers a request the client sent, as the daemon would, once the page has taken the answer in. */
 	reply(frame: Frame, result: unknown) {
 		return this.settle({ jsonrpc: "2.0", id: frame.id, result });

@@ -39,6 +39,7 @@ import {
 import { FlaggedByTheTeam, type FlaggedRow } from "./FlaggedByTheTeam.tsx";
 import { GoalCard, type GoalState } from "./GoalCard.tsx";
 import { channelName, longRange, money } from "./marketing.ts";
+import { NeedsYouPart } from "./NeedsYouPart.tsx";
 import { type OrderWaiting, PurchaseOrderRow } from "./OrderRow.tsx";
 import type { OrderAsk } from "./orders.ts";
 import {
@@ -338,6 +339,7 @@ export function Today() {
 			{documenting?.offered && (
 				<CatervaficationCard again={askDocumentingAgain} />
 			)}
+			<NeedsYouPart />
 			{autopilot && (
 				<FlaggedByTheTeam rows={autopilot.flagged} agents={agents} />
 			)}

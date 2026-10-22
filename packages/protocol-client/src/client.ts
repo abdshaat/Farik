@@ -112,7 +112,13 @@ export type MethodName =
 	| "procurement_mailbox.connect"
 	| "procurement_mailbox.disconnect"
 	| "procurement_mailbox.check"
-	| "marketing_budget.raise";
+	| "marketing_budget.raise"
+	| "reminders.get"
+	| "reminders.set"
+	| "reminders.snooze"
+	| "reminders.dismiss"
+	| "reminders.give"
+	| "reminders.mine";
 export type Status = "connecting" | "open" | "closed";
 
 /** The part of the browser `WebSocket` the client uses. */
@@ -144,6 +150,8 @@ export type DaemonClient = {
 	command(c: Command): Promise<CommandReply>;
 	query(name: QueryName, params: object): Promise<unknown>;
 	call(method: MethodName, params: object): Promise<unknown>;
+	/** Hears the daemon's pushes other than events, such as `reminders.due`; `params` in camelCase. */
+	onNotice(method: string, cb: (params: unknown) => void): void;
 	onStatus(cb: (s: Status) => void): void;
 	close(): void;
 };
@@ -156,6 +164,7 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 	const queued: string[] = [];
 	const listeners: ((s: Status) => void)[] = [];
 	const handlers: ((e: Event) => void)[] = [];
+	const notices: { method: string; cb: (params: unknown) => void }[] = [];
 	let nextId = 1;
 	let status: Status = "connecting";
 
@@ -184,6 +193,12 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 		if (frame.method === "event" && frame.params) {
 			const event = toCamel(frame.params.event) as Event;
 			for (const h of handlers) h(event);
+			return;
+		}
+		// A push that is not an event has a method and no id.
+		if (frame.method && frame.id == null) {
+			const params = toCamel(frame.params);
+			for (const n of notices) if (n.method === frame.method) n.cb(params);
 			return;
 		}
 		const p = frame.id == null ? undefined : pending.get(frame.id);
@@ -224,6 +239,9 @@ export function connect(url: string, socket?: SocketLike): DaemonClient {
 			request("command", { command }) as Promise<CommandReply>,
 		query: (name, params) => request("query", { name, params }),
 		call: (method, params) => request(method, params),
+		onNotice(method, cb) {
+			notices.push({ method, cb });
+		},
 		onStatus(cb) {
 			listeners.push(cb);
 			cb(status);

@@ -206,7 +206,7 @@ Tests:
 - `sets_the_reminder_s_time_and_notices` (`pages/ThisComputer.test.tsx`): asserts that changing the time and the two switches sends `reminders.set`.
 - `notifies_in_the_browser_when_the_digest_is_due` (`app/connection.test.tsx`): asserts that a `reminders.due` push with permission granted makes one `Notification`, and a second push for the same digest makes none.
 
-- [ ] `feat(web): needs you today`
+- [x] `feat(web): needs you today`
 
 ### Task 7: Spec
 

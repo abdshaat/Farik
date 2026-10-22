@@ -1,6 +1,6 @@
-import { Button, TextField } from "@catervas/ui";
+import { Button, Switch, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
-import { useConnection } from "../app/connection.tsx";
+import { useConnection, useHub } from "../app/connection.tsx";
 import { commandSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
@@ -8,12 +8,59 @@ import styles from "./AllTeams.module.css";
 import { FindingSettings } from "./find/FindingSettings.tsx";
 import { GithubSettings } from "./find/GithubSettings.tsx";
 import { dollars } from "./Gate.tsx";
+import { useDigest } from "./reminders.ts";
 
 type Computer = {
 	agentsAtOnce: number | null;
 	dailyCapUsd: number | null;
 	spentTodayUsd: number;
 };
+
+/** The daily reminder: when it comes, and where its notice shows. */
+function ReminderSettings() {
+	const { client } = useHub();
+	const { digest, again } = useDigest();
+	const [said, setSaid] = useState<string>();
+	if (!digest) return null;
+	const set = async (change: object) => {
+		setSaid(undefined);
+		try {
+			await client?.call("reminders.set", change);
+		} catch (e) {
+			setSaid(saidAll(e));
+		}
+		again();
+	};
+	return (
+		<section className={styles.card} aria-labelledby="reminders-heading">
+			<h2 id="reminders-heading">{t("remindersTitle")}</h2>
+			<div>
+				<label htmlFor="reminder-time">{t("remindersAt")}</label>{" "}
+				<input
+					id="reminder-time"
+					type="time"
+					value={digest.time}
+					onChange={(e) => e.target.value && set({ time: e.target.value })}
+				/>
+			</div>
+			<Switch
+				id="reminder-browser"
+				label={t("remindersBrowser")}
+				description={t("remindersBrowserHint")}
+				checked={digest.browser}
+				onChange={(browser) => set({ browser })}
+			/>
+			<Switch
+				id="reminder-system"
+				label={t("remindersSystem")}
+				description={t("remindersSystemHint")}
+				checked={digest.system}
+				onChange={(system) => set({ system })}
+			/>
+			{said && <p role="alert">{said}</p>}
+		</section>
+	);
+}
 
 /** This computer: the limits all the teams share (ADR 0059). */
 export function ThisComputer() {
@@ -101,6 +148,7 @@ export function ThisComputer() {
 			</form>
 			<GithubSettings />
 			<FindingSettings />
+			<ReminderSettings />
 		</div>
 	);
 }

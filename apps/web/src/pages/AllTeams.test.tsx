@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerCalls, IDLE, NOTHING, row } from "../test/finding.ts";
+import { DIGEST } from "../test/reminders.ts";
 import {
 	answerQuery,
 	renderApp,
@@ -117,6 +118,26 @@ describe("all teams", () => {
 		).toBe("/t/shop/");
 		expect(within(waiting).queryByText(/Bakery/)).toBeNull();
 		expect(screen.queryByText(/limit is reached/)).toBeNull();
+	});
+
+	it("shows_the_band_of_what_needs_you_today", async () => {
+		const { hub } = await renderApp("/teams");
+		const h = hub as FakeSocket;
+		answerCalls(h, { "reminders.get": DIGEST });
+		await answerQuery(h, "teams.list", listing());
+		const band = await screen.findByRole("region", {
+			name: "9 things need you today.",
+		});
+		expect(
+			within(band).getByText(
+				"A price check failed, and Tidepool's last deploy failed.",
+			),
+		).toBeTruthy();
+		expect(
+			within(band)
+				.getByRole("link", { name: en.needsYouSeeAll })
+				.getAttribute("href"),
+		).toBe("/needs-you");
 	});
 
 	it("offers_undo_until_a_team_starts", async () => {

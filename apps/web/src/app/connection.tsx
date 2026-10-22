@@ -12,6 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { type Due, showDue } from "./notices.ts";
 
 type Status =
 	| "checking"
@@ -87,6 +88,8 @@ export function ConnectionProvider(props: {
 		// While Catervas restarts on a chosen project: until when to keep trying, and whether it was tried yet.
 		let reopenUntil: number | undefined;
 		let retried = false;
+		// The digests already shown as a browser notice.
+		const noticed = new Set<string>();
 
 		const lose = () => {
 			if (stopped) return;
@@ -107,6 +110,9 @@ export function ConnectionProvider(props: {
 			current = c;
 			setClient(c);
 			if (reopenUntil === undefined) setStatus("connecting");
+			// The hub tells every page when the daily digest is due; a team's socket is never told.
+			if (!inner)
+				c.onNotice("reminders.due", (due) => showDue(due as Due, noticed));
 			c.onStatus((s) => {
 				if (stopped || c !== current) return;
 				if (s === "closed") return lose();

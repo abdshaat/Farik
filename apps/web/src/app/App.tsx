@@ -19,6 +19,7 @@ import { YourTeams } from "../pages/find/YourTeams.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { MarketingPlan } from "../pages/MarketingPlan.tsx";
+import { NeedsYou } from "../pages/NeedsYou.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { Opening } from "../pages/Opening.tsx";
 import { PlanEditor } from "../pages/PlanEditor.tsx";
@@ -108,6 +109,7 @@ export function App() {
 			<Route element={<Shell />}>
 				<Route path="/teams" element={<AllTeams />} />
 				<Route path="/computer" element={<ThisComputer />} />
+				<Route path="/needs-you" element={<NeedsYou />} />
 			</Route>
 			{/* Each team's pages are under its own address (ADR 0059). */}
 			<Route path="/t/:team" element={<TeamScope />}>

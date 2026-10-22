@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import { answerCalls, IDLE, row } from "../test/finding.ts";
+import { DIGEST } from "../test/reminders.ts";
 import { answerQuery, renderApp } from "../test/render-app.tsx";
 
 describe("this computer", () => {
@@ -68,6 +69,42 @@ describe("this computer", () => {
 		);
 		const alert = await screen.findByRole("alert");
 		expect(alert.textContent).toBe(en.refuseAgentsAtOnce);
+	});
+	it("sets_the_reminder_s_time_and_notices", async () => {
+		const { hub } = await renderApp("/computer");
+		const h = hub as FakeSocket;
+		answerCalls(h, {
+			"reminders.get": { ...DIGEST, count: 0, groups: [] },
+			"reminders.set": {},
+		});
+		await answerQuery(h, "computer.get", {
+			agents_at_once: null,
+			daily_cap_usd: null,
+			spent_today_usd: 0,
+		});
+		expect(
+			await screen.findByRole("heading", { name: en.remindersTitle }),
+		).toBeTruthy();
+		const time = (await screen.findByLabelText(
+			en.remindersAt,
+		)) as HTMLInputElement;
+		expect(time.value).toBe("09:00");
+		fireEvent.change(time, { target: { value: "07:30" } });
+		const sent = (n: number) =>
+			waitFor(() => {
+				const frame = h.calls("reminders.set")[n];
+				if (!frame) throw new Error(`no reminders.set number ${n}`);
+				return frame;
+			});
+		expect((await sent(0)).params).toEqual({ time: "07:30" });
+
+		const browser = screen.getByRole("switch", { name: /In the browser/ });
+		const computer = screen.getByRole("switch", { name: /From the computer/ });
+		expect(browser.getAttribute("aria-checked")).toBe("true");
+		fireEvent.click(browser);
+		expect((await sent(1)).params).toEqual({ browser: false });
+		fireEvent.click(computer);
+		expect((await sent(2)).params).toEqual({ system: false });
 	});
 	it("pauses_finding_and_forgets_everything", async () => {
 		const { hub } = await renderApp("/computer");

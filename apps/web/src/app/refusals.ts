@@ -30,6 +30,11 @@ const WORDS: Record<string, keyof typeof en> = {
 	agents_at_once_out_of_range: "refuseAgentsAtOnce",
 	daily_cap_out_of_range: "refuseComputerCap",
 	team_unknown: "refuseTeamUnknown",
+	// The daily reminder (SPEC 4.4).
+	no_team_for_this: "refuseNoTeamForThis",
+	unknown_item: "refuseReminderGone",
+	cannot_give: "refuseReminderCannotGive",
+	bad_time: "refuseReminderTime",
 	// The human's commands (SPEC 4.2), refused by the orchestrator with `code: detail`.
 	already_paused: "refuseAlreadyPaused",
 	not_paused: "refuseNotPaused",

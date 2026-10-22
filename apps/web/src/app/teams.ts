@@ -54,7 +54,8 @@ export function forgetTeam() {
 }
 
 /** The addresses that belong to no team: setup, All teams, This computer, a team's own. */
-const NOT_A_TEAMS = /^\/(setup|teams|computer|connect|t)([/?#]|$)/;
+const NOT_A_TEAMS =
+	/^\/(setup|teams|computer|needs-you|find|connect|t)([/?#]|$)/;
 
 /** Whether `path` is a page of a team, which `/t/<team>` goes before. */
 export function isTeamAddress(path: string): boolean {
@@ -117,6 +118,6 @@ export function samePage(page: string): string {
 	if (/^\/(tasks|requests|files|marketing)\//.test(page)) return "/";
 	if (/^\/team\/[^/]+/.test(page)) return "/team";
 	if (/^\/channel\/[^/]+/.test(page)) return "/channel";
-	if (/^\/(teams|computer)/.test(page)) return "/";
+	if (/^\/(teams|computer|needs-you)/.test(page)) return "/";
 	return page;
 }
