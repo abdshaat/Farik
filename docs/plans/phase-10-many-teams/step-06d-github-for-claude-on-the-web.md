@@ -121,7 +121,7 @@ Tests (`pages/find/Github.test.tsx`):
   - A `github` row on Found offers Watch and **Copy to this computer**, which sends `github.copy` after the folder pick and shows "Copied to".
   - This computer shows "GitHub: connected as octo" with **Disconnect**.
 
-- [ ] `feat(web): connect github and copy a repository to this computer`
+- [x] `feat(web): connect github and copy a repository to this computer`
 
 ### Task 5: Spec
 

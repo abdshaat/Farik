@@ -12,6 +12,7 @@ import { ExportCard } from "./ExportCard.tsx";
 import styles from "./find.module.css";
 import {
 	type Choice,
+	type ClaudeWork,
 	counted,
 	FOUND_SEEN,
 	type FoundRow,
@@ -48,6 +49,32 @@ function meta(
 	return [when, row.services.join(", ")].filter(Boolean).join(" · ");
 }
 
+/** What Claude on the web made in a repository, in words: "2 branches from Claude on the web · 1 pull request (draft)". */
+export function claudeWorkWords(work: ClaudeWork[]): string {
+	const branches = work.filter((one) => one.kind === "branch").length;
+	const pulls = work.filter((one) => one.kind === "pull");
+	const drafts = pulls.filter((one) => one.draft).length;
+	const pullWords = counted(pulls.length, t("githubPullOne"), (count) =>
+		t("githubPulls", { count }),
+	);
+	return [
+		branches > 0
+			? counted(branches, t("githubBranchOne"), (count) =>
+					t("githubBranches", { count }),
+				)
+			: "",
+		pulls.length === 0
+			? ""
+			: drafts === 0
+				? pullWords
+				: pulls.length === 1
+					? t("githubPullDraft", { pulls: pullWords })
+					: t("githubPullsDrafts", { pulls: pullWords, count: drafts }),
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
 /** Team, Watch and Ignore for one row, the chosen one filled. */
 function Pick(props: {
 	row: FoundRow;
@@ -56,7 +83,9 @@ function Pick(props: {
 }) {
 	// A claude.ai Project or a job is watched; it joins a team only by a proof (docs/design/many-teams.md).
 	const choices =
-		props.row.kind === "claude_ai" || props.row.kind === "job"
+		props.row.kind === "claude_ai" ||
+		props.row.kind === "job" ||
+		props.row.kind === "github"
 			? CHOICES.filter((choice) => choice !== "team")
 			: CHOICES;
 	return (
@@ -87,6 +116,7 @@ function Item(props: {
 	onChoose: (choice: Choice) => void;
 	onSeparate: (folder: string) => void;
 	onLocate: () => void;
+	onCopy: () => void;
 }) {
 	const { row } = props;
 	const [open, setOpen] = useState(false);
@@ -142,7 +172,32 @@ function Item(props: {
 			) : (
 				<Pick row={row} value={props.value} onChoose={props.onChoose} />
 			)}
-			<p className={styles.meta}>{meta(row, props.section)}</p>
+			{row.kind === "github" ? (
+				<>
+					<p className={styles.meta}>
+						{t("githubOnGithub")}
+						{row.github?.notSeenLately && ` · ${t("githubNotSeen")}`}
+					</p>
+					<p className={styles.meta}>
+						{row.lastAt && (
+							<span>
+								{t("githubPushed", {
+									when: whenWorked(row.lastAt).toLowerCase(),
+								})}
+							</span>
+						)}
+						{row.lastAt && (row.claudeWork?.length ?? 0) > 0 && " · "}
+						{(row.claudeWork?.length ?? 0) > 0 && (
+							<span>{claudeWorkWords(row.claudeWork ?? [])}</span>
+						)}
+					</p>
+					<span className={styles.actions}>
+						<Button onClick={props.onCopy}>{t("githubCopy")}</Button>
+					</span>
+				</>
+			) : (
+				<p className={styles.meta}>{meta(row, props.section)}</p>
+			)}
 			{open && several && (
 				<div id={panel} className={styles.panel}>
 					<p>
@@ -200,6 +255,8 @@ export function Found() {
 	const [said, setSaid] = useState<string>();
 	const [locating, setLocating] = useState<FoundRow>();
 	const [adding, setAdding] = useState(false);
+	const [copying, setCopying] = useState<FoundRow>();
+	const [copied, setCopied] = useState<string>();
 
 	// What the owner has seen of the list is what "new projects found" counts from.
 	useEffect(() => {
@@ -257,6 +314,7 @@ export function Found() {
 					onChoose={(choice) => choose(row, choice)}
 					onSeparate={(folder) => separate(row, folder)}
 					onLocate={() => setLocating(row)}
+					onCopy={() => setCopying(row)}
 				/>
 			))}
 		</ul>
@@ -334,6 +392,7 @@ export function Found() {
 					)}
 				</>
 			)}
+			{copied && <p role="status">{t("githubCopied", { folder: copied })}</p>}
 			{said && <p role="alert">{said}</p>}
 			<div className={styles.foot}>
 				<Button onClick={() => (first ? navigate("/teams") : navigate(-1))}>
@@ -356,6 +415,17 @@ export function Found() {
 					}}
 				/>
 			)}
+			{copying && (
+				<CopyDialog
+					row={copying}
+					onClose={() => setCopying(undefined)}
+					onCopied={(folder) => {
+						setCopying(undefined);
+						setCopied(tilde(folder));
+						again();
+					}}
+				/>
+			)}
 			{adding && (
 				<AddProjectDialog
 					onClose={() => setAdding(false)}
@@ -366,6 +436,48 @@ export function Found() {
 				/>
 			)}
 		</Wizard>
+	);
+}
+
+/** Copy a repository of GitHub's to this computer: the owner picks the folder to put it in (journey C, frame 6). */
+function CopyDialog(props: {
+	row: FoundRow;
+	onClose: () => void;
+	onCopied: (folder: string) => void;
+}) {
+	const { client } = useHub();
+	const [busy, setBusy] = useState(false);
+	const [said, setSaid] = useState<string>();
+	const fullName = props.row.github?.fullName ?? props.row.name;
+	const use = async (parent: string) => {
+		setBusy(true);
+		setSaid(undefined);
+		try {
+			const answer = (await client?.call("github.copy", {
+				fullName,
+				parent,
+			})) as { folder: string };
+			props.onCopied(answer.folder);
+		} catch (e) {
+			setSaid(findingSaid(e, "githubCopyFailed"));
+		} finally {
+			setBusy(false);
+		}
+	};
+	return (
+		<Dialog
+			open
+			title={t("githubCopyTitle", { name: props.row.name })}
+			onClose={props.onClose}
+		>
+			<ul className={styles.legend}>
+				<li>{t("githubCopyFrom")}</li>
+				<li>{t("githubCopyNothing")}</li>
+			</ul>
+			<p>{t("githubPutIn")}</p>
+			<FolderBrowser mode="parent" busy={busy} onUse={use} />
+			{said && <p role="alert">{said}</p>}
+		</Dialog>
 	);
 }
 

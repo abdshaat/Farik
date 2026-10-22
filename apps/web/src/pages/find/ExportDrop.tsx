@@ -120,13 +120,12 @@ export function ExportDrop() {
 					onClick={() => {
 						// Nothing is called: the card on All teams waits for the export.
 						keep(EXPORT_PENDING, "1");
-						navigate("/find/services");
+						navigate("/find/github");
 					}}
 				>
 					{t("exportLater")}
 				</Button>
-				{/* GitHub, step 2 of 3, is step 06d's; until it lands this goes to the services. */}
-				<Button kind="primary" onClick={() => navigate("/find/services")}>
+				<Button kind="primary" onClick={() => navigate("/find/github")}>
 					{t("exportNext")}
 				</Button>
 			</div>

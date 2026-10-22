@@ -6,6 +6,7 @@ import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";
 import styles from "./AllTeams.module.css";
 import { FindingSettings } from "./find/FindingSettings.tsx";
+import { GithubSettings } from "./find/GithubSettings.tsx";
 import { dollars } from "./Gate.tsx";
 
 type Computer = {
@@ -98,6 +99,7 @@ export function ThisComputer() {
 				{saved && <p role="status">{t("computerSaved")}</p>}
 				{said && <p role="alert">{said}</p>}
 			</form>
+			<GithubSettings />
 			<FindingSettings />
 		</div>
 	);

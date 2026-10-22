@@ -8,6 +8,7 @@ import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Files } from "../pages/Files.tsx";
+import { ConnectGithub } from "../pages/find/ConnectGithub.tsx";
 import { ExportDrop } from "../pages/find/ExportDrop.tsx";
 import { Found } from "../pages/find/Found.tsx";
 import { Scanning } from "../pages/find/Scanning.tsx";
@@ -79,6 +80,7 @@ export function App() {
 			<Route path="/find/scanning" element={<Scanning />} />
 			<Route path="/find/found" element={<Found />} />
 			<Route path="/find/export" element={<ExportDrop />} />
+			<Route path="/find/github" element={<ConnectGithub />} />
 			<Route path="/find/services" element={<Services />} />
 			{/* The steps after the project talk to the team just taken on, the current one. */}
 			<Route element={<CurrentScope />}>

@@ -183,6 +183,14 @@ const WORDS: Record<string, keyof typeof en> = {
 	home_itself: "refuseFolderIsHome",
 	not_a_repository: "refuseFolderNotRepository",
 	not_the_top: "refuseFolderNotTop",
+	// GitHub for an owner who uses Claude on the web (SPEC 4.4; ADR 0059).
+	github_token_refused: "refuseGithubTokenRefused",
+	github_rate_limited: "refuseGithubRateLimited",
+	github_unreachable: "refuseGithubUnreachable",
+	github_not_connected: "refuseGithubNotConnected",
+	no_secret_store: "refuseNoSecretStore",
+	folder_taken: "refuseFolderTaken",
+	copy_failed: "refuseCopyFailed",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

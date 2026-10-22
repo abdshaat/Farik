@@ -118,6 +118,8 @@ describe("claude on the web, without GitHub", () => {
 
 		// Later: nothing is called, and the card waits on All teams.
 		fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+		await waitFor(() => expect(where()).toBe("/find/github"));
+		fireEvent.click(await screen.findByRole("button", { name: "Skip" }));
 		await waitFor(() => expect(where()).toBe("/find/services"));
 
 		// Tapping the services declares them.

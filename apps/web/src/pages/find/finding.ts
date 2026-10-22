@@ -112,7 +112,7 @@ export type FoundRow = {
 	/** The project's key: its normalised repository address, its real path, a connector project's name, or a claude.ai uuid. */
 	key: string;
 	name: string;
-	kind: "folder" | "connector" | "claude_ai" | "hand" | "job";
+	kind: "folder" | "connector" | "claude_ai" | "hand" | "job" | "github";
 	folders: string[];
 	lastAt: string | null;
 	jobs: { name: string; schedule: string }[];
@@ -122,6 +122,24 @@ export type FoundRow = {
 	/** The slug of the team whose project folder is one of `folders`. */
 	alreadyTeam: string | null;
 	gone: boolean;
+	/** The `claude/` branches and open pull requests from them that Claude Code on the web made. */
+	claudeWork?: ClaudeWork[];
+	/** The repository's details, for a row of kind `github`. */
+	github?: {
+		fullName: string;
+		private: boolean;
+		defaultBranch: string;
+		pushedAt: string;
+		notSeenLately: boolean;
+	} | null;
+};
+
+/** A branch or an open pull request that Claude Code on the web made. */
+export type ClaudeWork = {
+	kind: "branch" | "pull";
+	name: string;
+	number?: number;
+	draft?: boolean;
 };
 
 export type Choice = "team" | "watch" | "ignore";
