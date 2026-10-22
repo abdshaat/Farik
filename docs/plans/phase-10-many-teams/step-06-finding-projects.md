@@ -114,7 +114,7 @@ docs/SPEC.md                                     modifies: revision 0.146
 Tests (`crates/core/src/finding.rs`):
 - `suggests_a_choice_for_each_project`: asserts each row of the suggestion table at a fixed `now`, with a project 29 days old and one 31 days old on each side of the 30 days.
 
-- [ ] `feat(core): suggest a team, watch or ignore for each found project`
+- [x] `feat(core): suggest a team, watch or ignore for each found project`
 
 ### Task 2: Choices, separations, moves, declared services and routines in the index
 

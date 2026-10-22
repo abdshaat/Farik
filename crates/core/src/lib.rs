@@ -21,6 +21,8 @@ pub mod contract;
 pub mod criteria;
 /// When a delivery closes (ADR 0062).
 pub mod delivery;
+/// What Catervas suggests for each project it found, and where its row sits.
+pub mod finding;
 /// Each role's folder under `docs/catervas/`, its human documents and their agent twins.
 pub mod folders;
 /// What leaves for the forge, with no task id in it (ADR 0066).
