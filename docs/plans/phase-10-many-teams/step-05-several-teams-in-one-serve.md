@@ -250,7 +250,7 @@ Tests (orchestrator tests, with the recorded adapter and two orchestrators shari
   - b's log has no `agent.slept`.
 - `stops_every_team_at_the_computer_s_cap`: asserts that with `daily_cap_usd` 1.0, a session of a costing 0.6 and one of b costing 0.5 leave both teams idle with `COMPUTER_DAY_SPENT`. The next UTC day starts them again.
 
-- [ ] `feat(runtime): sessions share places, the account's reset and the computer's cap`
+- [x] `feat(runtime): sessions share places, the account's reset and the computer's cap`
 
 ### Task 7: The hub's methods
 

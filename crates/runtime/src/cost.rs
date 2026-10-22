@@ -212,6 +212,33 @@ pub fn day_spent(
         .any(|exhausted| exhausted.scope == BudgetScope::DayUsd))
 }
 
+/// The dollars spent on the UTC day of `now`, by every team's sessions in this project.
+///
+/// # Errors
+///
+/// `Store` when the costs cannot be read.
+pub fn day_usd(projections: &Projections, now: DateTime<Utc>) -> Result<f64, CostError> {
+    Ok(
+        spent_by(projections, CostScope::Day, &now.date_naive().to_string())?
+            .map_or(0.0, |row| row.usd),
+    )
+}
+
+/// The dollars spent from the first of the UTC month of `now` through its day.
+///
+/// # Errors
+///
+/// `Store` when the costs cannot be read.
+pub fn month_spent(projections: &Projections, now: DateTime<Utc>) -> Result<f64, CostError> {
+    let month = now.format("%Y-%m-").to_string();
+    Ok(projections
+        .costs(CostScope::Day)?
+        .iter()
+        .filter(|row| row.key.starts_with(&month) && row.key <= now.date_naive().to_string())
+        .map(|row| row.usd)
+        .sum())
+}
+
 /// How many of the task's sessions were the first `refine` session after the owner sent the task
 /// back into `refining` (ADR 0081): they are not counted against it. Only a session whose cost
 /// is recorded counts as one, since only those are in the task's count.

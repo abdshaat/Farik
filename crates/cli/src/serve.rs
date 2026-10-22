@@ -15,6 +15,7 @@ use catervas_runtime::daemon::{
     DaemonHandle, DaemonState, PortChoice, SetupHost, candidates, serve_held,
 };
 use catervas_runtime::orchestrator::{TickRules, TickScope};
+use catervas_runtime::slots::Slots;
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
@@ -179,7 +180,23 @@ async fn run(port: Option<u16>, no_open: bool, io: &mut CliIo<'_>) -> i32 {
         Ok(bound) => bound,
         Err(error) => return crate::run::refuse(io, false, &error),
     };
-    let shared = match shared_web(io, bound) {
+    let limits = state_dir(&io.env)
+        .map(|directory| read_state(&directory))
+        .unwrap_or_default();
+    let slots = match &io.sleeper {
+        Some(sleeper) => Slots::with_sleeper(
+            limits.agents_at_once,
+            limits.daily_cap_usd,
+            Arc::clone(&io.clock),
+            Arc::clone(sleeper),
+        ),
+        None => Slots::with_clock(
+            limits.agents_at_once,
+            limits.daily_cap_usd,
+            Arc::clone(&io.clock),
+        ),
+    };
+    let shared = match shared_web(io, bound, slots) {
         Ok(shared) => shared,
         Err(error) => return crate::run::refuse(io, false, &error),
     };

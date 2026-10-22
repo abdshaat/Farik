@@ -21,6 +21,7 @@ use catervas_runtime::orchestrator::{
     command_handler, result_of, sandbox_recreator,
 };
 use catervas_runtime::sleep::{Sleeper, TokioSleeper};
+use catervas_runtime::slots::Slots;
 use catervas_runtime::{
     AVAILABLE_FOR, DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews,
     PolledPreviews, PreviewFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory,
@@ -250,6 +251,7 @@ pub(crate) fn command_deps(
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
         work: Arc::default(),
+        slots: None,
     })
 }
 
@@ -382,6 +384,9 @@ pub(crate) struct Shared {
     pub(crate) codes: ConnectCodes,
     /// The hub's port, which every page's `Origin` and `Host` name.
     pub(crate) port: u16,
+    /// The places for sessions, the AI account's sleep and the computer's day, which every team's
+    /// sessions share.
+    pub(crate) slots: Arc<Slots>,
 }
 
 /// The AI account a start found Claude Code signed in with.
@@ -590,6 +595,7 @@ async fn start_listening(
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
         work: Arc::default(),
+        slots: options.shared.map(|shared| Arc::clone(&shared.slots)),
     }));
     daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
     daemon.set_sandbox_recreator(sandbox_recreator(Arc::clone(&orchestrator)));
@@ -711,7 +717,7 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
 /// The sessions and codes a serve shares among its teams, behind the hub's `port`. The sessions
 /// are kept in the state folder, made here when it is not there yet, or in memory when there is
 /// none.
-pub(crate) fn shared_web(io: &CliIo<'_>, port: u16) -> Result<Shared, String> {
+pub(crate) fn shared_web(io: &CliIo<'_>, port: u16, slots: Arc<Slots>) -> Result<Shared, String> {
     let file = match state_dir(&io.env) {
         Some(directory) => {
             make_state_dir(&directory)?;
@@ -723,6 +729,7 @@ pub(crate) fn shared_web(io: &CliIo<'_>, port: u16) -> Result<Shared, String> {
         sessions: BrowserSessions::open(file).map_err(|error| error.to_string())?,
         codes: ConnectCodes::default(),
         port,
+        slots,
     })
 }
 

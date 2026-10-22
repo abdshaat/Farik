@@ -151,6 +151,7 @@ impl Harness {
             forge: Arc::new(forge),
             sleeper: Arc::new(NeverWakes),
             work: Arc::default(),
+            slots: None,
         })
     }
 
@@ -182,6 +183,28 @@ impl Harness {
         clock: Arc<MovableClock>,
         sleeper: Arc<dyn Sleeper>,
     ) -> Orchestrator {
+        self.orchestrator_over(adapter, clock, sleeper, None)
+    }
+
+    /// `orchestrator_on`, sharing `slots` with the orchestrators of other teams, whose `clock` it
+    /// and they share.
+    pub(crate) fn orchestrator_sharing(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        clock: Arc<MovableClock>,
+        slots: Arc<crate::slots::Slots>,
+    ) -> Orchestrator {
+        let sleeper = Arc::new(MovingSleeper(Arc::clone(&clock)));
+        self.orchestrator_over(adapter, clock, sleeper, Some(slots))
+    }
+
+    fn orchestrator_over(
+        &self,
+        adapter: Arc<dyn RuntimeAdapter>,
+        clock: Arc<MovableClock>,
+        sleeper: Arc<dyn Sleeper>,
+        slots: Option<Arc<crate::slots::Slots>>,
+    ) -> Orchestrator {
         let deps = &self.project.deps;
         let tools = Arc::new(ToolDeps {
             log: Arc::clone(&deps.log),
@@ -211,6 +234,7 @@ impl Harness {
             forge: Arc::new(self.gh.forge(&self.project.repo.path)),
             sleeper,
             work: Arc::default(),
+            slots,
         })
     }
 
