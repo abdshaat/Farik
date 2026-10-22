@@ -228,6 +228,38 @@ fn apply(
     Ok(answered)
 }
 
+/// Applies the ready-made or saved team `slug` to the team of a project that was just made, no
+/// agent of it having worked, names the team `name`, and writes it. Answers the `team.updated`
+/// body to record; nothing is recorded here.
+///
+/// # Errors
+///
+/// A sentence saying the template is not there or unreadable, or what the team it makes breaks.
+pub fn apply_to_new_team(
+    files: &catervas_store::files::ProjectFiles,
+    templates: &Templates,
+    slug: &str,
+    name: &str,
+) -> Result<catervas_protocol::event::EventBody, String> {
+    let template = match builtin(slug) {
+        Some((template, _)) => template,
+        None => templates.read(slug).map_err(|error| error.to_string())?,
+    };
+    let current = files.read_team().map_err(|error| error.to_string())?;
+    let starters = suggested().map_err(|failure| failure.message)?;
+    let mut applied = apply_template(&current, &template, &BTreeSet::new(), &starters);
+    if let Some(error) = applied.errors.first() {
+        return Err(format!("{}: {}", error.path, error.message));
+    }
+    let mut wire = serde_json::to_value(&applied.team).map_err(|error| error.to_string())?;
+    wire["name"] = json!(name.chars().take(100).collect::<String>());
+    applied.team = serde_json::from_value(wire).map_err(|error| error.to_string())?;
+    files
+        .write_team(&applied.team)
+        .map_err(|error| error.to_string())?;
+    Ok(team_updated(&applied.team, Some(template.name.as_str())))
+}
+
 /// Before `template.apply` writes the team: when the template would take Google Ads from an agent
 /// (a removed agent that has it) and would be applied, pauses the plan's campaigns for each as
 /// removing the connection does, whatever Google answers. A template that cannot be applied (it

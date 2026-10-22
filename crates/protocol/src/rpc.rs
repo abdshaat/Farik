@@ -365,10 +365,11 @@ mod tests {
             "teams": [{
                 "slug": "bakery", "name": "Bakery", "root": "/h/bakery", "status": "running",
                 "working_agents": 1, "waiting": 0, "today_usd": 0.5, "month_usd": 4.0,
+                "undoable": true,
             }, {
                 "slug": "shop", "name": "Shop", "root": "/h/shop", "status": "failed",
                 "failed": "the log is gone", "working_agents": 0, "waiting": 0,
-                "today_usd": 0, "month_usd": 0,
+                "today_usd": 0, "month_usd": 0, "undoable": false,
             }],
             "current": "bakery",
             "account_asleep_until": null,

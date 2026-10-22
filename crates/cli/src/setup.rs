@@ -165,7 +165,11 @@ impl CliHost {
     /// Makes `root` a Catervas project when it is not one: `init`, then the old team carried while a
     /// project is being left, else the team paused and the marker. Answers the project, and
     /// whether it was made.
-    fn taken_on(&self, root: &Path, no_sandbox: bool) -> Result<(Project, bool), SetupError> {
+    pub(crate) fn taken_on(
+        &self,
+        root: &Path,
+        no_sandbox: bool,
+    ) -> Result<(Project, bool), SetupError> {
         let now = self.clock.now();
         let made = !root.join(".catervas/team.yaml").exists();
         if made {
@@ -222,7 +226,7 @@ impl CliHost {
     }
 
     /// Runs `git <args>` in `directory`, as catervas, with `git` from the environment's `PATH`.
-    fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
+    pub(crate) fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
         let program = on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
         let output = std::process::Command::new(program)
             .args(catervas_store::git::CATERVAS_IDENTITY)

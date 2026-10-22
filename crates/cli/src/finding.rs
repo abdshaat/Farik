@@ -9,7 +9,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use catervas_protocol::clock::Clock;
 use catervas_runtime::computer::program_output;
 use catervas_runtime::connectors::ConnectorSecrets;
-use catervas_runtime::daemon::{FindingHost, FindingProgress};
+use catervas_runtime::daemon::{
+    FindingHost, FindingProgress, MadeProject, MemberRequest, PlanKind, SETUP_PENDING, SetupHost,
+    TeamPlan, apply_to_new_team,
+};
 use catervas_runtime::github::{GithubPlaces, load_connection, read_into_index};
 use catervas_store::claude_history::{
     ReadProgress, ReadSummary, find_copies, place_sessions, read_transcripts_while,
@@ -18,9 +21,11 @@ use catervas_store::claude_services::read_service_settings;
 use catervas_store::jobs::{JobPlaces, find_jobs};
 use catervas_store::machine::{Found, MACHINE_DB, MachineIndex, open_machine_index};
 
-use crate::CliIo;
 use crate::discover::{JobsFound, ServicesView, not_projects, settings_paths};
+use crate::setup::CliHost;
+use crate::start::try_lock;
 use crate::state::{make_state_dir, read_state, write_state};
+use crate::{CliIo, project};
 
 /// Where a scan looks, and the clock it stamps what it writes with.
 pub(crate) struct ScanPlaces {
@@ -183,6 +188,170 @@ impl CliFinder {
     }
 }
 
+/// How long a removed team is waited for to let go of its folder.
+const RELEASE_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl CliFinder {
+    /// The setup host that makes a project, which says to nobody which one it chose.
+    fn setup_host(&self) -> CliHost {
+        CliHost {
+            env: self.env.clone(),
+            home: self.home.clone(),
+            clock: Arc::clone(&self.clock),
+            chosen: tokio::sync::watch::channel(None).0,
+            waiting: None,
+            leaving: None,
+            secrets: Arc::clone(&self.secrets),
+            teams: Arc::default(),
+        }
+    }
+
+    /// Makes the project of `plan` and answers it with what was created, or why not. A project
+    /// that is half made is taken apart.
+    fn make_project(&self, host: &CliHost, plan: &TeamPlan) -> Result<MadeProject, String> {
+        let refused = |why: catervas_runtime::daemon::SetupError| match why {
+            catervas_runtime::daemon::SetupError::Refused(sentence)
+            | catervas_runtime::daemon::SetupError::Failed(sentence) => sentence,
+        };
+        match &plan.kind {
+            PlanKind::Folder { folder } => {
+                if folder.join(".catervas/team.yaml").exists() {
+                    return Err(format!(
+                        "has_team: {} already has a Catervas team",
+                        folder.display()
+                    ));
+                }
+                let before = std::fs::symlink_metadata(folder.join(".catervas")).is_ok();
+                let root = host
+                    .open(&folder.display().to_string(), false, false)
+                    .map_err(refused)?;
+                let created = if before {
+                    Vec::new()
+                } else {
+                    vec![root.join(".catervas")]
+                };
+                Ok(MadeProject {
+                    team_id: String::new(),
+                    root,
+                    created,
+                })
+            }
+            PlanKind::Project { folder, members } => {
+                let parent = folder
+                    .parent()
+                    .and_then(|parent| parent.strip_prefix(&self.home).ok())
+                    .map(|parent| parent.display().to_string())
+                    .ok_or_else(|| "outside_home: the folder is outside your home".to_string())?;
+                let name = folder
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .ok_or_else(|| "bad_name: the folder has no name".to_string())?;
+                let requests: Vec<MemberRequest> = members
+                    .iter()
+                    .map(|(name, path)| MemberRequest {
+                        name: name.clone(),
+                        path: path.display().to_string(),
+                        integration_branch: None,
+                    })
+                    .collect();
+                let root = host
+                    .create_folder(&parent, name, &requests, false)
+                    .map_err(refused)?;
+                Ok(MadeProject {
+                    team_id: String::new(),
+                    root,
+                    created: vec![folder.clone()],
+                })
+            }
+            PlanKind::Connector { folder } => {
+                if std::fs::symlink_metadata(folder).is_ok() {
+                    return Err("folder_taken: a folder with that name is already there".into());
+                }
+                std::fs::create_dir_all(folder)
+                    .map_err(|error| format!("{} cannot be made: {error}", folder.display()))?;
+                let made = (|| -> Result<(), String> {
+                    host.git(folder, &["init", "-b", "main"]).map_err(refused)?;
+                    std::fs::write(
+                        folder.join("README.md"),
+                        format!(
+                            "# {}\n\nBookkeeping kept by your Catervas team.\n",
+                            plan.name
+                        ),
+                    )
+                    .map_err(|error| format!("README.md cannot be written: {error}"))?;
+                    host.git(folder, &["add", "README.md"]).map_err(refused)?;
+                    host.git(folder, &["commit", "-m", "Start the project"])
+                        .map_err(refused)?;
+                    host.taken_on(folder, false).map_err(refused)?;
+                    Ok(())
+                })();
+                if let Err(why) = made {
+                    let _ = std::fs::remove_dir_all(folder);
+                    return Err(why);
+                }
+                Ok(MadeProject {
+                    team_id: String::new(),
+                    root: std::fs::canonicalize(folder).unwrap_or_else(|_| folder.clone()),
+                    created: vec![folder.clone()],
+                })
+            }
+        }
+    }
+
+    /// Takes apart what `make_project` made, as far as it can.
+    fn discard(created: &[PathBuf]) {
+        for path in created {
+            let _ = if path.file_name().is_some_and(|name| name == ".catervas") {
+                remove_catervas_folder(path)
+            } else {
+                std::fs::remove_dir_all(path).map_err(|error| error.to_string())
+            };
+        }
+    }
+}
+
+/// Removes a `.catervas` folder, or the link that is one, never what the link points at.
+fn remove_catervas_folder(path: &Path) -> Result<(), String> {
+    let is_link = std::fs::symlink_metadata(path)
+        .map_err(|error| error.to_string())?
+        .file_type()
+        .is_symlink();
+    if is_link {
+        std::fs::remove_file(path)
+    } else {
+        std::fs::remove_dir_all(path)
+    }
+    .map_err(|error| format!("{} cannot be removed: {error}", path.display()))
+}
+
+/// Whether the git folder `folder` holds only Catervas's own work: every commit by Catervas, and
+/// nothing changed or added beside `.catervas`.
+fn only_catervas_work(folder: &Path) -> bool {
+    let git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(folder)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    let Some(authors) = git(&["log", "--all", "--format=%ae"]) else {
+        return false;
+    };
+    let Some(status) = git(&["status", "--porcelain"]) else {
+        return false;
+    };
+    authors
+        .lines()
+        .all(|email| email.trim() == "catervas@localhost")
+        && status.lines().all(|line| {
+            line[3.min(line.len())..]
+                .trim_matches('"')
+                .starts_with(".catervas")
+        })
+}
+
 impl FindingHost for CliFinder {
     fn scan(&self, stop: &AtomicBool, report: &dyn Fn(FindingProgress)) -> Result<(), String> {
         make_state_dir(&self.state)?;
@@ -212,6 +381,87 @@ impl FindingHost for CliFinder {
             let _ = read_into_index(&self.github.api, &token, &mut index, self.clock.now(), stop);
         }
         Ok(())
+    }
+
+    fn create_team(&self, plan: &TeamPlan) -> Result<MadeProject, String> {
+        let host = self.setup_host();
+        let mut made = self.make_project(&host, plan)?;
+        let prepared = (|| -> Result<String, String> {
+            let now = self.clock.now();
+            let opened = project::open_project(&made.root, now)?;
+            let templates =
+                catervas_runtime::templates::Templates::new(self.state.join("templates"));
+            let body = apply_to_new_team(&opened.files, &templates, &plan.template, &plan.name)?;
+            let event = opened.event(body, now, None)?;
+            opened.append(&event)?;
+            match std::fs::remove_file(made.root.join(SETUP_PENDING)) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(format!("{SETUP_PENDING} cannot be removed: {error}"));
+                }
+                _ => {}
+            }
+            if !plan.services.is_empty() {
+                let found: Vec<serde_json::Value> = plan
+                    .services
+                    .iter()
+                    .map(|(id, name)| serde_json::json!({ "service_id": id, "name": name }))
+                    .collect();
+                let file = made.root.join(".catervas/local/found-services.json");
+                std::fs::write(&file, serde_json::Value::Array(found).to_string())
+                    .map_err(|error| format!("{} cannot be written: {error}", file.display()))?;
+            }
+            Ok(opened.ids.team_id.clone())
+        })();
+        match prepared {
+            Ok(team_id) => {
+                made.team_id = team_id;
+                Ok(made)
+            }
+            Err(why) => {
+                Self::discard(&made.created);
+                Err(why)
+            }
+        }
+    }
+
+    fn remove_made(&self, root: &Path, created: &[PathBuf]) -> Result<Option<String>, String> {
+        let until = std::time::Instant::now() + RELEASE_WAIT;
+        let lock = loop {
+            let listed = read_state(&self.state)
+                .projects
+                .iter()
+                .any(|each| each == root);
+            match try_lock(root) {
+                Ok(Some(lock)) if !listed => break Some(lock),
+                Ok(_) => {}
+                Err(_) => break None,
+            }
+            if std::time::Instant::now() >= until {
+                return Err(format!("{} is still in use", root.display()));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        let mut left = None;
+        for path in created {
+            if path.file_name().is_some_and(|name| name == ".catervas") {
+                if std::fs::symlink_metadata(path).is_ok() {
+                    remove_catervas_folder(path)?;
+                }
+            } else if std::fs::symlink_metadata(path).is_ok() {
+                if only_catervas_work(path) {
+                    std::fs::remove_dir_all(path).map_err(|error| {
+                        format!("{} cannot be removed: {error}", path.display())
+                    })?;
+                } else {
+                    left = Some(format!(
+                        "Catervas left {}: it has changes of yours.",
+                        path.display()
+                    ));
+                }
+            }
+        }
+        drop(lock);
+        Ok(left)
     }
 
     fn secrets(&self) -> Arc<dyn ConnectorSecrets> {

@@ -65,7 +65,9 @@ pub mod web;
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
 
-pub use finding::{Finding, FindingHost, FindingProgress};
+pub use finding::{
+    Finding, FindingHost, FindingProgress, MadeProject, NamesRun, PlanKind, TeamPlan,
+};
 pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
@@ -75,6 +77,7 @@ pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
 pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
 pub(crate) use team::{secret_at, with_server};
+pub use templates::apply_to_new_team;
 
 /// What a daemon with no project answers what needs one.
 pub(crate) const NO_PROJECT: &str = "catervas has no project yet";

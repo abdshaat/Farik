@@ -570,6 +570,9 @@
           "$ref": "#/$defs/teamsRemoveRequest"
         },
         {
+          "$ref": "#/$defs/teamsUndoRequest"
+        },
+        {
           "$ref": "#/$defs/computerSetRequest"
         },
         {
@@ -649,6 +652,24 @@
         },
         {
           "$ref": "#/$defs/linkingAnswerRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalGetRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalEditRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalMoveOutRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalRevertRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingRejectRequest"
         },
         {
           "$ref": "#/$defs/repoAddRequest"
@@ -3158,7 +3179,7 @@
       }
     },
     "teamsListResult": {
-      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
+      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month), undoable (a team Catervas made from the proposal whose log has no session.started: teams.undo takes it back). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
       "type": "object",
       "additionalProperties": false,
       "required": ["teams", "current", "account_asleep_until"],
@@ -3168,7 +3189,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["slug", "name", "root", "status", "working_agents", "waiting", "today_usd", "month_usd"],
+            "required": ["slug", "name", "root", "status", "working_agents", "waiting", "today_usd", "month_usd", "undoable"],
             "properties": {
               "slug": { "type": "string" },
               "name": { "type": "string" },
@@ -3178,7 +3199,8 @@
               "working_agents": { "type": "integer", "minimum": 0 },
               "waiting": { "type": "integer", "minimum": 0 },
               "today_usd": { "type": "number" },
-              "month_usd": { "type": "number" }
+              "month_usd": { "type": "number" },
+              "undoable": { "type": "boolean" }
             }
           }
         },
@@ -3252,6 +3274,30 @@
       "additionalProperties": false,
       "required": ["removed"],
       "properties": { "removed": { "const": true } }
+    },
+    "teamsUndoRequest": {
+      "title": "Teams Undo Request",
+      "description": "Takes back a team Catervas made from the proposal while it has not started a session (docs/SPEC.md 4.1; ADR 0059): stops its drive, removes it from the hub and state.json, and deletes what Catervas made for it, the .catervas folder in the owner's folder or the project folder or new folder, but a folder whose git log holds a commit that is not Catervas's is left, and the answer's left says so. The projects go back to the proposal. A team with a session.started is refused with -32005 and team_has_started, a slug no made team has with team_unknown. Answers teamsUndoResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "teams.undo" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug"],
+          "properties": { "slug": { "type": "string" } }
+        }
+      }
+    },
+    "teamsUndoResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["removed"],
+      "properties": { "removed": { "const": true }, "left": { "type": "string" } }
     },
     "computerSetRequest": {
       "title": "Computer Set Request",
@@ -4012,6 +4058,118 @@
         }
       }
     },
+    "proposalGetRequest": {
+      "title": "Proposal Get Request",
+      "description": "The teams to make from the projects the owner chose and the links between them, one card each, newest work first (docs/SPEC.md 4.4; ADR 0059): a team for each group of linked projects with a project chosen as a team and no driven team, a team for each such project alone, and an add_to_team card for the projects of a group that has a project of a driven team. A card's name, purpose and template are the owner's edits or Claude's suggestions marked from_claude, else the suggestion. Answers proposalGetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "proposalEditRequest": {
+      "title": "Proposal Edit Request",
+      "description": "The owner's edit of a card: its name (1 to 100 characters, not blank), its purpose (at most 200) and the team it starts from. A template that is not a ready-made team and not one of the owner's saved teams is refused with -32005 and template_unknown. An edit by the owner takes the from_claude mark away. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.edit" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string", "maxLength": 100 },
+            "template": { "type": "string" },
+            "purpose": { "type": "string", "maxLength": 200 }
+          }
+        }
+      }
+    },
+    "proposalMoveOutRequest": {
+      "title": "Proposal Move Out Request",
+      "description": "Moves the project key out of the card id: it becomes a card of its own, and No is kept between it and each project that stays, so that finding does not group them again. A card of one project, or a project not in the card, is refused with -32005 and unknown_project. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.move_out" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "key"],
+          "properties": { "id": { "type": "string" }, "key": { "type": "string" } }
+        }
+      }
+    },
+    "proposalRevertRequest": {
+      "title": "Proposal Revert Request",
+      "description": "Forgets the edits of a card, Claude's suggested name and purpose among them: Keep the folder name. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.revert" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } }
+        }
+      }
+    },
+    "proposalCreateRequest": {
+      "title": "Proposal Create Request",
+      "description": "Makes the teams of the cards, each alone and paused (docs/SPEC.md 4.1, 4.4; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. ids names the cards to make, else every card; only names project keys, and makes the cards whose projects are all among them. The proofs of each card's links are checked again first: a card whose proof no longer holds is split back into its projects, and the answer says which. A new_team card makes one team (a folder of the owner's, a project folder for several repositories, or a new folder for work done through connectors); an add_to_team card adds its projects as repositories to the team. A card that fails stops only itself. Answers proposalCreateResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.create" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed"],
+          "properties": {
+            "confirmed": { "type": "boolean" },
+            "ids": { "type": "array", "items": { "type": "string" } },
+            "only": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "linkingRejectRequest": {
+      "title": "Linking Reject Request",
+      "description": "Keeps No between the project key and each project of others, without asking whether a proof holds: the owner took a repository out of a team (docs/SPEC.md 4.4; ADR 0059). Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.reject" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "others"],
+          "properties": { "key": { "type": "string" }, "others": { "type": "array", "items": { "type": "string" } } }
+        }
+      }
+    },
     "findingRow": {
       "type": "object",
       "additionalProperties": false,
@@ -4622,6 +4780,91 @@
               "names": { "type": "array", "items": { "type": "string" } },
               "why": { "type": "array", "items": { "type": "string" } }
             }
+          }
+        }
+      }
+    },
+    "proposalProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "services"],
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "folder": { "type": "string" },
+        "services": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "proposalGetResult": {
+      "description": "cards: id (a hash of the sorted keys of the group, stable), kind (new_team or add_to_team), projects (key, name, folder with home written ~, the services it uses through Claude), jobs (their names), why (one sentence for each reason the projects are together), name, purpose (when there is one), template (a ready-made team's or a saved team's slug), folder (a new folder's, written from home, for work done through connectors), from_claude (name or purpose came from Claude and not yet the owner's), and for add_to_team the slug and name of the team.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cards"],
+      "properties": {
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "projects", "jobs", "why", "name", "template", "from_claude"],
+            "properties": {
+              "id": { "type": "string" },
+              "kind": { "enum": ["new_team", "add_to_team"] },
+              "projects": { "type": "array", "items": { "$ref": "#/$defs/proposalProject" } },
+              "jobs": { "type": "array", "items": { "type": "string" } },
+              "why": { "type": "array", "items": { "type": "string" } },
+              "name": { "type": "string" },
+              "purpose": { "type": "string" },
+              "template": { "type": "string" },
+              "folder": { "type": "string" },
+              "from_claude": { "type": "boolean" },
+              "team": { "type": "string" },
+              "team_name": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "proposalCreateResult": {
+      "description": "made: a team made (card id, slug, name, root); added: projects added to a team (card id, team, the names added); failed: a card that failed (card id, name, reason beginning with its code); split: a card whose proof no longer held, with the keys of its projects, which were made apart.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["made", "added", "failed", "split"],
+      "properties": {
+        "made": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "slug", "name", "root"],
+            "properties": { "id": { "type": "string" }, "slug": { "type": "string" }, "name": { "type": "string" }, "root": { "type": "string" } }
+          }
+        },
+        "added": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "team", "names"],
+            "properties": { "id": { "type": "string" }, "team": { "type": "string" }, "names": { "type": "array", "items": { "type": "string" } } }
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "reason"],
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "reason": { "type": "string" } }
+          }
+        },
+        "split": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "projects"],
+            "properties": { "id": { "type": "string" }, "projects": { "type": "array", "items": { "type": "string" } } }
           }
         }
       }

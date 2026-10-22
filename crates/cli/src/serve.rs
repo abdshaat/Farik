@@ -144,6 +144,8 @@ struct Serving<'s, 'io> {
     removing: BTreeSet<PathBuf>,
     /// The name each team that is not driven has in an address.
     idle_slugs: BTreeMap<TeamSlug, PathBuf>,
+    /// The name a team made beside the others was given in an address, until its drive starts.
+    named: BTreeMap<PathBuf, TeamSlug>,
     events: mpsc::UnboundedSender<Event>,
     state_dir: Option<PathBuf>,
     no_open: bool,
@@ -242,6 +244,8 @@ async fn run<'io>(
     )));
     let (removals, mut removed) = mpsc::unbounded_channel();
     hub.set_removals(removals);
+    let (additions, mut added) = mpsc::unbounded_channel();
+    hub.set_additions(additions);
     let mut serving = Serving {
         state_dir: state_dir(&io.env),
         io,
@@ -260,6 +264,7 @@ async fn run<'io>(
         failed: BTreeMap::new(),
         removing: BTreeSet::new(),
         idle_slugs: BTreeMap::new(),
+        named: BTreeMap::new(),
         events,
         no_open,
         linked: false,
@@ -327,6 +332,12 @@ async fn run<'io>(
             }
             Some(slug) = removed.recv() => {
                 serving.remove(&slug);
+            }
+            Some(team) = added.recv() => {
+                // A team made beside the others is driven at once, with the name it was given.
+                if serving.add(team) {
+                    wizard = false;
+                }
             }
             Ok(()) = hub_run.choice.changed() => {
                 let chosen = hub_run.choice.borrow_and_update().clone();
@@ -539,6 +550,9 @@ impl<'s, 'io> Serving<'s, 'io> {
     /// The name `root`'s team has in an address: its team id, with `-2`, `-3` when another team
     /// has it.
     fn slug_of(&self, root: &Path) -> TeamSlug {
+        if let Some(slug) = self.named.get(root) {
+            return slug.clone();
+        }
         let id = open_project(root, self.io.clock.now()).map_or_else(
             |_| {
                 root.file_name().map_or_else(
@@ -561,6 +575,22 @@ impl<'s, 'io> Serving<'s, 'io> {
             }
             count += 1;
         }
+    }
+
+    /// Drives a team that was made beside the running ones, as `slug`. Answers whether a drive
+    /// is running now, which is what the wizard is waiting for.
+    fn add(&mut self, added: catervas_runtime::daemon::hub::TeamAdded) -> bool {
+        let root = added.root;
+        self.teams
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(root.clone());
+        self.named.insert(root.clone(), added.slug);
+        if let Some(error) = self.launch(root.clone(), false, false, true) {
+            self.say(true, &format!("catervas: {}: {error}", root.display()));
+        }
+        self.named.remove(&root);
+        !self.drives.is_empty()
     }
 
     /// Takes on the project the wizard chose, and with it those waiting on the account. Answers

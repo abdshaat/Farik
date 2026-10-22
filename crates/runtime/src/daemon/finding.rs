@@ -118,11 +118,98 @@ pub trait FindingHost: Send + Sync {
     fn secrets(&self) -> Arc<dyn ConnectorSecrets>;
     /// Where GitHub is and how a repository is cloned from it.
     fn github(&self) -> GithubPlaces;
+    /// Makes the project of one team of the proposal, paused with its setup marker removed and its
+    /// template applied, and writes what the plan found to `.catervas/local/found-services.json`. It
+    /// does not drive the team.
+    ///
+    /// # Errors
+    ///
+    /// A sentence beginning with a code, saying what could not be made; nothing is left behind.
+    fn create_team(&self, plan: &TeamPlan) -> Result<MadeProject, String> {
+        let _ = plan;
+        Err("not_available: this catervas cannot make teams".to_string())
+    }
+    /// Deletes what `created` lists once nobody drives `root` any more, but only a folder whose git
+    /// log holds Catervas's own commits alone. Answers the sentence to tell the owner when it left
+    /// something.
+    ///
+    /// # Errors
+    ///
+    /// A sentence saying what could not be deleted.
+    fn remove_made(&self, root: &Path, created: &[PathBuf]) -> Result<Option<String>, String> {
+        let _ = (root, created);
+        Err("not_available: this catervas cannot remove teams".to_string())
+    }
+    /// Runs the owner's Claude Code once with `prompt`, Haiku and no tools.
+    ///
+    /// # Errors
+    ///
+    /// Claude Code's words when it did not answer.
+    fn ask_names(&self, prompt: &str) -> Result<NamesRun, String> {
+        let _ = prompt;
+        Err("Claude Code cannot be asked here".to_string())
+    }
     /// The committed files of the repository at `root` that proofs of linking are read from, as
     /// `(path, text)`; none when they cannot be read.
     fn committed_files(&self, root: &str) -> Vec<(String, String)> {
         catervas_store::linking::read_from_git(root)
     }
+}
+
+/// How one team of the proposal is made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlanKind {
+    /// A repository of the owner's, made a team where it is.
+    Folder {
+        /// The repository's folder.
+        folder: PathBuf,
+    },
+    /// Several repositories, bundled as a project folder made at `folder`.
+    Project {
+        /// The project folder to make.
+        folder: PathBuf,
+        /// The repositories, each with its name as a member and its folder.
+        members: Vec<(String, PathBuf)>,
+    },
+    /// Work done through connectors: a new folder at `folder`, a git repository with a README.
+    Connector {
+        /// The folder to make.
+        folder: PathBuf,
+    },
+}
+
+/// One team to make.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamPlan {
+    /// The team's name.
+    pub name: String,
+    /// The ready-made or saved team it starts from.
+    pub template: String,
+    /// How its project is made.
+    pub kind: PlanKind,
+    /// The services its projects use through Claude, by the catalog's id and name.
+    pub services: Vec<(String, String)>,
+}
+
+/// A team that was made, paused, ready to be driven.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MadeProject {
+    /// The folder of its project.
+    pub root: PathBuf,
+    /// Its team id, from which its name in an address comes.
+    pub team_id: String,
+    /// What was created: the `.catervas` folder in a repository of the owner's, or the whole project
+    /// folder or new folder.
+    pub created: Vec<PathBuf>,
+}
+
+/// What Claude Code answered the names run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamesRun {
+    /// What it said.
+    pub result: String,
+    /// The `total_cost_usd` it reported.
+    pub cost_usd: f64,
 }
 
 /// Where a scan is.
@@ -166,6 +253,9 @@ pub struct Finding {
     stop: AtomicBool,
     /// Counts up each time the counts are published, so that a page knows to ask again.
     version: AtomicU64,
+    /// The cards `proposal.get` showed last, by id, with the keys of their projects: what
+    /// `proposal.create` makes, and checks the proofs of again.
+    shown: Mutex<BTreeMap<String, Vec<String>>>,
 }
 
 impl Finding {
@@ -229,7 +319,7 @@ impl Finding {
 }
 
 /// The methods the hub answers for finding (docs/schemas/rpc.schema.json).
-pub(super) const METHODS: [&str; 26] = [
+pub(super) const METHODS: [&str; 33] = [
     "finding.offer",
     "finding.catalog",
     "finding.start",
@@ -256,7 +346,17 @@ pub(super) const METHODS: [&str; 26] = [
     "linking.maybe",
     "linking.groups",
     "linking.answer",
+    "linking.reject",
+    "proposal.get",
+    "proposal.edit",
+    "proposal.move_out",
+    "proposal.revert",
+    "proposal.create",
+    "teams.undo",
 ];
+
+mod proposal;
+pub(super) use proposal::{has_started, made_slugs};
 
 /// A refusal: its code, then its sentence.
 fn refusal(code: &str, sentence: &str) -> Failure {
@@ -331,6 +431,9 @@ pub(super) fn call(hub: &Hub, method: &str, params: &Value) -> Result<Value, Fai
         "linking.maybe" => linking_maybe(hub, host.as_ref()),
         "linking.groups" => linking_groups(hub, host.as_ref()),
         "linking.answer" => linking_answer(hub, host.as_ref(), params),
+        method if proposal::METHODS.contains(&method) => {
+            proposal::call(hub, host.as_ref(), method, params)
+        }
         _ => forget(hub, host.as_ref(), params),
     }
 }

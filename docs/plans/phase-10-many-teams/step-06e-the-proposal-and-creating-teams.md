@@ -140,7 +140,7 @@ Tests (`crates/cli/tests/serving.rs`, ignored, with fixture repositories under t
   - A new folder with a commit of the owner's is left, with the sentence.
 - `adds_a_linked_project_to_the_team_it_works_with`: asserts that a Yes between a driven one-repo team's project and another project gives an `add_to_team` card, and creating adds it as a member.
 
-- [ ] `feat(cli): create the proposed teams paused, add to a team, and undo`
+- [x] `feat(cli): create the proposed teams paused, add to a team, and undo`
 
 ### Task 4: Names from Claude
 

@@ -81,6 +81,15 @@ pub struct IdleTeam {
     pub status: IdleStatus,
 }
 
+/// A team that was made beside the running ones, which serve is to drive (ADR 0059).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TeamAdded {
+    /// Its project's folder.
+    pub root: PathBuf,
+    /// Its name in an address.
+    pub slug: TeamSlug,
+}
+
 /// The teams one serve drives, and the one `/rpc` answers for.
 #[derive(Default)]
 pub struct Hub {
@@ -92,6 +101,8 @@ pub struct Hub {
     slots: OnceLock<Arc<Slots>>,
     /// Where `teams.remove` says which team to stop and forget.
     removals: OnceLock<tokio::sync::mpsc::UnboundedSender<TeamSlug>>,
+    /// Where `proposal.create` says which team to start driving.
+    additions: OnceLock<tokio::sync::mpsc::UnboundedSender<TeamAdded>>,
     /// What finding projects keeps (`finding.*`).
     pub(super) finding: Arc<super::finding::Finding>,
 }
@@ -121,6 +132,30 @@ impl Hub {
     /// Gives the hub where `teams.remove` sends the team to stop.
     pub fn set_removals(&self, removals: tokio::sync::mpsc::UnboundedSender<TeamSlug>) {
         let _ = self.removals.set(removals);
+    }
+
+    /// Gives the hub where `proposal.create` sends the team to drive.
+    pub fn set_additions(&self, additions: tokio::sync::mpsc::UnboundedSender<TeamAdded>) {
+        let _ = self.additions.set(additions);
+    }
+
+    /// Asks serve to drive the team at `root` as `slug`; `false` when nothing listens.
+    pub(super) fn add_team(&self, added: TeamAdded) -> bool {
+        self.additions
+            .get()
+            .is_some_and(|additions| additions.send(added).is_ok())
+    }
+
+    /// Asks serve to stop `slug` and forget its project; `false` when nothing listens.
+    pub(super) fn remove_team(&self, slug: &TeamSlug) -> bool {
+        self.removals
+            .get()
+            .is_some_and(|removals| removals.send(slug.clone()).is_ok())
+    }
+
+    /// Whether the hub drives the team `slug` or lists it as one it does not.
+    pub(super) fn knows(&self, slug: &str) -> bool {
+        self.team(slug).is_some() || self.idle().iter().any(|idle| idle.slug.as_str() == slug)
     }
 
     /// Gives the hub the host that scans the computer's Claude history.
@@ -381,6 +416,7 @@ pub(super) fn query(state: &DaemonState, name: &str) -> Result<Value, Failure> {
 fn teams_list(hub: &Hub) -> Result<Value, Failure> {
     let internal = |error: &dyn std::fmt::Display| Failure::new(INTERNAL_ERROR, error.to_string());
     let mut teams = Vec::new();
+    let made = super::finding::made_slugs(hub);
     for (slug, state) in hub.driven() {
         let (Some(deps), Some(web)) = (state.deps(), state.web()) else {
             continue;
@@ -404,6 +440,7 @@ fn teams_list(hub: &Hub) -> Result<Value, Failure> {
             "waiting": waiting,
             "today_usd": crate::cost::day_usd(&deps.projections, now).map_err(|e| internal(&e))?,
             "month_usd": crate::cost::month_spent(&deps.projections, now).map_err(|e| internal(&e))?,
+            "undoable": made.contains(slug.as_str()) && !super::finding::has_started(deps),
         }));
     }
     for idle in hub.idle() {
@@ -421,6 +458,7 @@ fn teams_list(hub: &Hub) -> Result<Value, Failure> {
             "waiting": 0,
             "today_usd": 0.0,
             "month_usd": 0.0,
+            "undoable": false,
         });
         if let Some(why) = failed {
             row["failed"] = json!(why);
