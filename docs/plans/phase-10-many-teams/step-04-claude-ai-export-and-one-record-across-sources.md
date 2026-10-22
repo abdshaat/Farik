@@ -193,7 +193,7 @@ Files: `claude_history.rs`.
 - `matches_a_project_by_hand`: projects `/h/shop` (remote `github.com/me/shop`), `/h/shop/apps`, `/h/notes`: root `/h/shop/apps/web` matches `/h/shop/apps`; `/h/shopping` none; no root with that remote matches `/h/shop`, as does root `/h/other` with it. RED.
 - `links_copies_on_strong_evidence_only`: replies R1–R4 at 09:00:05, 09:01, 09:02, 09:03; `a` holds them, `b` (later `first_at`) the same fingerprints under new keys plus R5: `CopyOf { copy: b, of: a }` and `reply_copies` maps each of `b`'s four to `a`'s; on equal `first_at`, the lower `indexed` is kept. `b` sharing only R1–R2: nothing. `b` sharing R1, R3, R4 while each holds an unshared reply between them: nothing. `b` and `c` each copying `a`: three `MaybeSame` (a–b, a–c, b–c), no `CopyOf`, and `reply_copies` maps each of `b`'s and `c`'s four replies to `a`'s (8 rows). Two separate copy pairs: two `CopyOf`. `reply_fingerprint` ignores sub-second time. Each `Source::as_wire` is its wire value. RED.
 
-- [ ] `feat(core): key repositories and match records across sources`
+- [x] `feat(core): key repositories and match records across sources`
 
 ### Task 3: Importing the export
 

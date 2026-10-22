@@ -422,6 +422,403 @@ pub fn place_session(
     }
 }
 
+/// Where a project, or an item of one, was found. A project's sources are derived from its rows, never
+/// stored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Source {
+    /// A scan of this computer found it.
+    Local,
+    /// One of its sessions is a copy of another, so it was teleported here.
+    Teleported,
+    /// Claude.ai's export holds it.
+    Export,
+    /// The owner added it by hand.
+    ByHand,
+}
+
+impl Source {
+    /// The wire value of this source.
+    #[must_use]
+    pub fn as_wire(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Teleported => "teleported",
+            Self::Export => "export",
+            Self::ByHand => "by_hand",
+        }
+    }
+}
+
+fn remote_key(host: &str, path: &str) -> Option<String> {
+    let host = host.trim().to_lowercase();
+    let mut segments: Vec<String> = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    if let Some(last) = segments.last_mut()
+        && let Some(stripped) = last.strip_suffix(".git")
+    {
+        *last = stripped.to_string();
+    }
+    segments.retain(|segment| !segment.is_empty());
+    (!host.is_empty() && segments.len() >= 2).then(|| format!("{host}/{}", segments.join("/")))
+}
+
+/// A repository's address as one key: host then path, lower case, with a final `.git` and a trailing
+/// `/` dropped, and the user, password and port dropped, so that SSH and HTTPS forms of one
+/// repository are one and a token in a remote is never kept. `None` for a local path, a `file://`
+/// address, a Windows drive path, and anything with fewer than two path segments.
+#[must_use]
+pub fn normalise_remote(address: &str) -> Option<String> {
+    let address = address.trim();
+    if address.is_empty() {
+        return None;
+    }
+    if address.contains("://") {
+        let url = url::Url::parse(address).ok()?;
+        if url.scheme() == "file" {
+            return None;
+        }
+        return remote_key(url.host_str()?, url.path());
+    }
+    // The scp form, `[user@]host:path`, where no `/` comes before the `:`.
+    let (before, path) = address.split_once(':')?;
+    if before.contains('/') {
+        return None;
+    }
+    let host = before.rsplit('@').next().unwrap_or(before);
+    if host.chars().count() < 2 {
+        return None;
+    }
+    remote_key(host, path)
+}
+
+/// Why a project cannot be added by hand.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HandProjectRefusal {
+    /// The name is empty.
+    EmptyName,
+    /// Neither a folder nor a repository address was given.
+    NoPlace,
+    /// The address is not one Catervas can read.
+    NotARepositoryAddress(String),
+    /// The folder is home, the root or a temporary folder.
+    NotAProjectFolder(String),
+}
+
+impl std::fmt::Display for HandProjectRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyName => formatter.write_str("a project needs a name"),
+            Self::NoPlace => {
+                formatter.write_str("say where the project is: --folder <path> or --repo <address>")
+            }
+            Self::NotARepositoryAddress(address) => {
+                write!(
+                    formatter,
+                    "{address} isn't a repository address Catervas can read"
+                )
+            }
+            Self::NotAProjectFolder(path) => write!(
+                formatter,
+                "{path} can't be a project: it is your home, the root or a temporary folder"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for HandProjectRefusal {}
+
+/// Checks a project added by hand: its trimmed name and its repository's key.
+///
+/// # Errors
+///
+/// `EmptyName` for a blank name, `NoPlace` with neither a folder nor an address,
+/// `NotARepositoryAddress` for an address `normalise_remote` cannot read.
+pub fn check_hand_project(
+    name: &str,
+    has_folder: bool,
+    repository: Option<&str>,
+) -> Result<(String, Option<String>), HandProjectRefusal> {
+    let name: String = name.trim().chars().take(TITLE_LIMIT).collect();
+    if name.is_empty() {
+        return Err(HandProjectRefusal::EmptyName);
+    }
+    if !has_folder && repository.is_none() {
+        return Err(HandProjectRefusal::NoPlace);
+    }
+    let remote = repository
+        .map(|address| {
+            normalise_remote(address)
+                .ok_or_else(|| HandProjectRefusal::NotARepositoryAddress(address.to_string()))
+        })
+        .transpose()?;
+    Ok((name, remote))
+}
+
+/// A found project's root and remote, as far as matching a project by hand goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectKey<'a> {
+    /// The root folder.
+    pub root: &'a str,
+    /// The normalised remote, when it has one.
+    pub remote: Option<&'a str>,
+}
+
+/// The found project a project by hand is the same as, as an index into `projects` (newest first): the
+/// one with the longest root containing the hand project's root, else the first with its remote.
+#[must_use]
+pub fn match_hand_project(
+    root: Option<&str>,
+    remote: Option<&str>,
+    projects: &[ProjectKey<'_>],
+) -> Option<usize> {
+    let by_root = root.and_then(|root| {
+        projects
+            .iter()
+            .enumerate()
+            .filter(|(_, project)| is_under(root, project.root))
+            .max_by_key(|(index, project)| (project.root.len(), std::cmp::Reverse(*index)))
+            .map(|(index, _)| index)
+    });
+    by_root.or_else(|| {
+        let remote = remote?;
+        projects
+            .iter()
+            .position(|project| project.remote == Some(remote))
+    })
+}
+
+/// How many fingerprints two sessions must share, under different reply keys, to be linked.
+pub const MIN_SHARED_REPLIES: usize = 3;
+
+/// What identifies a reply across copies of its session: its time to the second, its model and its
+/// four token counters. No text is hashed, and none is read.
+#[must_use]
+pub fn reply_fingerprint(at: DateTime<Utc>, model: &str, usage: Usage) -> String {
+    format!(
+        "{}|{model}|{}|{}|{}|{}",
+        at.timestamp(),
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cache_read_tokens,
+        usage.cache_write_tokens
+    )
+}
+
+/// One session's replies, for finding copies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionReplies {
+    /// The session.
+    pub session_id: String,
+    /// When it started.
+    pub first_at: DateTime<Utc>,
+    /// Its row id in the index: the order sessions were indexed in.
+    pub indexed: i64,
+    /// `(reply key, fingerprint)` in time order.
+    pub replies: Vec<(String, String)>,
+}
+
+/// How two sessions are linked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CopyLink {
+    /// `copy` is a copy of `of`, which is kept.
+    CopyOf {
+        /// The copy, counted nowhere.
+        copy: String,
+        /// The session kept.
+        of: String,
+    },
+    /// Linked, but one of them is in another link too, so neither is dropped.
+    MaybeSame {
+        /// The smaller session id.
+        first: String,
+        /// The other.
+        second: String,
+    },
+}
+
+/// What `copies_among` found.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Copies {
+    /// The links, `CopyOf` by copy then `MaybeSame` by ids.
+    pub links: Vec<CopyLink>,
+    /// `(copied reply key, kept reply key)`, by copied key.
+    pub reply_copies: Vec<(String, String)>,
+}
+
+fn is_prefix_covered(replies: &[(String, String)], shared: &BTreeSet<usize>) -> bool {
+    shared.iter().next_back().is_some_and(|last| {
+        (0..=*last).all(|index| shared.contains(&index)) && *last < replies.len()
+    })
+}
+
+/// The positions of `a`'s replies whose fingerprint `b` holds under another key.
+fn shared_positions(a: &SessionReplies, b: &SessionReplies) -> BTreeSet<usize> {
+    a.replies
+        .iter()
+        .enumerate()
+        .filter(|(_, (key, print))| {
+            b.replies
+                .iter()
+                .any(|(other_key, other)| other == print && other_key != key)
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+fn are_linked(a: &SessionReplies, b: &SessionReplies) -> bool {
+    let in_a = shared_positions(a, b);
+    let prints: BTreeSet<&String> = in_a.iter().map(|index| &a.replies[*index].1).collect();
+    if prints.len() < MIN_SHARED_REPLIES {
+        return false;
+    }
+    let in_b = shared_positions(b, a);
+    is_prefix_covered(&a.replies, &in_a) || is_prefix_covered(&b.replies, &in_b)
+}
+
+fn component_of(parent: &mut [usize], mut node: usize) -> usize {
+    while parent[node] != node {
+        parent[node] = parent[parent[node]];
+        node = parent[node];
+    }
+    node
+}
+
+/// The replies of linked sessions to count once, within each connected group of linked sessions, as
+/// `(copied key, kept key)` by copied key.
+fn replies_counted_once(
+    sessions: &[SessionReplies],
+    pairs: &[(usize, usize)],
+    degree: &[usize],
+    kept_of: &BTreeMap<usize, usize>,
+) -> Vec<(String, String)> {
+    let mut parent: Vec<usize> = (0..sessions.len()).collect();
+    for (first, second) in pairs {
+        let (x, y) = (
+            component_of(&mut parent, *first),
+            component_of(&mut parent, *second),
+        );
+        parent[x] = y;
+    }
+    let mut groups: BTreeMap<(usize, &String), Vec<(usize, &String)>> = BTreeMap::new();
+    for (index, session) in sessions.iter().enumerate() {
+        if degree[index] == 0 {
+            continue;
+        }
+        let component = component_of(&mut parent, index);
+        for (key, print) in &session.replies {
+            groups
+                .entry((component, print))
+                .or_default()
+                .push((index, key));
+        }
+    }
+    let mut reply_copies = Vec::new();
+    for replies in groups.values() {
+        let holders: BTreeSet<usize> = replies.iter().map(|(index, _)| *index).collect();
+        if holders.len() < 2 {
+            continue;
+        }
+        let partner = holders.iter().find(|index| kept_of.contains_key(index));
+        let kept_session = partner.copied().unwrap_or_else(|| {
+            holders
+                .iter()
+                .copied()
+                .min_by_key(|index| (sessions[*index].first_at, sessions[*index].indexed))
+                .unwrap_or_default()
+        });
+        let kept_key = replies
+            .iter()
+            .filter(|(index, _)| *index == kept_session)
+            .map(|(_, key)| *key)
+            .min();
+        let Some(kept_key) = kept_key else { continue };
+        for (index, key) in replies {
+            if *index != kept_session {
+                reply_copies.push(((*key).clone(), kept_key.clone()));
+            }
+        }
+    }
+    reply_copies.sort();
+    reply_copies
+}
+
+/// Finds the sessions that are copies of one another and the replies to count once.
+///
+/// Two sessions are linked only when they share at least `MIN_SHARED_REPLIES` fingerprints under
+/// different reply keys and the shared ones cover every reply of one of them up to its last shared
+/// one. A pair in which each is in no other link merges: the later start is the copy of the other
+/// (on equal starts, the session indexed first is kept). Every other linked pair is `MaybeSame`. A
+/// fingerprint's replies in linked sessions are counted once: the kept one is the copy's partner's,
+/// else the earliest session's, then the lowest row id, then the smallest key.
+#[must_use]
+pub fn copies_among(sessions: &[SessionReplies]) -> Copies {
+    let mut pairs = Vec::new();
+    for first in 0..sessions.len() {
+        for second in first + 1..sessions.len() {
+            if are_linked(&sessions[first], &sessions[second]) {
+                pairs.push((first, second));
+            }
+        }
+    }
+    let mut degree = vec![0_usize; sessions.len()];
+    for (first, second) in &pairs {
+        degree[*first] += 1;
+        degree[*second] += 1;
+    }
+    let mut links = Vec::new();
+    let mut kept_of: BTreeMap<usize, usize> = BTreeMap::new();
+    for (first, second) in &pairs {
+        let (a, b) = (&sessions[*first], &sessions[*second]);
+        if degree[*first] == 1 && degree[*second] == 1 {
+            let a_is_kept = (a.first_at, a.indexed) <= (b.first_at, b.indexed);
+            let (kept, copy) = if a_is_kept {
+                (*first, *second)
+            } else {
+                (*second, *first)
+            };
+            kept_of.insert(kept, copy);
+            links.push((
+                sessions[copy].session_id.clone(),
+                sessions[kept].session_id.clone(),
+                true,
+            ));
+        } else {
+            let (low, high) = if a.session_id <= b.session_id {
+                (&a.session_id, &b.session_id)
+            } else {
+                (&b.session_id, &a.session_id)
+            };
+            links.push((low.clone(), high.clone(), false));
+        }
+    }
+    links.sort();
+    let links = links
+        .into_iter()
+        .map(|(one, other, is_copy)| {
+            if is_copy {
+                CopyLink::CopyOf {
+                    copy: one,
+                    of: other,
+                }
+            } else {
+                CopyLink::MaybeSame {
+                    first: one,
+                    second: other,
+                }
+            }
+        })
+        .collect();
+
+    let reply_copies = replies_counted_once(sessions, &pairs, &degree, &kept_of);
+    Copies {
+        links,
+        reply_copies,
+    }
+}
+
 /// Wire fixtures for tests, in this crate and in others.
 pub mod fixtures;
 
@@ -911,6 +1308,289 @@ mod tests {
         ];
         for (place, wire) in wires {
             assert_eq!(place.as_wire(), wire);
+        }
+    }
+
+    #[test]
+    fn normalises_ssh_and_https_remotes_alike() {
+        for address in [
+            "https://github.com/Me/Shop.git",
+            "https://github.com/me/shop/",
+            "http://github.com/me/shop",
+            "git@github.com:me/shop.git",
+            "github.com:me/shop.git",
+            "ssh://git@github.com/me/shop.GIT",
+            "ssh://git@github.com:22/me/shop",
+            "git://github.com/me/shop.git",
+            "https://x-access-token:SECRET@github.com/me/shop.git",
+        ] {
+            assert_eq!(
+                normalise_remote(address).as_deref(),
+                Some("github.com/me/shop"),
+                "{address}"
+            );
+        }
+        assert_eq!(
+            normalise_remote("https://gitlab.com/Group/Sub/Proj.git").as_deref(),
+            Some("gitlab.com/group/sub/proj")
+        );
+        for address in [
+            "/home/me/shop",
+            "file:///home/me/shop",
+            "../shop",
+            "https://github.com/me",
+            "git@github.com:",
+            "C:/repo",
+            "",
+        ] {
+            assert_eq!(normalise_remote(address), None, "{address}");
+        }
+    }
+
+    #[test]
+    fn checks_a_project_by_hand() {
+        assert_eq!(
+            check_hand_project("  Shop ", true, None),
+            Ok(("Shop".to_string(), None))
+        );
+        assert_eq!(
+            check_hand_project("Shop", false, Some("git@github.com:me/shop.git")),
+            Ok(("Shop".to_string(), Some("github.com/me/shop".to_string())))
+        );
+        assert_eq!(
+            check_hand_project(" ", true, None),
+            Err(HandProjectRefusal::EmptyName)
+        );
+        assert_eq!(
+            check_hand_project("Shop", false, None),
+            Err(HandProjectRefusal::NoPlace)
+        );
+        assert_eq!(
+            check_hand_project("Shop", false, Some("/tmp/x")),
+            Err(HandProjectRefusal::NotARepositoryAddress(
+                "/tmp/x".to_string()
+            ))
+        );
+        let sentences = [
+            (HandProjectRefusal::EmptyName, "a project needs a name"),
+            (
+                HandProjectRefusal::NoPlace,
+                "say where the project is: --folder <path> or --repo <address>",
+            ),
+            (
+                HandProjectRefusal::NotARepositoryAddress("/tmp/x".to_string()),
+                "/tmp/x isn't a repository address Catervas can read",
+            ),
+            (
+                HandProjectRefusal::NotAProjectFolder("/".to_string()),
+                "/ can't be a project: it is your home, the root or a temporary folder",
+            ),
+        ];
+        for (refusal, sentence) in sentences {
+            assert_eq!(refusal.to_string(), sentence);
+        }
+    }
+
+    #[test]
+    fn matches_a_project_by_hand() {
+        let projects = [
+            ProjectKey {
+                root: "/h/shop",
+                remote: Some("github.com/me/shop"),
+            },
+            ProjectKey {
+                root: "/h/shop/apps",
+                remote: None,
+            },
+            ProjectKey {
+                root: "/h/notes",
+                remote: None,
+            },
+        ];
+        assert_eq!(
+            match_hand_project(Some("/h/shop/apps/web"), None, &projects),
+            Some(1)
+        );
+        assert_eq!(
+            match_hand_project(Some("/h/shopping"), None, &projects),
+            None
+        );
+        assert_eq!(
+            match_hand_project(None, Some("github.com/me/shop"), &projects),
+            Some(0)
+        );
+        assert_eq!(
+            match_hand_project(Some("/h/other"), Some("github.com/me/shop"), &projects),
+            Some(0)
+        );
+        assert_eq!(
+            match_hand_project(None, Some("github.com/me/x"), &projects),
+            None
+        );
+    }
+
+    fn at_second(seconds: u32) -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339(&format!(
+            "2026-10-12T09:{:02}:{:02}Z",
+            seconds / 60,
+            seconds % 60
+        ))
+        .expect("a time")
+        .with_timezone(&Utc)
+    }
+
+    /// A reply made at second `n`, with usage that only it has.
+    fn print(n: u32) -> String {
+        reply_fingerprint(
+            at_second(n),
+            "claude-opus-5-5",
+            usage(u64::from(n), 2, 3, 4),
+        )
+    }
+
+    fn session(id: &str, indexed: i64, first: u32, replies: &[(&str, u32)]) -> SessionReplies {
+        SessionReplies {
+            session_id: id.to_string(),
+            first_at: at_second(first),
+            indexed,
+            replies: replies
+                .iter()
+                .map(|(key, n)| ((*key).to_string(), print(*n)))
+                .collect(),
+        }
+    }
+
+    fn pair(copy: &str, of: &str) -> CopyLink {
+        CopyLink::CopyOf {
+            copy: copy.to_string(),
+            of: of.to_string(),
+        }
+    }
+
+    fn maybe(first: &str, second: &str) -> CopyLink {
+        CopyLink::MaybeSame {
+            first: first.to_string(),
+            second: second.to_string(),
+        }
+    }
+
+    fn copied(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(copy, kept)| ((*copy).to_string(), (*kept).to_string()))
+            .collect()
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines, clippy::many_single_char_names)]
+    fn links_copies_on_strong_evidence_only() {
+        let a = session(
+            "a",
+            1,
+            5,
+            &[("a1", 5), ("a2", 60), ("a3", 120), ("a4", 180)],
+        );
+        let b = session(
+            "b",
+            2,
+            300,
+            &[("b1", 5), ("b2", 60), ("b3", 120), ("b4", 180), ("b5", 400)],
+        );
+        let found = copies_among(&[a.clone(), b.clone()]);
+        assert_eq!(found.links, vec![pair("b", "a")]);
+        assert_eq!(
+            found.reply_copies,
+            copied(&[("b1", "a1"), ("b2", "a2"), ("b3", "a3"), ("b4", "a4")])
+        );
+        // On equal start times the session indexed first is kept.
+        let tied = SessionReplies {
+            first_at: a.first_at,
+            ..b.clone()
+        };
+        assert_eq!(
+            copies_among(&[tied.clone(), a.clone()]).links,
+            vec![pair("b", "a")]
+        );
+        let earlier = SessionReplies { indexed: 0, ..tied };
+        assert_eq!(
+            copies_among(&[earlier, a.clone()]).links,
+            vec![pair("a", "b")]
+        );
+        // Two shared replies are not enough.
+        let two = session("b", 2, 300, &[("b1", 5), ("b2", 60)]);
+        assert_eq!(copies_among(&[a.clone(), two]), Copies::default());
+        // Three shared, but each holds a reply between them that the other lacks.
+        let gap_a = session(
+            "a",
+            1,
+            5,
+            &[("a1", 5), ("a2", 60), ("a3", 120), ("a4", 180)],
+        );
+        let gap_b = session(
+            "b",
+            2,
+            300,
+            &[("b1", 5), ("b9", 90), ("b3", 120), ("b4", 180)],
+        );
+        assert_eq!(copies_among(&[gap_a, gap_b]), Copies::default());
+        // A shared key is a resume, not a copy.
+        let resumed = session(
+            "b",
+            2,
+            300,
+            &[("a1", 5), ("a2", 60), ("a3", 120), ("a4", 180)],
+        );
+        assert_eq!(copies_among(&[a.clone(), resumed]), Copies::default());
+        // Two copies of one session cannot be told apart.
+        let c = session(
+            "c",
+            3,
+            310,
+            &[("c1", 5), ("c2", 60), ("c3", 120), ("c4", 180)],
+        );
+        let found = copies_among(&[a.clone(), b, c]);
+        assert_eq!(
+            found.links,
+            vec![maybe("a", "b"), maybe("a", "c"), maybe("b", "c")]
+        );
+        assert_eq!(found.reply_copies.len(), 8);
+        for (copy, kept) in [("b1", "a1"), ("c4", "a4"), ("b3", "a3"), ("c2", "a2")] {
+            assert!(
+                found
+                    .reply_copies
+                    .contains(&(copy.to_string(), kept.to_string()))
+            );
+        }
+        // Two separate pairs.
+        let x = session("x", 4, 1000, &[("x1", 1000), ("x2", 1001), ("x3", 1002)]);
+        let y = session("y", 5, 1100, &[("y1", 1000), ("y2", 1001), ("y3", 1002)]);
+        let two_pairs = copies_among(&[
+            a.clone(),
+            x,
+            y,
+            session(
+                "z",
+                6,
+                400,
+                &[("z1", 5), ("z2", 60), ("z3", 120), ("z4", 180)],
+            ),
+        ]);
+        assert_eq!(two_pairs.links, vec![pair("y", "x"), pair("z", "a")]);
+        // A second only changes the second of the time; seconds decide.
+        let subsecond = reply_fingerprint(
+            at_second(5) + chrono::Duration::milliseconds(700),
+            "claude-opus-5-5",
+            usage(5, 2, 3, 4),
+        );
+        assert_eq!(subsecond, print(5));
+        let wires = [
+            (Source::Local, "local"),
+            (Source::Teleported, "teleported"),
+            (Source::Export, "export"),
+            (Source::ByHand, "by_hand"),
+        ];
+        for (source, wire) in wires {
+            assert_eq!(source.as_wire(), wire);
         }
     }
 }
