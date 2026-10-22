@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use catervas_core::claude_export::{ClaudeProjectRecord, ConversationRecord};
 use catervas_core::claude_history::ToolUse;
 use catervas_core::claude_services::{
     Call, Configured, ConfiguredServer, ServerKind, Service, ServiceSource, ServiceUse, SessionUse,
@@ -341,6 +342,9 @@ fn stamp(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
+// An export's item replaces the stored one when it is at least as recent, or the stored one is undated.
+const LATER: &str = "(updated_at IS NULL OR excluded.updated_at >= updated_at)";
+
 // A session's turn fields are those of its earliest turn: the folder it started in.
 const EARLIER: &str = "excluded.first_at IS NOT NULL AND (sessions.first_at IS NULL OR excluded.first_at < sessions.first_at)";
 
@@ -506,6 +510,102 @@ impl MachineIndex {
         )?;
         transaction.commit()?;
         Ok(())
+    }
+
+    /// Writes one export's conversations and Projects, all or none: each item by uuid, its fields
+    /// replaced when the incoming `updated_at` is at least the stored one (or the stored one is none),
+    /// and the latest export time that held it kept. Returns how many conversations and Projects
+    /// were not there before.
+    pub(crate) fn record_claude_export(
+        &mut self,
+        account: &str,
+        content_at: DateTime<Utc>,
+        conversations: &[ConversationRecord],
+        projects: &[ClaudeProjectRecord],
+        now: DateTime<Utc>,
+    ) -> Result<(u64, u64), StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (seen, imported) = (stamp(content_at), stamp(now));
+        transaction.execute(
+            "INSERT OR IGNORE INTO claude_exports (account, content_at, imported_at)
+             VALUES (?1, ?2, ?3)",
+            (account, &seen, &imported),
+        )?;
+        let optional = |time: Option<DateTime<Utc>>| time.map(stamp);
+        let mut new_conversations = 0;
+        for item in conversations {
+            let before: i64 = transaction.query_row(
+                "SELECT count(*) FROM claude_conversations WHERE uuid = ?1",
+                (&item.uuid,),
+                |row| row.get(0),
+            )?;
+            new_conversations += u64::from(before == 0);
+            transaction.execute(
+                &"INSERT INTO claude_conversations
+                     (uuid, account, title, created_at, updated_at, messages,
+                      seen_in_export_at, first_imported_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT (uuid) DO UPDATE SET
+                     account = CASE WHEN LATER THEN excluded.account ELSE account END,
+                     title = CASE WHEN LATER THEN excluded.title ELSE title END,
+                     created_at = CASE WHEN LATER THEN excluded.created_at ELSE created_at END,
+                     updated_at = CASE WHEN LATER THEN excluded.updated_at ELSE updated_at END,
+                     messages = CASE WHEN LATER THEN excluded.messages ELSE messages END,
+                     seen_in_export_at = max(seen_in_export_at, excluded.seen_in_export_at)"
+                    .replace("LATER", LATER),
+                (
+                    &item.uuid,
+                    account,
+                    &item.title,
+                    optional(item.created_at),
+                    optional(item.updated_at),
+                    int(item.messages),
+                    &seen,
+                    &imported,
+                ),
+            )?;
+        }
+        let mut new_projects = 0;
+        for item in projects {
+            let before: i64 = transaction.query_row(
+                "SELECT count(*) FROM claude_projects WHERE uuid = ?1",
+                (&item.uuid,),
+                |row| row.get(0),
+            )?;
+            new_projects += u64::from(before == 0);
+            let doc_names =
+                serde_json::to_string(&item.doc_names).unwrap_or_else(|_| "[]".to_string());
+            transaction.execute(
+                &"INSERT INTO claude_projects
+                     (uuid, account, name, description, doc_names, created_at, updated_at,
+                      seen_in_export_at, first_imported_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                 ON CONFLICT (uuid) DO UPDATE SET
+                     account = CASE WHEN LATER THEN excluded.account ELSE account END,
+                     name = CASE WHEN LATER THEN excluded.name ELSE name END,
+                     description = CASE WHEN LATER THEN excluded.description ELSE description END,
+                     doc_names = CASE WHEN LATER THEN excluded.doc_names ELSE doc_names END,
+                     created_at = CASE WHEN LATER THEN excluded.created_at ELSE created_at END,
+                     updated_at = CASE WHEN LATER THEN excluded.updated_at ELSE updated_at END,
+                     seen_in_export_at = max(seen_in_export_at, excluded.seen_in_export_at)"
+                    .replace("LATER", LATER),
+                (
+                    &item.uuid,
+                    account,
+                    &item.name,
+                    &item.description,
+                    doc_names,
+                    optional(item.created_at),
+                    optional(item.updated_at),
+                    &seen,
+                    &imported,
+                ),
+            )?;
+        }
+        transaction.commit()?;
+        Ok((new_conversations, new_projects))
     }
 
     /// Every session with a folder, as its id and that folder.
@@ -1073,10 +1173,16 @@ mod tests {
         let temp = TempProject::new("opens-machine-index");
         let path = temp.root.join("state").join(MACHINE_DB);
         let index = open_machine_index(&path, now()).expect("the index opens");
-        assert_eq!(index.applied_migrations().expect("versions"), vec![1, 2, 3]);
+        assert_eq!(
+            index.applied_migrations().expect("versions"),
+            vec![1, 2, 3, 4]
+        );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
-        assert_eq!(again.applied_migrations().expect("versions"), vec![1, 2, 3]);
+        assert_eq!(
+            again.applied_migrations().expect("versions"),
+            vec![1, 2, 3, 4]
+        );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
         let mut tables: Vec<String> = connection
@@ -1090,6 +1196,9 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "claude_conversations",
+                "claude_exports",
+                "claude_projects",
                 "configured_servers",
                 "jobs",
                 "projects",

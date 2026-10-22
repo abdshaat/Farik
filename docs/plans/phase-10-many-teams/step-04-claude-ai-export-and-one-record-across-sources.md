@@ -205,7 +205,7 @@ Files: `Cargo.toml`, `crates/store/Cargo.toml`; `migrations.rs`, `<n>_claude_exp
 - `refuses_what_is_not_a_claude_export`: a text file `NotAZip`; only `notes.txt` `NotAnExport`; `conversations.json` `{}`, and `projects.json` `{}`, `NotAList`; `users.json` `{}` `NotAList`; `conversations.json` cut mid-array `Unreadable`; only C3 `NothingDated`; `a_patched_zip` with `BadChecksum` `Damaged`, `Method(99)` `Unsupported`, `Encrypted` `Encrypted`. Each `Display` is its sentence above; after each, the claude.ai tables are empty. RED.
 - `reads_a_malicious_zip_safely`: `NotAnExport` when the only `conversations.json` is `../conversations.json`, `/conversations.json`, or `a_zip_with_a_symlink("conversations.json", "/etc/passwd")`; with 4 KiB per entry, `TooLarge { limit_bytes: 4096 }` reading "over 4 KiB" for an honest 8 KiB entry and for `DeclaredSize(100)` over 8 KiB; with a 1 KiB file limit, `TooLarge` for a 2 KiB zip. After each, nothing in the claude.ai tables, and the folder holds only the zips and `machine.db`. RED.
 
-- [ ] `feat(store): import claude.ai's export into the machine index`
+- [x] `feat(store): import claude.ai's export into the machine index`
 
 ### Task 4: Re-importing, and what `found` says about claude.ai
 

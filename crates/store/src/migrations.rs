@@ -113,7 +113,7 @@ pub(crate) fn apply_through(
 
 /// The migrations of the machine-level index (`machine.db`), numbered apart from a project log's so
 /// the two never meet in one folder.
-const MACHINE_MIGRATIONS: [Migration; 3] = [
+const MACHINE_MIGRATIONS: [Migration; 4] = [
     Migration {
         version: 1,
         sql: include_str!("migrations/machine/0001_history.sql"),
@@ -125,6 +125,10 @@ const MACHINE_MIGRATIONS: [Migration; 3] = [
     Migration {
         version: 3,
         sql: include_str!("migrations/machine/0003_services.sql"),
+    },
+    Migration {
+        version: 4,
+        sql: include_str!("migrations/machine/0004_claude_export.sql"),
     },
 ];
 
@@ -262,7 +266,7 @@ mod tests {
                 [],
             )
             .expect("a transcript file");
-        apply_machine(&mut connection, now).expect("version 3");
+        apply_list(&mut connection, &MACHINE_MIGRATIONS, 3, now).expect("version 3");
         let versions: Vec<i64> = connection
             .prepare("SELECT version FROM schema_migrations ORDER BY version")
             .expect("a statement")

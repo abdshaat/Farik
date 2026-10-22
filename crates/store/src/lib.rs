@@ -9,6 +9,8 @@ pub mod autopilot;
 pub mod baseline;
 /// The branch names a new branch may not take.
 pub mod branches;
+/// Reading claude.ai's data export into the machine index, from the zip, without extracting it.
+pub mod claude_export;
 /// Reading Claude Code's transcripts into the machine index, and placing each session in its project.
 pub mod claude_history;
 /// Reading the connectors Claude's settings name into the machine index, never a key.
