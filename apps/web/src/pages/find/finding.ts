@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { useHub } from "../../app/connection.tsx";
+import { said } from "../../app/refusals.ts";
+import type { en } from "../../strings/en.ts";
+import { t } from "../../strings/t.ts";
 
 /** How often the page asks `finding.status` again while a scan runs. */
 const POLL_MS = 1000;
@@ -102,3 +105,91 @@ export function counted(
 ): string {
 	return count === 1 ? one : many(count);
 }
+
+/** One row of `finding.list`, in camelCase. */
+export type FoundRow = {
+	/** The project's key: its normalised repository address, its real path, a connector project's name, or a claude.ai uuid. */
+	key: string;
+	name: string;
+	kind: "folder" | "connector" | "claude_ai" | "hand" | "job";
+	folders: string[];
+	lastAt: string | null;
+	jobs: { name: string; schedule: string }[];
+	services: string[];
+	suggested: Choice | null;
+	choice: Choice | null;
+	/** The slug of the team whose project folder is one of `folders`. */
+	alreadyTeam: string | null;
+	gone: boolean;
+};
+
+export type Choice = "team" | "watch" | "ignore";
+
+/** `finding.list`'s answer, in camelCase. */
+export type FoundList = {
+	main: FoundRow[];
+	explored: FoundRow[];
+	gone: FoundRow[];
+	home: { sessions: number; formedInto: string[] };
+	computerJobs: FoundRow[];
+	ignored: FoundRow[];
+};
+
+/**
+ * The found list, asked on mount and again whenever the scan publishes new counts (`version`),
+ * and on `again()`.
+ */
+export function useFoundList(version: number | undefined): {
+	list: FoundList | undefined;
+	again: () => void;
+} {
+	const { client } = useHub();
+	const [list, setList] = useState<FoundList>();
+	const [round, setRound] = useState(0);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: version and round ask for the list again
+	useEffect(() => {
+		if (!client) return;
+		let live = true;
+		client.call("finding.list", {}).then(
+			(answer) => live && setList(answer as FoundList),
+			() => {},
+		);
+		return () => {
+			live = false;
+		};
+	}, [client, version, round]);
+	return { list, again: () => setRound((n) => n + 1) };
+}
+
+/** `path` with the home folder written as `~`: the first two parts of /home/<name> or /Users/<name>. */
+export function tilde(path: string): string {
+	return path.replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, "~");
+}
+
+/** The name of a project's folder under Catervas: its name before any bracket, lower case, with dashes. */
+export function slugOf(name: string): string {
+	return (
+		name
+			.split("(")[0]
+			?.toLowerCase()
+			.replace(/[^a-z0-9]+/g, "-")
+			.replace(/^-+|-+$/g, "") || "project"
+	);
+}
+
+/** How long ago `moment` was, in days, as a person says it. */
+export function whenWorked(moment: string, now = Date.now()): string {
+	const days = Math.floor((now - Date.parse(moment)) / 86_400_000);
+	if (days <= 0) return t("foundToday");
+	if (days === 1) return t("foundYesterday");
+	return t("foundDaysAgo", { count: days });
+}
+
+/** A failed call of finding in plain words: its refusal code's sentence, else `other`. */
+export function findingSaid(e: unknown, other: keyof typeof en): string {
+	const message = e instanceof Error ? e.message : "";
+	return said(/^([a-z_]+): /.exec(message)?.[1], {}, other);
+}
+
+/** When the owner last opened the found list, kept in this browser: what is newer is "new". */
+export const FOUND_SEEN = "catervas.foundSeen";

@@ -2,9 +2,9 @@ import { Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { useHub } from "../../app/connection.tsx";
-import { commandSaid } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import styles from "./find.module.css";
+import { findingSaid } from "./finding.ts";
 
 /** What is read, kept and never touched, word for word from the mockup. */
 export function WhatIsRead() {
@@ -42,9 +42,7 @@ export function useStartLooking(setup: boolean) {
 			await client.call("finding.start", {});
 			navigate("/find/scanning", { state: { setup } });
 		} catch (e) {
-			setSaid(
-				commandSaid(e instanceof Error ? e.message : "", {}) || t("findStart"),
-			);
+			setSaid(findingSaid(e, "findStart"));
 		} finally {
 			setBusy(false);
 		}

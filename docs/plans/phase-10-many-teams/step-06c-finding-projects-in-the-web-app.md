@@ -120,7 +120,7 @@ Tests (`pages/find/Found.test.tsx`):
   - "No longer on this computer (1)" opens to a row with **Locate…**.
   - With no rows it shows "We didn't find any projects", and **Add a project by hand** sends `finding.add_project`.
 
-- [ ] `feat(web): here's what you work on`
+- [x] `feat(web): here's what you work on`
 
 ### Task 3: Claude on the web, without GitHub
 

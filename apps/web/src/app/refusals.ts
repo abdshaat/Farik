@@ -169,6 +169,20 @@ const WORDS: Record<string, keyof typeof en> = {
 	documents_switching: "refuseDocumentsSwitching",
 	documents_in_flight: "refuseDocumentsInFlight",
 	documents_busy: "refuseDocumentsBusy",
+	// Finding the owner's projects (SPEC 4.1; ADR 0059).
+	finding_paused: "refuseFindingPaused",
+	unknown_project: "refuseUnknownProject",
+	not_gone: "refuseNotGone",
+	not_the_same_repository: "refuseNotSameRepository",
+	unknown_service: "refuseUnknownService",
+	cannot_add: "refuseCannotAdd",
+	retention_not_offered: "refuseRetention",
+	forget_needs_confirming: "refuseForgetConfirm",
+	not_there: "refuseFolderNotThere",
+	outside_home: "refuseFolderOutsideHome",
+	home_itself: "refuseFolderIsHome",
+	not_a_repository: "refuseFolderNotRepository",
+	not_the_top: "refuseFolderNotTop",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */

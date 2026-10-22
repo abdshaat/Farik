@@ -8,6 +8,7 @@ import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Files } from "../pages/Files.tsx";
+import { Found } from "../pages/find/Found.tsx";
 import { Scanning } from "../pages/find/Scanning.tsx";
 import { WhereClaude } from "../pages/find/WhereClaude.tsx";
 import { Gate } from "../pages/Gate.tsx";
@@ -74,6 +75,7 @@ export function App() {
 			{/* Finding the owner's projects (ADR 0059) is the computer's, so it talks to the hub. */}
 			<Route path="/setup/where" element={<WhereClaude />} />
 			<Route path="/find/scanning" element={<Scanning />} />
+			<Route path="/find/found" element={<Found />} />
 			{/* The steps after the project talk to the team just taken on, the current one. */}
 			<Route element={<CurrentScope />}>
 				<Route path="/setup/scan" element={<SetupScan />} />

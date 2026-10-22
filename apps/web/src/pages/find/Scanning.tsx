@@ -2,12 +2,16 @@ import { Button } from "@catervas/ui";
 import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 import { useHub } from "../../app/connection.tsx";
-import { commandSaid } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
 import { Wizard } from "../setup/Wizard.tsx";
 import { useStartLooking } from "./FindOffer.tsx";
 import styles from "./find.module.css";
-import { counted, type FindingStatus, useFindingStatus } from "./finding.ts";
+import {
+	counted,
+	type FindingStatus,
+	findingSaid,
+	useFindingStatus,
+} from "./finding.ts";
 
 /** How long is left, in words. */
 function timeLeft(seconds: number): string {
@@ -71,7 +75,7 @@ export function Scanning() {
 		try {
 			await client?.call("finding.stop", {});
 		} catch (e) {
-			setSaid(commandSaid(e instanceof Error ? e.message : "", {}));
+			setSaid(findingSaid(e, "refuseOther"));
 		}
 		again();
 	};
