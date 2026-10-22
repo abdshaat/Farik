@@ -51,6 +51,7 @@ mod documents;
 pub(crate) mod fixtures;
 mod gates;
 mod hooks;
+pub mod hub;
 mod mcp;
 pub(crate) mod own_calls;
 mod repos;
@@ -260,6 +261,8 @@ pub struct DaemonState {
     campaign_made: tokio::sync::Notify,
     /// The sandbox image's build, run in the background while setup waits (ADR 0070).
     image_build: crate::computer::ImageBuild,
+    /// The teams `catervas serve` drives, on the hub's own state alone (ADR 0059).
+    hub: OnceLock<Arc<hub::Hub>>,
 }
 
 /// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
@@ -357,6 +360,7 @@ impl DaemonState {
             spend_reads: Mutex::default(),
             campaign_made: tokio::sync::Notify::new(),
             image_build: crate::computer::ImageBuild::default(),
+            hub: OnceLock::new(),
         }
     }
 
@@ -390,7 +394,20 @@ impl DaemonState {
             spend_reads: Mutex::default(),
             campaign_made: tokio::sync::Notify::new(),
             image_build: crate::computer::ImageBuild::default(),
+            hub: OnceLock::new(),
         }
+    }
+
+    /// Makes this the hub's own state: it routes each page to its team in `hub` (ADR 0059).
+    /// Answers `true`, or `false` when it was a hub already.
+    pub fn set_hub(&self, hub: Arc<hub::Hub>) -> bool {
+        self.hub.set(hub).is_ok()
+    }
+
+    /// The teams this state is the hub of, when it is.
+    #[must_use]
+    pub fn hub(&self) -> Option<&Arc<hub::Hub>> {
+        self.hub.get()
     }
 
     /// The project `project.leave` is leaving, if it was asked to; serve reads it once the run has
@@ -1190,13 +1207,25 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
     let browser = Router::new()
         .route("/", get(app::app_from::<E>))
         .route("/connect", get(app::app_from::<E>).post(web::connect))
-        .route("/rpc", get(web::rpc))
         .route("/session", get(web::session))
-        .route("/documents/raw", get(documents::raw))
         .route("/disconnect", post(web::disconnect))
-        .fallback(get(app::app_from::<E>))
-        .layer(Extension(cancel))
-        .with_state(Arc::clone(&state));
+        .fallback(get(app::app_from::<E>));
+    // The hub's own state answers `/rpc` and `/documents/raw` for the current team, and has a page
+    // route for each team and one for itself (ADR 0059); a team's daemon answers its own.
+    let browser = if state.hub().is_some() {
+        browser
+            .route("/rpc", get(hub::current_rpc))
+            .route("/documents/raw", get(hub::current_documents))
+            .route("/hub/rpc", get(web::rpc))
+            .route("/t/{team}/rpc", get(hub::team_rpc))
+            .route("/t/{team}/documents/raw", get(hub::team_documents))
+    } else {
+        browser
+            .route("/rpc", get(web::rpc))
+            .route("/documents/raw", get(documents::raw))
+    }
+    .layer(Extension(cancel))
+    .with_state(Arc::clone(&state));
     // Outside the daemon-token layer: a Catervas connector's shim holds no daemon token, only the
     // ticket its launch was given, which names its session (ADR 0038, ADR 0042).
     let calls = Router::new()

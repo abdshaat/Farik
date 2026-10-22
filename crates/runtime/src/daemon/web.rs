@@ -76,9 +76,9 @@ pub struct WebState {
 
 /// The one live connect code: `issue` replaces it, and `redeem` spends it. It lives in memory, so
 /// a restart makes the link it was printed in useless.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ConnectCodes {
-    live: Mutex<Option<String>>,
+    live: Arc<Mutex<Option<String>>>,
 }
 
 impl ConnectCodes {
@@ -119,10 +119,14 @@ const SESSION_DAYS: i64 = 30;
 /// The browsers that traded a code, kept in `<state_dir>/browser-sessions.json` (mode 0600) as the
 /// SHA-256 of each session's secret, never the secret. Without a state folder they are kept in
 /// memory for the process's life.
+///
+/// A clone is another handle on the same sessions: `catervas serve` gives every team's page the
+/// one set, so that the browser connects once (ADR 0059).
+#[derive(Clone)]
 pub struct BrowserSessions {
     file: Option<PathBuf>,
     /// The sessions when there is no file; with one, the lock each read-modify-write holds.
-    memory: Mutex<Vec<StoredSession>>,
+    memory: Arc<Mutex<Vec<StoredSession>>>,
 }
 
 /// One session as the file keeps it.
@@ -148,7 +152,7 @@ impl BrowserSessions {
     pub fn open(file: Option<PathBuf>) -> Result<Self, DaemonError> {
         let sessions = BrowserSessions {
             file,
-            memory: Mutex::new(Vec::new()),
+            memory: Arc::default(),
         };
         sessions.load(&[])?;
         Ok(sessions)

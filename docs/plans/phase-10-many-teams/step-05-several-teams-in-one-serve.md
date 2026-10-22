@@ -216,7 +216,7 @@ Tests (in `hub.rs`, with two test `DaemonState`s as `web.rs`'s tests build them)
   - A cookie made by the hub's `/connect` is accepted on both teams' sockets.
 - `names_teams_once`: asserts that `slugs_for(["bakery","shop","bakery"])` is `bakery, shop, bakery-2`.
 
-- [ ] `feat(runtime): a hub routes each page to its team`
+- [x] `feat(runtime): a hub routes each page to its team`
 
 ### Task 5: Serve drives every team
 
