@@ -35,9 +35,9 @@ fn a_todo_write_line(cwd: &str, at: &str) -> String {
             "content": [{
                 "type": "tool_use", "id": "toolu_todos", "name": "TodoWrite",
                 "input": { "todos": [
-                    {"content": "NEVER-KEPT-TODO one", "status": "completed", "activeForm": "a"},
-                    {"content": "NEVER-KEPT-TODO two", "status": "in_progress", "activeForm": "b"},
-                    {"content": "NEVER-KEPT-TODO three", "status": "pending", "activeForm": "c"},
+                    {"content": "NEVER-KEPT-ITEM one", "status": "completed", "activeForm": "a"},
+                    {"content": "NEVER-KEPT-ITEM two", "status": "in_progress", "activeForm": "b"},
+                    {"content": "NEVER-KEPT-ITEM three", "status": "pending", "activeForm": "c"},
                 ]},
             }],
             "usage": {"input_tokens": 1, "output_tokens": 1,
@@ -159,7 +159,7 @@ fn gathers_the_reminders_input() {
     // No to-do text reaches the index.
     drop(index);
     let bytes = std::fs::read(world.temp.root.join("state").join(MACHINE_DB)).expect("the index");
-    let marker = b"NEVER-KEPT-TODO";
+    let marker = b"NEVER-KEPT-ITEM";
     assert!(!bytes.windows(marker.len()).any(|window| window == marker));
 
     // A session in a folder outside home is not read by git.
