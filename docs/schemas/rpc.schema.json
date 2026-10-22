@@ -1933,13 +1933,18 @@
         "designer_browser": {
           "$ref": "#/$defs/computerItem",
           "description": "The UI/UX Designer's browser, the Playwright connector's pinned image; present only for a team with a Designer, which setup's suggested team has (step 12)."
+        },
+        "taking_on": {
+          "type": "boolean",
+          "description": "Whether the project that stopped because this computer's sandbox was not ready is now being taken on, the sandbox image being ready: Catervas restarts on it (spec 0.139)."
         }
       },
       "required": [
         "claude",
         "git",
         "docker",
-        "sandbox_image"
+        "sandbox_image",
+        "taking_on"
       ]
     },
     "accountStatusResult": {

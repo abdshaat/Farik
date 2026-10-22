@@ -288,7 +288,7 @@ async fn with_the_product_manager(
     let (ended, open) = converse(project, task_id, &mut driver, stdin, printer, &mut presses).await;
     let mut code = 0;
     let readiness = match (&ended, &open) {
-        (Ended::Failed(error), _) => {
+        (Ended::Failed(error) | Ended::Unready(error), _) => {
             report_error(printer, error);
             code = 1;
             None
@@ -388,7 +388,7 @@ async fn converse(
         )
         .await;
         let open = match &ended {
-            Ended::Failed(_) => return (ended, None),
+            Ended::Failed(_) | Ended::Unready(_) => return (ended, None),
             Ended::Idle(_) | Ended::Stopped => open_question(project, task_id),
         };
         let (Ended::Idle(_), Some(question)) = (&ended, &open) else {

@@ -62,8 +62,11 @@ pub(crate) struct CliHost {
     pub(crate) stores: Vec<Arc<dyn CredentialStore>>,
     /// Where the chosen project is said.
     pub(crate) chosen: watch::Sender<Option<PathBuf>>,
-    /// A project already chosen, which has no credential yet: `connect` takes it on.
+    /// A project already chosen, which has no credential yet, or no sandbox when `sandbox`:
+    /// `connect`, or `sandbox_ready`, takes it on.
     pub(crate) waiting: Option<PathBuf>,
+    /// Whether `waiting` waits on this computer's sandbox rather than on the credential.
+    pub(crate) sandbox: bool,
     /// The root the team just left from the browser: opening it again stays on it as it is.
     pub(crate) leaving: Option<PathBuf>,
     /// Where the connector keys are kept, for the team taken to another project.
@@ -477,10 +480,19 @@ impl SetupHost for CliHost {
                 refused("this computer has no keychain and no folder to keep the key in")
             }
         })?;
-        if let Some(root) = &self.waiting {
+        let taking_on = self.waiting.as_ref().filter(|_| !self.sandbox);
+        if let Some(root) = taking_on {
             self.choose(root.clone());
         }
-        Ok((source, self.waiting.is_some()))
+        Ok((source, taking_on.is_some()))
+    }
+
+    fn sandbox_ready(&self) -> bool {
+        let taking_on = self.waiting.as_ref().filter(|_| self.sandbox);
+        if let Some(root) = taking_on {
+            self.choose(root.clone());
+        }
+        taking_on.is_some()
     }
 
     fn home(&self) -> PathBuf {
@@ -607,6 +619,7 @@ mod tests {
                 stores: Vec::new(),
                 chosen: tokio::sync::watch::channel(None).0,
                 waiting: None,
+                sandbox: false,
                 leaving: leaving.map(Path::to_path_buf),
                 secrets: self.secrets.clone(),
             }
