@@ -3,6 +3,8 @@
 
 /// What each agent does, and what moved.
 pub mod activity;
+/// What the analytics read from the machine index.
+pub mod analytics;
 /// What the log says about autopilot (ADR 0082).
 pub mod autopilot;
 /// The copy of a private folder a task is judged against.

@@ -91,7 +91,7 @@ Tests (`crates/store/src/analytics.rs`):
   - Active hours sum gaps under 5 minutes: replies at 10:00, 10:03 and 10:20 give 3 minutes.
   - "Used most" names "Editing files" for `Edit` and `Write` calls.
 
-- [ ] `feat(store): the owner's usage and workflow, counted once per reply`
+- [x] `feat(store): the owner's usage and workflow, counted once per reply`
 
 ### Task 2: The team's activity from its log
 
