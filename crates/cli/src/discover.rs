@@ -1,20 +1,16 @@
 //! `catervas discover`: what Catervas found in the Claude Code history.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 
 use catervas_core::claude_history::Source;
 use catervas_core::claude_services::{ServiceUse, Work};
 use catervas_core::jobs::JobKind;
 use catervas_core::pricing::Usage;
-use catervas_runtime::computer::program_output;
 use catervas_store::claude_export::{ExportLimits, ExportSummary, import_claude_export};
-use catervas_store::claude_history::{
-    ReadSummary, add_project_by_hand, find_copies, place_sessions, read_transcripts,
-};
-use catervas_store::claude_services::{
-    SettingsPaths, WindowsClaude, read_service_settings, windows_claude_dirs,
-};
-use catervas_store::jobs::{JobPlaces, find_jobs};
+use catervas_store::claude_history::{ReadSummary, add_project_by_hand};
+use catervas_store::claude_services::{SettingsPaths, WindowsClaude, windows_claude_dirs};
 use catervas_store::machine::{
     Activity, ClaudeAi, FormedFound, Found, FoundProject, FoundServices, GoneFolder, JobRow,
     MACHINE_DB, Ownership, forget_machine_index, open_machine_index,
@@ -22,6 +18,7 @@ use catervas_store::machine::{
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Value, json};
 
+use crate::finding::{ScanPlaces, scan};
 use crate::printable::printable;
 use crate::state::{claude_desktop_dirs, claude_dir, claude_json, make_state_dir, state_dir};
 use crate::{CliIo, Report};
@@ -115,7 +112,10 @@ pub(crate) fn discover(io: &CliIo<'_>, args: &DiscoverArgs<'_>) -> Result<Report
     lines.push(FIRST_LINE.to_string());
     let (summary, found, jobs, services);
     if has_history {
-        (summary, found, jobs, services) = scan_history(io, &mut index, &claude)?;
+        let places = ScanPlaces::of(io, &claude);
+        let totals = scan(&places, &mut index, &AtomicBool::new(false), &|_| {})?;
+        (summary, found, jobs, services) =
+            (totals.summary, totals.found, totals.jobs, totals.services);
         lines.extend(report_lines(summary, &found, &jobs, &services, &homes));
     } else {
         summary = ReadSummary::default();
@@ -142,46 +142,6 @@ pub(crate) fn discover(io: &CliIo<'_>, args: &DiscoverArgs<'_>) -> Result<Report
     })
 }
 
-/// Reads the transcripts, places and compares the sessions, and finds the jobs and the services.
-fn scan_history(
-    io: &CliIo<'_>,
-    index: &mut catervas_store::machine::MachineIndex,
-    claude: &Path,
-) -> Result<(ReadSummary, Found, JobsFound, ServicesView), String> {
-    let summary = read_transcripts(index, claude, io.clock.now()).map_err(|e| e.to_string())?;
-    place_sessions(index, &not_projects(io), io.clock.now()).map_err(|e| e.to_string())?;
-    find_copies(index).map_err(|e| e.to_string())?;
-    let now = io.clock.now();
-    let home = io
-        .env
-        .get("HOME")
-        .filter(|home| !home.is_empty())
-        .map(|home| {
-            Path::new(home)
-                .canonicalize()
-                .unwrap_or_else(|_| PathBuf::from(home))
-        });
-    let places = JobPlaces {
-        home,
-        claude_dir: claude.to_path_buf(),
-    };
-    let run_program = |program: &str, args: &[&str]| program_output(&io.env, program, args);
-    let searched = find_jobs(index, &places, &run_program, now).map_err(|e| e.to_string())?;
-    let (paths, several_windows_users) = settings_paths(io, claude);
-    read_service_settings(index, &paths).map_err(|e| e.to_string())?;
-    let found = index.found().map_err(|e| e.to_string())?;
-    let services = ServicesView {
-        found: index.found_services().map_err(|e| e.to_string())?,
-        several_windows_users,
-    };
-    let jobs = JobsFound {
-        rows: index.found_jobs(now).map_err(|e| e.to_string())?,
-        unreadable: searched.unreadable,
-        now,
-    };
-    Ok((summary, found, jobs, services))
-}
-
 /// Adds a project by hand and says which found project, if any, it is the same as.
 fn add_project(
     io: &CliIo<'_>,
@@ -199,7 +159,7 @@ fn add_project(
         name,
         folder.as_deref(),
         args.repository,
-        &not_projects(io),
+        &not_projects(&io.env),
         io.clock.now(),
     )
     .map_err(|e| e.to_string())?;
@@ -342,12 +302,14 @@ fn claude_ai_lines(claude: &ClaudeAi) -> Vec<String> {
 
 /// Where Claude's settings are: the settings file, Claude Code's folder, Claude Desktop's folders, and
 /// whether a WSL machine has several Windows users with Claude Desktop (none of theirs is read).
-fn settings_paths(io: &CliIo<'_>, claude: &Path) -> (SettingsPaths, bool) {
-    let mut desktop_dirs = claude_desktop_dirs(&io.env, std::env::consts::OS);
+pub(crate) fn settings_paths(
+    env: &BTreeMap<String, String>,
+    claude: &Path,
+) -> (SettingsPaths, bool) {
+    let mut desktop_dirs = claude_desktop_dirs(env, std::env::consts::OS);
     let mut several = false;
     let on_wsl = std::env::consts::OS == "linux"
-        && io
-            .env
+        && env
             .get("WSL_DISTRO_NAME")
             .is_some_and(|name| !name.is_empty());
     if on_wsl {
@@ -359,7 +321,7 @@ fn settings_paths(io: &CliIo<'_>, claude: &Path) -> (SettingsPaths, bool) {
     }
     (
         SettingsPaths {
-            claude_json: claude_json(&io.env),
+            claude_json: claude_json(env),
             claude_dir: claude.to_path_buf(),
             desktop_dirs,
         },
@@ -395,10 +357,10 @@ fn homes_of(io: &CliIo<'_>) -> Vec<String> {
 }
 
 /// Home and `TMPDIR`: folders that are never a project.
-fn not_projects(io: &CliIo<'_>) -> Vec<PathBuf> {
+pub(crate) fn not_projects(env: &BTreeMap<String, String>) -> Vec<PathBuf> {
     ["HOME", "TMPDIR"]
         .iter()
-        .filter_map(|name| io.env.get(*name).filter(|value| !value.is_empty()))
+        .filter_map(|name| env.get(*name).filter(|value| !value.is_empty()))
         .map(PathBuf::from)
         .collect()
 }
@@ -491,10 +453,10 @@ fn name_of(root: &str) -> String {
 
 /// The jobs a scan found, and when it ran.
 #[derive(Default)]
-struct JobsFound {
-    rows: Vec<JobRow>,
-    unreadable: u64,
-    now: DateTime<Utc>,
+pub(crate) struct JobsFound {
+    pub rows: Vec<JobRow>,
+    pub unreadable: u64,
+    pub now: DateTime<Utc>,
 }
 
 impl JobsFound {
@@ -519,9 +481,9 @@ impl JobsFound {
 }
 
 /// The services found, and whether Windows' Claude Desktop folders were left unread.
-struct ServicesView {
-    found: FoundServices,
-    several_windows_users: bool,
+pub(crate) struct ServicesView {
+    pub found: FoundServices,
+    pub several_windows_users: bool,
 }
 
 impl Default for ServicesView {

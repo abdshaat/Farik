@@ -141,7 +141,7 @@ Tests:
   - With stop set after file 2, the scan ends `Stopped`, and the index holds the first two files' sessions.
 - The existing `crates/cli/tests/discover.rs` tests keep passing.
 
-- [ ] `refactor(cli): one scan for discover and the hub, with progress`
+- [x] `refactor(cli): one scan for discover and the hub, with progress`
 
 ### Task 4: The hub's finding methods
 

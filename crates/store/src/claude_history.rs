@@ -81,6 +81,21 @@ pub struct ReadSummary {
     pub new_sessions: u64,
     /// Files refused for being outside Claude Code's transcripts.
     pub refused: u64,
+    /// Whether the scan was asked to stop before it had listed every file.
+    pub stopped: bool,
+}
+
+/// How far a scan of the transcripts has got, as it is told before each file and once at the end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadProgress {
+    /// Every candidate file, counted before the first is read.
+    pub files_total: u64,
+    /// The candidates passed so far.
+    pub files_read: u64,
+    /// When the next file was last changed; `None` after the last.
+    pub next_modified: Option<DateTime<Utc>>,
+    /// The sessions the index holds so far.
+    pub sessions: u64,
 }
 
 fn sorted_entries(folder: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
@@ -273,13 +288,44 @@ pub fn read_transcripts(
     claude_dir: &Path,
     now: DateTime<Utc>,
 ) -> Result<ReadSummary, HistoryError> {
+    read_transcripts_while(index, claude_dir, now, &mut |_| true)
+}
+
+/// As `read_transcripts`, telling `progress` before each file and once after the last, and stopping
+/// between two files when it answers `false`. What was read stays in the index, which is incremental.
+///
+/// # Errors
+///
+/// As `read_transcripts`.
+pub fn read_transcripts_while(
+    index: &mut MachineIndex,
+    claude_dir: &Path,
+    now: DateTime<Utc>,
+    progress: &mut dyn FnMut(&ReadProgress) -> bool,
+) -> Result<ReadSummary, HistoryError> {
     let mut summary = ReadSummary::default();
     let Ok(projects) = claude_dir.join("projects").canonicalize() else {
         summary.sessions = index.session_count()?;
         return Ok(summary);
     };
     let before = index.session_count()?;
-    for path in candidates(&projects)? {
+    let files = candidates(&projects)?;
+    let files_total = files.len() as u64;
+    for (number, path) in files.into_iter().enumerate() {
+        let next_modified = std::fs::metadata(&path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .map(DateTime::<Utc>::from);
+        let go_on = progress(&ReadProgress {
+            files_total,
+            files_read: number as u64,
+            next_modified,
+            sessions: index.session_count()?,
+        });
+        if !go_on {
+            summary.stopped = true;
+            break;
+        }
         let real = match classify(&path, &projects) {
             Opened::Skipped => continue,
             Opened::Refused => {
@@ -329,6 +375,14 @@ pub fn read_transcripts(
             },
             now,
         )?;
+    }
+    if !summary.stopped {
+        progress(&ReadProgress {
+            files_total,
+            files_read: files_total,
+            next_modified: None,
+            sessions: index.session_count()?,
+        });
     }
     summary.sessions = index.session_count()?;
     summary.new_sessions = summary.sessions - before;
@@ -706,7 +760,8 @@ mod tests {
                 files: 1,
                 sessions: 1,
                 new_sessions: 1,
-                refused: 0
+                refused: 0,
+                stopped: false
             }
         );
         assert_eq!(

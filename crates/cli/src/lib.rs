@@ -35,6 +35,9 @@ pub mod daemon_client;
 mod discover;
 /// Everything this project disagrees with itself about.
 pub mod doctor;
+/// Finding projects: the scan `catervas discover` and the hub share.
+#[cfg(unix)]
+mod finding;
 /// The hooks Claude Code runs around a tool call, carried to the daemon and back.
 pub mod hook;
 /// The human's commands, from any terminal.
