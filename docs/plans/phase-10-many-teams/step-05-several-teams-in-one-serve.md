@@ -185,7 +185,7 @@ Tests (in `slots.rs`):
   - With `daily_cap_usd` 10, `record_spend("a", 6.0)` and `record_spend("b", 4.0)` the same day, `day_capped` is true and `spent_elsewhere("a")` is 4.0.
   - The next UTC day is not capped.
 
-- [ ] `feat(runtime): share places, the account's sleep and the computer's day across teams`
+- [x] `feat(runtime): share places, the account's sleep and the computer's day across teams`
 
 ### Task 3: `state.json` lists every team
 

@@ -110,6 +110,8 @@ pub mod sign_in;
 pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
+/// What several teams in one serve share: places for sessions, the AI account's sleep, the computer's day.
+pub mod slots;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Saved team templates, kept privately in Catervas's state folder.
