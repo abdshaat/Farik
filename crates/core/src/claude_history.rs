@@ -590,6 +590,39 @@ pub fn match_hand_project(
     })
 }
 
+/// The groups of `projects` that are one project: those with the same normalised remote, except
+/// that two roots the owner said are different (`separated`, each pair with the smaller path first)
+/// never share a group. A project with no remote is a group of its own. Groups and the indexes in
+/// each keep the order of `projects`.
+#[must_use]
+pub fn fold_by_remote(
+    projects: &[ProjectKey<'_>],
+    separated: &[(String, String)],
+) -> Vec<Vec<usize>> {
+    let apart = |a: &str, b: &str| {
+        let (low, high) = if a <= b { (a, b) } else { (b, a) };
+        separated
+            .iter()
+            .any(|(first, second)| first == low && second == high)
+    };
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for (index, project) in projects.iter().enumerate() {
+        let joined = project.remote.and_then(|remote| {
+            groups.iter_mut().find(|group| {
+                projects[group[0]].remote == Some(remote)
+                    && group
+                        .iter()
+                        .all(|&other| !apart(projects[other].root, project.root))
+            })
+        });
+        match joined {
+            Some(group) => group.push(index),
+            None => groups.push(vec![index]),
+        }
+    }
+    groups
+}
+
 /// How many fingerprints two sessions must share, under different reply keys, to be linked.
 pub const MIN_SHARED_REPLIES: usize = 3;
 
@@ -1601,5 +1634,22 @@ mod tests {
         for (source, wire) in wires {
             assert_eq!(source.as_wire(), wire);
         }
+    }
+
+    #[test]
+    fn folds_folders_by_remote_unless_separated() {
+        let key = |root, remote| ProjectKey { root, remote };
+        let projects = [
+            key("/a/shop", Some("github.com/me/shop")),
+            key("/b/shop", Some("github.com/me/shop")),
+            key("/c/other", None),
+            key("/d/shop", Some("github.com/me/shop")),
+        ];
+        assert_eq!(fold_by_remote(&projects, &[]), vec![vec![0, 1, 3], vec![2]]);
+        let apart = [("/a/shop".to_string(), "/b/shop".to_string())];
+        assert_eq!(
+            fold_by_remote(&projects, &apart),
+            vec![vec![0, 3], vec![1], vec![2]]
+        );
     }
 }

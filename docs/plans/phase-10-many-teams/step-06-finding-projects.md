@@ -129,7 +129,7 @@ Tests (`machine.rs`):
   - A routine by hand shows under its project's jobs.
   - The migrations list ends at 7.
 
-- [ ] `feat(store): keep the owner's choices and corrections in the machine index`
+- [x] `feat(store): keep the owner's choices and corrections in the machine index`
 
 ### Task 3: The scan, shared and reporting its progress
 

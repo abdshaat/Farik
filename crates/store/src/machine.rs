@@ -9,10 +9,12 @@ use catervas_core::claude_history::{
     Copies, CopyLink, ProjectKey, SessionReplies, Source, ToolUse, match_hand_project,
     reply_fingerprint,
 };
+use catervas_core::claude_services::catalog::CATALOG;
 use catervas_core::claude_services::{
     Call, Configured, ConfiguredServer, ServerKind, Service, ServiceSource, ServiceUse, SessionUse,
     Work, find_services, is_bookkeeping_folder,
 };
+use catervas_core::finding::Choice;
 use catervas_core::jobs::{JobKind, SESSION_CRON_DAYS};
 use catervas_core::pricing::Usage;
 use chrono::{DateTime, Duration as Days, SecondsFormat, Utc};
@@ -345,6 +347,21 @@ pub struct FormedFound {
     pub activity: Activity,
     /// Every service its sessions called, most calls first.
     pub services: Vec<ServiceUse>,
+    /// Whether the owner declared the service and no session formed the project.
+    pub declared: bool,
+}
+
+/// A routine the owner typed in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandRoutine {
+    /// Its row id.
+    pub id: i64,
+    /// Its name.
+    pub name: String,
+    /// The key of the project it belongs to, when it belongs to one.
+    pub project_key: Option<String>,
+    /// When it runs, as the owner wrote it.
+    pub schedule: String,
 }
 
 /// The services the owner reaches through Claude's connectors, as the index holds them.
@@ -685,15 +702,28 @@ impl MachineIndex {
         Ok((new_conversations, new_projects))
     }
 
-    /// Every session with a folder, as its id and that folder.
+    /// Every session with a folder, as its id and that folder, the folder as it is now when the owner
+    /// said it moved.
     pub(crate) fn session_folders(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let moves = self.moves()?;
         let mut statement = self.connection.prepare(
             "SELECT session_id, cwd FROM sessions WHERE cwd IS NOT NULL ORDER BY session_id",
         )?;
-        let rows = statement
+        let rows: Vec<(String, String)> = statement
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<Result<_, _>>()?;
-        Ok(rows)
+        Ok(rows
+            .into_iter()
+            .map(|(id, cwd)| {
+                let now = moves.iter().find_map(|(old, new)| {
+                    Path::new(&cwd)
+                        .strip_prefix(old)
+                        .ok()
+                        .map(|rest| Path::new(new).join(rest).to_string_lossy().into_owned())
+                });
+                (id, now.unwrap_or(cwd))
+            })
+            .collect())
     }
 
     /// Every root any scan has placed a session under.
@@ -1494,9 +1524,32 @@ impl MachineIndex {
                     last_at: latest.unwrap_or(DateTime::UNIX_EPOCH),
                     activity,
                     services: project.services.clone(),
+                    declared: false,
                 }
             })
             .collect();
+        let mut formed = formed;
+        if !formed
+            .iter()
+            .any(|project| project.work == Work::Bookkeeping)
+        {
+            for (id, name, at) in self.declared_service_rows()? {
+                let bookkeeping = CATALOG
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .is_some_and(|entry| Work::of(entry.kind) == Some(Work::Bookkeeping));
+                if bookkeeping {
+                    formed.push(FormedFound {
+                        name: format!("{} ({name})", Work::Bookkeeping.label()),
+                        work: Work::Bookkeeping,
+                        last_at: at,
+                        activity: Activity::default(),
+                        services: Vec::new(),
+                        declared: true,
+                    });
+                }
+            }
+        }
         let taken: BTreeSet<&str> = found
             .formed
             .iter()
@@ -1517,6 +1570,200 @@ impl MachineIndex {
         })
     }
 
+    /// Keeps the owner's choice for the project `key`, replacing an earlier one.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn put_choice(
+        &mut self,
+        key: &str,
+        choice: Choice,
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO choices (key, choice, at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (key) DO UPDATE SET choice = excluded.choice, at = excluded.at",
+            (key, choice.as_wire(), stamp(now)),
+        )?;
+        Ok(())
+    }
+
+    /// The owner's choices, by project key.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn choices(&self) -> Result<BTreeMap<String, Choice>, StoreError> {
+        let mut statement = self.connection.prepare("SELECT key, choice FROM choices")?;
+        let mut rows = statement.query([])?;
+        let mut choices = BTreeMap::new();
+        while let Some(row) = rows.next()? {
+            let wire: String = row.get(1)?;
+            let choice = Choice::from_wire(&wire).ok_or_else(|| StoreError::Sqlite {
+                detail: "the index holds a choice that is not one".to_string(),
+            })?;
+            choices.insert(row.get(0)?, choice);
+        }
+        Ok(choices)
+    }
+
+    /// Records that the folders `a` and `b` are different projects, whichever way round they are given.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn separate(&mut self, a: &str, b: &str) -> Result<(), StoreError> {
+        let (low, high) = if a <= b { (a, b) } else { (b, a) };
+        self.connection.execute(
+            "INSERT OR IGNORE INTO separations (a, b) VALUES (?1, ?2)",
+            (low, high),
+        )?;
+        Ok(())
+    }
+
+    /// The pairs of folders the owner said are different, each with the smaller path first.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn separations(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT a, b FROM separations ORDER BY a, b")?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Records that the folder `old` is now `new`; the sessions that worked under `old` are placed
+    /// under `new` the next time sessions are placed.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn put_move(&mut self, old: &str, new: &str) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO moved (old, new) VALUES (?1, ?2)
+             ON CONFLICT (old) DO UPDATE SET new = excluded.new",
+            (old, new),
+        )?;
+        Ok(())
+    }
+
+    /// Every folder that moved, as `(old, new)`.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn moves(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT old, new FROM moved ORDER BY old")?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    /// Replaces the services the owner says they use with `rows`, each a catalog id (or
+    /// `other:<name>`) and a name.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn replace_declared_services(
+        &mut self,
+        rows: &[(String, String)],
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute("DELETE FROM declared_services", [])?;
+        for (id, name) in rows {
+            transaction.execute(
+                "INSERT OR REPLACE INTO declared_services (service_id, name, at) VALUES (?1, ?2, ?3)",
+                (id, name, stamp(now)),
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// The services the owner declared, as `(id, name)`, by name.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn declared_services(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT service_id, name FROM declared_services ORDER BY name, service_id")?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
+    fn declared_service_rows(&self) -> Result<Vec<(String, String, DateTime<Utc>)>, StoreError> {
+        let mut statement = self.connection.prepare(
+            "SELECT service_id, name, at FROM declared_services ORDER BY name, service_id",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut declared = Vec::new();
+        while let Some(row) = rows.next()? {
+            declared.push((
+                row.get(0)?,
+                row.get(1)?,
+                read_time(&row.get::<_, String>(2)?)?,
+            ));
+        }
+        Ok(declared)
+    }
+
+    /// Adds a routine the owner typed in and answers its id.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn add_hand_routine(
+        &mut self,
+        name: &str,
+        project_key: Option<&str>,
+        schedule: &str,
+        now: DateTime<Utc>,
+    ) -> Result<i64, StoreError> {
+        self.connection.execute(
+            "INSERT INTO hand_routines (name, project_key, schedule, at) VALUES (?1, ?2, ?3, ?4)",
+            (name, project_key, schedule, stamp(now)),
+        )?;
+        Ok(self.connection.last_insert_rowid())
+    }
+
+    /// The routines the owner typed in, oldest first.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn hand_routines(&self) -> Result<Vec<HandRoutine>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT id, name, project_key, schedule FROM hand_routines ORDER BY id")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(HandRoutine {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    project_key: row.get(2)?,
+                    schedule: row.get(3)?,
+                })
+            })?
+            .collect::<Result<_, _>>()?;
+        Ok(rows)
+    }
+
     /// The migration versions applied to this index, in order.
     ///
     /// # Errors
@@ -1535,6 +1782,7 @@ impl MachineIndex {
 
 #[cfg(test)]
 mod tests {
+    use catervas_core::claude_history::fold_by_remote;
     use chrono::{TimeZone, Utc};
     use rusqlite::Connection;
 
@@ -1554,13 +1802,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6]
+            vec![1, 2, 3, 4, 5, 6, 7]
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6]
+            vec![1, 2, 3, 4, 5, 6, 7]
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -1575,15 +1823,20 @@ mod tests {
         assert_eq!(
             tables,
             vec![
+                "choices",
                 "claude_conversations",
                 "claude_exports",
                 "claude_projects",
                 "configured_servers",
+                "declared_services",
                 "hand_projects",
+                "hand_routines",
                 "jobs",
+                "moved",
                 "projects",
                 "replies",
                 "reply_copies",
+                "separations",
                 "session_links",
                 "sessions",
                 "tool_calls",
@@ -2023,5 +2276,129 @@ mod tests {
         assert!(!journal.exists());
         assert!(state.exists());
         assert!(!forget_machine_index(&path).expect("forgets again"));
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one test of the owner's answers, each step reading the one before"
+    )]
+    fn keeps_the_owner_s_answers() {
+        let temp = TempProject::new("keeps-owner-answers");
+        let path = temp.root.join(MACHINE_DB);
+        let mut index = open_machine_index(&path, now()).expect("the index opens");
+        // A choice survives a reopen, and the last one wins.
+        index
+            .put_choice("github.com/me/shop", Choice::Watch, now())
+            .expect("a choice");
+        index
+            .put_choice("/home/me/blog", Choice::Ignore, now())
+            .expect("a choice");
+        index
+            .put_choice("github.com/me/shop", Choice::Team, later(1))
+            .expect("a choice again");
+        drop(index);
+        let mut index = open_machine_index(&path, now()).expect("it opens again");
+        let choices = index.choices().expect("choices");
+        assert_eq!(choices["github.com/me/shop"], Choice::Team);
+        assert_eq!(choices["/home/me/blog"], Choice::Ignore);
+
+        // Two folders with one remote are two projects once the owner separates them.
+        let c = &index.connection;
+        for root in ["/home/me/shop", "/home/me/shop-copy"] {
+            seed_project(c, root, true);
+            c.execute(
+                "UPDATE projects SET remote = 'github.com/me/shop' WHERE root = ?1",
+                (root,),
+            )
+            .expect("a remote");
+            seed_session_at(c, root, "owner", Some(root), "2026-10-12T09:00:00.000Z");
+        }
+        let found = index.found().expect("found");
+        let keys = |found: &Found| -> Vec<(String, Option<String>)> {
+            found
+                .projects
+                .iter()
+                .map(|project| (project.root.clone(), project.remote.clone()))
+                .collect()
+        };
+        let folded = |index: &MachineIndex| {
+            let found = index.found().expect("found");
+            let owned = keys(&found);
+            let projects: Vec<ProjectKey<'_>> = owned
+                .iter()
+                .map(|(root, remote)| ProjectKey {
+                    root,
+                    remote: remote.as_deref(),
+                })
+                .collect();
+            let separated = index.separations().expect("separations");
+            fold_by_remote(&projects, &separated).len()
+        };
+        assert_eq!(found.projects.len(), 2);
+        assert_eq!(folded(&index), 1);
+        index
+            .separate("/home/me/shop-copy", "/home/me/shop")
+            .expect("a separation");
+        assert_eq!(
+            index.separations().expect("separations"),
+            vec![(
+                "/home/me/shop".to_string(),
+                "/home/me/shop-copy".to_string()
+            )]
+        );
+        assert_eq!(index.found().expect("found").projects.len(), 2);
+        assert_eq!(folded(&index), 2);
+
+        // A move places the old path's sessions under the new folder.
+        let c = &index.connection;
+        for (id, cwd) in [("m1", "/gone/shop/api"), ("m2", "/gone/shopping")] {
+            c.execute(
+                "INSERT INTO sessions (session_id, cwd) VALUES (?1, ?2)",
+                (id, cwd),
+            )
+            .expect("a session");
+        }
+        index
+            .put_move("/gone/shop", "/home/me/shop")
+            .expect("a move");
+        let folders: BTreeMap<String, String> = index
+            .session_folders()
+            .expect("folders")
+            .into_iter()
+            .filter(|(id, _)| id.starts_with('m'))
+            .collect();
+        assert_eq!(folders["m1"], "/home/me/shop/api");
+        assert_eq!(folders["m2"], "/gone/shopping");
+
+        // Declaring Zoho Books forms a bookkeeping project; a name with no catalog id forms none.
+        index
+            .replace_declared_services(
+                &[
+                    ("zoho_books".to_string(), "Zoho Books".to_string()),
+                    ("other:My ledger".to_string(), "My ledger".to_string()),
+                ],
+                now(),
+            )
+            .expect("declared");
+        let formed = index.found_services().expect("services").formed;
+        assert_eq!(formed.len(), 1);
+        assert_eq!(formed[0].name, "Bookkeeping (Zoho Books)");
+        assert!(formed[0].declared);
+
+        // A routine by hand shows under its project.
+        let id = index
+            .add_hand_routine(
+                "Month end",
+                Some("/home/me/shop"),
+                "every Monday at 9",
+                now(),
+            )
+            .expect("a routine");
+        let routines = index.hand_routines().expect("routines");
+        assert_eq!(routines.len(), 1);
+        assert_eq!(routines[0].id, id);
+        assert_eq!(routines[0].project_key.as_deref(), Some("/home/me/shop"));
+        assert_eq!(routines[0].schedule, "every Monday at 9");
     }
 }
