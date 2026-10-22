@@ -253,7 +253,7 @@ Files: `discover.rs` (`DiscoverArgs`, the lines and JSON); `lib.rs` (`Discover`'
 - `discovers_copies_and_projects_by_hand` (ignored): with `shop`'s `origin` `git@github.com:me/shop.git` and history in it, a plain `discover` runs first; then `--add-project Shop --repo https://github.com/Me/Shop` prints "added Shop by hand: the same project as ~/shop", and `discover` shows `shop`'s row named "Shop", JSON `sources` `["by_hand","local"]`, `repository` `github.com/me/shop`; `--add-project Billing --repo git@github.com:me/billing.git` prints "added Billing by hand" and `discover` an "added by hand: 1" section; `--add-project X` alone exits 1 with "catervas: " and `NoPlace`'s sentence. With two copies of one session in the history, stdout holds "3 sessions may be copies of others; their usage is counted once". RED.
 - `prints_claude_ai_names_as_text` (guard): a Project named `a\u{1b}[2Jb` prints as `a\u001b[2Jb`.
 
-- [ ] `feat(cli): read claude.ai's export and projects by hand in discover`
+- [x] `feat(cli): read claude.ai's export and projects by hand in discover`
 
 ### Task 8: Spec
 

@@ -2,11 +2,15 @@
 
 use std::path::{Path, PathBuf};
 
+use catervas_core::claude_history::Source;
 use catervas_core::claude_services::{ServiceUse, Work};
 use catervas_core::jobs::JobKind;
 use catervas_core::pricing::Usage;
 use catervas_runtime::computer::program_output;
-use catervas_store::claude_history::{ReadSummary, place_sessions, read_transcripts};
+use catervas_store::claude_export::{ExportLimits, ExportSummary, import_claude_export};
+use catervas_store::claude_history::{
+    ReadSummary, add_project_by_hand, find_copies, place_sessions, read_transcripts,
+};
 use catervas_store::claude_services::{
     SettingsPaths, WindowsClaude, read_service_settings, windows_claude_dirs,
 };
@@ -24,40 +28,67 @@ use crate::{CliIo, Report};
 
 /// Running it is the owner's consent (the screen's consent is a later step's), so it says what it is
 /// about to do rather than asking.
+const EXPORT_FIRST_LINE: &str = "reading your claude.ai export on this computer; nothing leaves it";
+
 const FIRST_LINE: &str = "reading your Claude Code history on this computer; nothing leaves it";
 
-/// Reads the Claude Code history on this computer into the machine index and says what it found, or,
-/// with `forget`, deletes the index and reads nothing.
+/// What `catervas discover` was asked.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct DiscoverArgs<'a> {
+    /// Delete the index and read nothing.
+    pub forget: bool,
+    /// The claude.ai export to read.
+    pub claude_export: Option<&'a Path>,
+    /// The name of a project to add by hand.
+    pub add_project: Option<&'a str>,
+    /// Its folder.
+    pub folder: Option<&'a Path>,
+    /// Its repository's address.
+    pub repository: Option<&'a str>,
+}
+
+fn nothing_found() -> Found {
+    Found {
+        projects: Vec::new(),
+        gone: Vec::new(),
+        not_a_project: Activity::default(),
+        unreadable_sessions: 0,
+        unreadable_lines: 0,
+        maybe_same_sessions: 0,
+        by_hand: Vec::new(),
+        claude_ai: ClaudeAi::default(),
+    }
+}
+
+/// Reads the Claude Code history on this computer, and claude.ai's export when one is given, into the
+/// machine index and says what it found; or, with `forget`, deletes the index and reads nothing; or,
+/// with `add_project`, adds a project by hand.
 ///
 /// # Errors
 ///
-/// A sentence saying there is no state folder or no Claude folder to be found, or what the index or
-/// git refused.
-pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
+/// A sentence saying there is no state folder or no Claude folder to be found, what the export is
+/// that it is not claude.ai's, or what the index or git refused.
+pub(crate) fn discover(io: &CliIo<'_>, args: &DiscoverArgs<'_>) -> Result<Report, String> {
     let state = state_dir(&io.env).ok_or("Catervas has no state folder; set HOME")?;
     let homes = homes_of(io);
-    if forget {
+    if args.forget {
         return forget_index(&state.join(MACHINE_DB), &homes);
+    }
+    if let Some(name) = args.add_project {
+        return add_project(io, &state, &homes, name, args);
     }
     let claude = claude_dir(&io.env)
         .ok_or("Catervas can't tell where Claude Code keeps its history; set HOME")?;
-    let first = FIRST_LINE.to_string();
-    if !claude.join("projects").is_dir() {
-        let none = Found {
-            projects: Vec::new(),
-            gone: Vec::new(),
-            not_a_project: Activity::default(),
-            unreadable_sessions: 0,
-            unreadable_lines: 0,
-            maybe_same_sessions: 0,
-            by_hand: Vec::new(),
-            claude_ai: ClaudeAi::default(),
-        };
+    let has_history = claude.join("projects").is_dir();
+    if !has_history && args.claude_export.is_none() && !state.join(MACHINE_DB).exists() {
         return Ok(Report {
-            lines: vec![first, "no Claude Code history on this computer".to_string()],
+            lines: vec![
+                FIRST_LINE.to_string(),
+                "no Claude Code history on this computer".to_string(),
+            ],
             json: found_json(
                 ReadSummary::default(),
-                &none,
+                &nothing_found(),
                 &JobsFound::default(),
                 &ServicesView::default(),
             ),
@@ -67,9 +98,59 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
     make_state_dir(&state)?;
     let mut index =
         open_machine_index(&state.join(MACHINE_DB), io.clock.now()).map_err(|e| e.to_string())?;
-    let summary =
-        read_transcripts(&mut index, &claude, io.clock.now()).map_err(|e| e.to_string())?;
-    place_sessions(&mut index, &not_projects(io), io.clock.now()).map_err(|e| e.to_string())?;
+    let mut lines = Vec::new();
+    let mut imported = None;
+    if let Some(file) = args.claude_export {
+        lines.push(EXPORT_FIRST_LINE.to_string());
+        let summary = import_claude_export(
+            &mut index,
+            &io.cwd.join(file),
+            ExportLimits::DEFAULT,
+            io.clock.now(),
+        )
+        .map_err(|e| e.to_string())?;
+        lines.extend(import_lines(&summary));
+        imported = Some(summary);
+    }
+    lines.push(FIRST_LINE.to_string());
+    let (summary, found, jobs, services);
+    if has_history {
+        (summary, found, jobs, services) = scan_history(io, &mut index, &claude)?;
+        lines.extend(report_lines(summary, &found, &jobs, &services, &homes));
+    } else {
+        summary = ReadSummary::default();
+        found = index.found().map_err(|e| e.to_string())?;
+        jobs = JobsFound::default();
+        services = ServicesView::default();
+        lines.push("no Claude Code history on this computer".to_string());
+    }
+    lines.extend(source_lines(&found, &homes));
+    let mut json = found_json(summary, &found, &jobs, &services);
+    if let Some(summary) = imported {
+        json["export"] = json!({
+            "conversations": summary.conversations,
+            "new_conversations": summary.new_conversations,
+            "projects": summary.projects,
+            "new_projects": summary.new_projects,
+            "skipped": summary.skipped,
+        });
+    }
+    Ok(Report {
+        lines,
+        json,
+        json_lines: None,
+    })
+}
+
+/// Reads the transcripts, places and compares the sessions, and finds the jobs and the services.
+fn scan_history(
+    io: &CliIo<'_>,
+    index: &mut catervas_store::machine::MachineIndex,
+    claude: &Path,
+) -> Result<(ReadSummary, Found, JobsFound, ServicesView), String> {
+    let summary = read_transcripts(index, claude, io.clock.now()).map_err(|e| e.to_string())?;
+    place_sessions(index, &not_projects(io), io.clock.now()).map_err(|e| e.to_string())?;
+    find_copies(index).map_err(|e| e.to_string())?;
     let now = io.clock.now();
     let home = io
         .env
@@ -82,12 +163,12 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
         });
     let places = JobPlaces {
         home,
-        claude_dir: claude.clone(),
+        claude_dir: claude.to_path_buf(),
     };
     let run_program = |program: &str, args: &[&str]| program_output(&io.env, program, args);
-    let searched = find_jobs(&mut index, &places, &run_program, now).map_err(|e| e.to_string())?;
-    let (paths, several_windows_users) = settings_paths(io, &claude);
-    read_service_settings(&mut index, &paths).map_err(|e| e.to_string())?;
+    let searched = find_jobs(index, &places, &run_program, now).map_err(|e| e.to_string())?;
+    let (paths, several_windows_users) = settings_paths(io, claude);
+    read_service_settings(index, &paths).map_err(|e| e.to_string())?;
     let found = index.found().map_err(|e| e.to_string())?;
     let services = ServicesView {
         found: index.found_services().map_err(|e| e.to_string())?,
@@ -98,13 +179,165 @@ pub(crate) fn discover(io: &CliIo<'_>, forget: bool) -> Result<Report, String> {
         unreadable: searched.unreadable,
         now,
     };
-    let mut lines = vec![first];
-    lines.extend(report_lines(summary, &found, &jobs, &services, &homes));
+    Ok((summary, found, jobs, services))
+}
+
+/// Adds a project by hand and says which found project, if any, it is the same as.
+fn add_project(
+    io: &CliIo<'_>,
+    state: &Path,
+    homes: &[String],
+    name: &str,
+    args: &DiscoverArgs<'_>,
+) -> Result<Report, String> {
+    make_state_dir(state)?;
+    let mut index =
+        open_machine_index(&state.join(MACHINE_DB), io.clock.now()).map_err(|e| e.to_string())?;
+    let folder = args.folder.map(|folder| io.cwd.join(folder));
+    let added = add_project_by_hand(
+        &mut index,
+        name,
+        folder.as_deref(),
+        args.repository,
+        &not_projects(io),
+        io.clock.now(),
+    )
+    .map_err(|e| e.to_string())?;
+    let line = match &added.same_as {
+        Some(root) => format!(
+            "added {} by hand: the same project as {}",
+            printable(&added.project.name),
+            shown(root, homes)
+        ),
+        None => format!("added {} by hand", printable(&added.project.name)),
+    };
     Ok(Report {
-        lines,
-        json: found_json(summary, &found, &jobs, &services),
+        lines: vec![line],
+        json: json!({
+            "name": added.project.name,
+            "root": added.project.root,
+            "repository": added.project.remote,
+            "same_as": added.same_as,
+        }),
         json_lines: None,
     })
+}
+
+fn import_lines(summary: &ExportSummary) -> Vec<String> {
+    let mut lines = vec![format!(
+        "read claude.ai's export: {} ({} new), {} ({} new)",
+        plural(summary.conversations, "conversation"),
+        summary.new_conversations,
+        plural(summary.projects, "Project"),
+        summary.new_projects
+    )];
+    let conversations = summary.skipped - summary.skipped_projects;
+    if conversations > 0 {
+        lines.push(format!(
+            "skipped {} it couldn't read",
+            plural(conversations, "conversation")
+        ));
+    }
+    if summary.skipped_projects > 0 {
+        lines.push(format!(
+            "skipped {} it couldn't read",
+            plural(summary.skipped_projects, "Project")
+        ));
+    }
+    lines
+}
+
+fn files_text(count: usize) -> String {
+    match count {
+        0 => "no files".to_string(),
+        n => plural(n as u64, "file"),
+    }
+}
+
+/// What the copies, the projects by hand and claude.ai's export add to the report.
+fn source_lines(found: &Found, homes: &[String]) -> Vec<String> {
+    let mut lines = Vec::new();
+    if found.maybe_same_sessions > 0 {
+        lines.push(format!(
+            "{} may be copies of others; their usage is counted once",
+            plural(found.maybe_same_sessions, "session")
+        ));
+    }
+    if !found.by_hand.is_empty() {
+        lines.push(format!("added by hand: {}", found.by_hand.len()));
+        for hand in &found.by_hand {
+            let place: Vec<String> = hand
+                .root
+                .iter()
+                .map(|root| shown(root, homes))
+                .chain(
+                    hand.remote
+                        .iter()
+                        .map(|remote| printable(remote).into_owned()),
+                )
+                .collect();
+            lines.push(format!("  {}  {}", printable(&hand.name), place.join("  ")));
+        }
+    }
+    lines.extend(claude_ai_lines(&found.claude_ai));
+    lines
+}
+
+fn claude_ai_lines(claude: &ClaudeAi) -> Vec<String> {
+    let Some(latest) = claude.latest_export_at else {
+        return Vec::new();
+    };
+    let mut lines = vec![format!(
+        "claude.ai: {}, {}, latest export up to {}",
+        plural(claude.conversations, "conversation"),
+        plural(claude.projects.len() as u64, "Project"),
+        day(latest)
+    )];
+    for month in &claude.by_month {
+        lines.push(format!(
+            "  {}  {}",
+            month.month,
+            plural(month.conversations, "conversation")
+        ));
+    }
+    if claude.earlier > 0 {
+        lines.push(format!(
+            "  earlier  {}",
+            plural(claude.earlier, "conversation")
+        ));
+    }
+    if claude.undated > 0 {
+        lines.push(format!(
+            "  undated  {}",
+            plural(claude.undated, "conversation")
+        ));
+    }
+    if !claude.projects.is_empty() {
+        lines.push("  Projects:".to_string());
+        for project in &claude.projects {
+            let name = project.name.as_deref().unwrap_or("(unnamed)");
+            let parts = [
+                Some(printable(name).into_owned()),
+                Some(files_text(project.doc_names.len())),
+                project
+                    .updated_at
+                    .map(|updated| format!("last updated {}", day(updated))),
+                (!project.in_latest_export).then(|| "not in the latest export".to_string()),
+            ];
+            let line = format!(
+                "    {}",
+                parts.into_iter().flatten().collect::<Vec<_>>().join("  ")
+            );
+            lines.push(line);
+        }
+    }
+    if claude.conversations_not_in_latest > 0 {
+        lines.push(format!(
+            "  not in the latest export: {}",
+            plural(claude.conversations_not_in_latest, "conversation")
+        ));
+    }
+    lines
 }
 
 /// Where Claude's settings are: the settings file, Claude Code's folder, Claude Desktop's folders, and
@@ -238,6 +471,15 @@ fn activity_text(activity: &Activity) -> String {
 
 fn day(time: DateTime<Utc>) -> String {
     time.format("%Y-%m-%d").to_string()
+}
+
+/// The name a project is shown by: the owner's, when a project added by hand is this one, else its
+/// folder's.
+fn shown_name(project: &FoundProject) -> String {
+    project
+        .name_by_hand
+        .clone()
+        .unwrap_or_else(|| name_of(&project.root))
 }
 
 fn name_of(root: &str) -> String {
@@ -424,7 +666,7 @@ fn project_lines(
     };
     let mut lines = vec![format!(
         "  {}  {}{bookkeeping}  last worked {}  {}",
-        printable(&name_of(&project.root)),
+        printable(&shown_name(project)),
         shown(&project.root, homes),
         day(project.last_at),
         activity_text(&project.own)
@@ -598,6 +840,43 @@ fn moment(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+fn sorted_sources(project: &FoundProject) -> Vec<&'static str> {
+    let mut sources: Vec<&str> = project.sources.iter().map(Source::as_wire).collect();
+    sources.sort_unstable();
+    sources
+}
+
+fn claude_ai_json(claude: &ClaudeAi) -> Value {
+    let projects: Vec<Value> = claude
+        .projects
+        .iter()
+        .map(|project| {
+            json!({
+                "uuid": project.uuid,
+                "name": project.name,
+                "description": project.description,
+                "doc_names": project.doc_names,
+                "updated_at": project.updated_at.map(moment),
+                "in_latest_export": project.in_latest_export,
+            })
+        })
+        .collect();
+    json!({
+        "latest_export_at": claude.latest_export_at.map(moment),
+        "conversations": claude.conversations,
+        "undated": claude.undated,
+        "earlier": claude.earlier,
+        "by_month": claude.by_month.iter().map(|month| json!({
+            "month": month.month, "conversations": month.conversations,
+        })).collect::<Vec<_>>(),
+        "projects": projects,
+        "not_in_latest_export": {
+            "conversations": claude.conversations_not_in_latest,
+            "projects": claude.projects_not_in_latest,
+        },
+    })
+}
+
 fn found_json(
     summary: ReadSummary,
     found: &Found,
@@ -609,7 +888,9 @@ fn found_json(
         .map(|row| match row {
             Row::Project(project) => json!({
                 "root": project.root,
-                "name": name_of(&project.root),
+                "name": shown_name(project),
+                "repository": project.remote,
+                "sources": sorted_sources(project),
                 "is_git": project.is_git,
                 "ownership": match project.ownership {
                     Ownership::Yours => "yours",
@@ -629,6 +910,8 @@ fn found_json(
             Row::Formed(formed) => json!({
                 "root": Value::Null,
                 "name": formed.name,
+                "repository": Value::Null,
+                "sources": ["local"],
                 "is_git": false,
                 "ownership": "yours",
                 "work": formed.work.as_wire(),
@@ -675,6 +958,11 @@ fn found_json(
         "unreadable_lines": found.unreadable_lines,
         "projects": projects,
         "gone": gone,
+        "maybe_same_sessions": found.maybe_same_sessions,
+        "by_hand": found.by_hand.iter().map(|hand| json!({
+            "name": hand.name, "root": hand.root, "repository": hand.remote,
+        })).collect::<Vec<_>>(),
+        "claude_ai": claude_ai_json(&found.claude_ai),
         "not_a_project": activity_json(&services.found.not_a_project),
         "services": service_list,
         "desktop": services.several_windows_users.then_some("several_windows_users"),

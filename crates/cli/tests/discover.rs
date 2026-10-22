@@ -9,13 +9,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use catervas::{CliIo, run_cli};
+use catervas_core::claude_export::fixtures::{a_conversation_json, a_project_json};
+use catervas_core::claude_history::fixtures::a_reply_line;
 use catervas_core::claude_history::fixtures::{
     CLAUDE_CODE_2_1_296, CLAUDE_CODE_2_1_296_CONNECTORS, a_turn_line,
 };
 use catervas_core::claude_services::fixtures::{
     a_claude_json_full_of_keys, a_desktop_config_full_of_keys, a_plugin_mcp_json_full_of_keys,
 };
+use catervas_core::pricing::Usage;
 use catervas_protocol::clock::FixedClock;
+use catervas_store::claude_export::fixtures::{an_export_zip, the_2026_10_export};
 use catervas_store::files::fixtures::TempProject;
 use catervas_store::git::fixtures::git_in;
 use catervas_store::machine::{MACHINE_DB, open_machine_index};
@@ -176,6 +180,8 @@ fn discovers_a_project_from_the_history() {
             "jobs": [],
             "work": null,
             "services": [],
+            "repository": null,
+            "sources": ["local"],
         })
     );
 }
@@ -596,4 +602,284 @@ fn prints_no_key() {
     }
     let bytes = std::fs::read(world.config().join("catervas").join(MACHINE_DB)).expect("the index");
     assert!(!bytes.windows(10).any(|window| window == b"KEY-MARKER"));
+}
+
+/// A home with no Claude Code history in it.
+fn bare_home(name: &str) -> (TempProject, PathBuf, PathBuf) {
+    let temp = TempProject::new(name);
+    let home = temp.root.join("home");
+    std::fs::create_dir_all(&home).expect("a home");
+    let config = home.join(".config");
+    (temp, home, config)
+}
+
+fn discover_bare(home: &Path, config: &Path, args: &[&str]) -> Ran {
+    let mut arguments = vec!["discover"];
+    arguments.extend_from_slice(args);
+    run(&[("HOME", home), ("XDG_CONFIG_HOME", config)], &arguments)
+}
+
+const EXPORT_REPORT: &str = "claude.ai: 3 conversations, 2 Projects, latest export up to 2026-10-05\n  \
+      2026-10  1 conversation\n  \
+      2026-09  1 conversation\n  \
+      2026-08  0 conversations\n  \
+      2026-07  0 conversations\n  \
+      2026-06  0 conversations\n  \
+      2026-05  0 conversations\n  \
+      2026-04  0 conversations\n  \
+      2026-03  0 conversations\n  \
+      2026-02  0 conversations\n  \
+      2026-01  0 conversations\n  \
+      2025-12  0 conversations\n  \
+      2025-11  0 conversations\n  \
+      undated  1 conversation\n  \
+      Projects:\n    \
+      Shop launch  2 files  last updated 2026-10-01\n    \
+      Taxes  no files  last updated 2026-09-12\n";
+
+#[test]
+fn reads_a_claude_export() {
+    let (_temp, home, config) = bare_home("reads-claude-export");
+    let zip = home.join("export.zip");
+    std::fs::write(&zip, the_2026_10_export()).expect("an export");
+    let zip_arg = zip.to_string_lossy().into_owned();
+
+    let ran = discover_bare(&home, &config, &["--claude-export", &zip_arg]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        format!(
+            "reading your claude.ai export on this computer; nothing leaves it\n\
+             read claude.ai's export: 3 conversations (3 new), 2 Projects (2 new)\n\
+             skipped 1 conversation it couldn't read\n\
+             reading your Claude Code history on this computer; nothing leaves it\n\
+             no Claude Code history on this computer\n{EXPORT_REPORT}"
+        )
+    );
+
+    let again = discover_bare(&home, &config, &["--claude-export", &zip_arg]);
+    assert!(
+        again
+            .out
+            .contains("read claude.ai's export: 3 conversations (0 new), 2 Projects (0 new)\n"),
+        "{}",
+        again.out
+    );
+
+    let as_json = discover_bare(&home, &config, &["--claude-export", &zip_arg, "--json"]);
+    let value: Value = serde_json::from_str(&as_json.out).expect("one JSON object");
+    let months = value["claude_ai"]["by_month"].as_array().expect("months");
+    assert_eq!(months.len(), 12);
+    assert_eq!(months[0], json!({"month": "2026-10", "conversations": 1}));
+    assert_eq!(months[1], json!({"month": "2026-09", "conversations": 1}));
+    assert!(months[2..].iter().all(|m| m["conversations"] == 0));
+    assert_eq!(value["claude_ai"]["undated"], 1);
+    assert_eq!(value["export"]["skipped"], 1);
+    assert_eq!(value["export"]["new_conversations"], 0);
+    assert_eq!(value["claude_ai"]["projects"][0]["name"], "Shop launch");
+    assert_eq!(
+        value["claude_ai"]["projects"][0]["doc_names"],
+        json!(["brief.md", "prices.csv"])
+    );
+    assert_eq!(
+        value["claude_ai"]["not_in_latest_export"],
+        json!({"conversations": 0, "projects": 0})
+    );
+
+    let plain = discover_bare(&home, &config, &[]);
+    assert_eq!(plain.code, 0, "{}", plain.err);
+    assert_eq!(
+        plain.out,
+        format!(
+            "reading your Claude Code history on this computer; nothing leaves it\n\
+             no Claude Code history on this computer\n{EXPORT_REPORT}"
+        )
+    );
+}
+
+#[test]
+fn refuses_what_is_not_a_claude_export() {
+    let (_temp, home, config) = bare_home("refuses-not-an-export");
+    let text = home.join("notes.txt");
+    std::fs::write(&text, "hello").expect("a file");
+
+    let ran = discover_bare(
+        &home,
+        &config,
+        &["--claude-export", &text.to_string_lossy()],
+    );
+
+    assert_eq!(ran.code, 1);
+    assert_eq!(
+        ran.err,
+        "catervas: this isn't claude.ai's export: it isn't a zip file; give Catervas the .zip claude.ai emailed you\n"
+    );
+    assert_eq!(ran.out, "");
+}
+
+/// Guard: checked by mutation (print a name raw), not watched to fail.
+#[test]
+fn prints_claude_ai_names_as_text() {
+    let (_temp, home, config) = bare_home("prints-claude-ai-names");
+    let project = a_project_json(
+        "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        "a\u{1b}[2Jb",
+        "2026-10-01T09:00:00Z",
+        &[],
+    );
+    let conversation = a_conversation_json(
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        "c\u{1b}[2Jd",
+        "2026-10-01T09:00:00Z",
+        "2026-10-01T09:00:00Z",
+        1,
+    );
+    let (conversations, projects) = (format!("[{conversation}]"), format!("[{project}]"));
+    let zip = home.join("export.zip");
+    std::fs::write(
+        &zip,
+        an_export_zip(&[
+            ("conversations.json", conversations.as_bytes()),
+            ("projects.json", projects.as_bytes()),
+        ]),
+    )
+    .expect("an export");
+
+    let ran = discover_bare(&home, &config, &["--claude-export", &zip.to_string_lossy()]);
+
+    assert_eq!(ran.code, 0, "{}", ran.err);
+    assert!(!ran.out.contains('\u{1b}'), "{:?}", ran.out);
+    assert!(
+        ran.out
+            .contains("    a\\u001b[2Jb  no files  last updated 2026-10-01\n"),
+        "{}",
+        ran.out
+    );
+}
+
+/// Three sessions in `shop` that replied the same four times under different ids.
+fn write_three_copies(world: &World) {
+    let cwd = world.home().join("shop").to_string_lossy().into_owned();
+    for (n, id) in ["a", "b", "c"].iter().enumerate() {
+        let session = format!("0000000{n}-0000-4000-8000-000000000000");
+        let lines: Vec<String> = (1..=4)
+            .map(|second| {
+                a_reply_line(
+                    &session,
+                    &cwd,
+                    &format!("2026-10-12T09:00:0{second}Z"),
+                    &format!("msg_{id}_{second}"),
+                    "claude-opus-5-5",
+                    Usage {
+                        input_tokens: second,
+                        output_tokens: 1,
+                        cache_read_tokens: 0,
+                        cache_write_tokens: 0,
+                    },
+                )
+            })
+            .collect();
+        std::fs::write(
+            world
+                .home()
+                .join(format!(".claude/projects/-shop/copy-{id}.jsonl")),
+            lines.join("\n") + "\n",
+        )
+        .expect("a transcript");
+    }
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn discovers_copies_and_projects_by_hand() {
+    let world = World::new("discovers-copies-and-hand");
+    world.make_shop();
+    git_in(
+        &world.home().join("shop"),
+        &["remote", "add", "origin", "git@github.com:me/shop.git"],
+    );
+    world.write_fixture();
+    let plain = world.discover(&[]);
+    assert_eq!(plain.code, 0, "{}", plain.err);
+
+    let added = world.discover(&[
+        "--add-project",
+        "Shop",
+        "--repo",
+        "https://github.com/Me/Shop",
+    ]);
+    assert_eq!(added.code, 0, "{}", added.err);
+    assert_eq!(
+        added.out,
+        "added Shop by hand: the same project as ~/shop\n"
+    );
+    let as_json = world.discover(&[
+        "--add-project",
+        "Shop",
+        "--repo",
+        "https://github.com/Me/Shop",
+        "--json",
+    ]);
+    let value: Value = serde_json::from_str(&as_json.out).expect("one JSON object");
+    assert_eq!(
+        value,
+        json!({
+            "name": "Shop", "root": null, "repository": "github.com/me/shop",
+            "same_as": world.home().join("shop").to_string_lossy(),
+        })
+    );
+
+    let shown = world.discover(&[]);
+    assert!(
+        shown.out.contains("  Shop  ~/shop  last worked 2026-10-12"),
+        "{}",
+        shown.out
+    );
+    assert!(!shown.out.contains("added by hand"), "{}", shown.out);
+    let shown_json: Value =
+        serde_json::from_str(&world.discover(&["--json"]).out).expect("one JSON object");
+    let shop = &shown_json["projects"][0];
+    assert_eq!(shop["name"], "Shop");
+    assert_eq!(shop["sources"], json!(["by_hand", "local"]));
+    assert_eq!(shop["repository"], "github.com/me/shop");
+
+    let billing = world.discover(&[
+        "--add-project",
+        "Billing",
+        "--repo",
+        "git@github.com:me/billing.git",
+    ]);
+    assert_eq!(billing.out, "added Billing by hand\n");
+    let listed = world.discover(&[]);
+    assert!(
+        listed
+            .out
+            .contains("added by hand: 1\n  Billing  github.com/me/billing\n"),
+        "{}",
+        listed.out
+    );
+    let listed_json: Value =
+        serde_json::from_str(&world.discover(&["--json"]).out).expect("one JSON object");
+    assert_eq!(
+        listed_json["by_hand"],
+        json!([{"name": "Billing", "root": null, "repository": "github.com/me/billing"}])
+    );
+
+    let nowhere = world.discover(&["--add-project", "X"]);
+    assert_eq!(nowhere.code, 1);
+    assert_eq!(
+        nowhere.err,
+        "catervas: say where the project is: --folder <path> or --repo <address>\n"
+    );
+
+    write_three_copies(&world);
+    let copies = world.discover(&[]);
+    assert!(
+        copies
+            .out
+            .contains("3 sessions may be copies of others; their usage is counted once\n"),
+        "{}",
+        copies.out
+    );
 }

@@ -375,8 +375,21 @@ enum Commands {
     #[cfg(unix)]
     Discover {
         /// Delete what Catervas found and read nothing.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["claude_export", "add_project"])]
         forget: bool,
+        /// Read the claude.ai data export (the .zip claude.ai emailed you) on this computer; a later
+        /// export updates an earlier one.
+        #[arg(long, value_name = "FILE", conflicts_with = "add_project")]
+        claude_export: Option<PathBuf>,
+        /// Add a project by hand, in a folder or a repository, or rename the one with the same key.
+        #[arg(long, value_name = "NAME")]
+        add_project: Option<String>,
+        /// The project's folder, with --add-project.
+        #[arg(long, value_name = "PATH", requires = "add_project")]
+        folder: Option<PathBuf>,
+        /// The project's repository address, with --add-project.
+        #[arg(long = "repo", value_name = "ADDRESS", requires = "add_project")]
+        repository: Option<String>,
     },
     /// Show the team's rules (5.12).
     Rules {
@@ -1242,7 +1255,22 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             return if told && code == OK { REFUSED } else { code };
         }
         #[cfg(unix)]
-        Commands::Discover { forget } => discover::discover(io, *forget),
+        Commands::Discover {
+            forget,
+            claude_export,
+            add_project,
+            folder,
+            repository,
+        } => discover::discover(
+            io,
+            &discover::DiscoverArgs {
+                forget: *forget,
+                claude_export: claude_export.as_deref(),
+                add_project: add_project.as_deref(),
+                folder: folder.as_deref(),
+                repository: repository.as_deref(),
+            },
+        ),
         Commands::Rules {
             command: RulesCommands::Show,
         } => open_project(&io.cwd, now).and_then(|project| team::rules(&project)),
