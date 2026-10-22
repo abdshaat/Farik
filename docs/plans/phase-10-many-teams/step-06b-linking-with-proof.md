@@ -195,7 +195,7 @@ Tests (`pages/find/Together.test.tsx`):
 
 Then the project plan: row 06b becomes 06b (this) and 06e (the proposal, names, creating teams, undo, fixing a mistake, suggested connections).
 
-- [ ] `docs(spec): linking with proof, revision 0.149`
+- [x] `docs(spec): linking with proof, revision 0.149`
 
 ## Verification
 
