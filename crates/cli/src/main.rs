@@ -38,16 +38,9 @@ fn main() -> std::process::ExitCode {
 
 /// Starts the system's opener on `url` and does not wait for it.
 fn open_in_browser(url: &str) -> Result<(), String> {
-    let mut command = if cfg!(target_os = "macos") {
-        std::process::Command::new("open")
-    } else if cfg!(windows) {
-        let mut command = std::process::Command::new("cmd");
-        command.args(["/c", "start", ""]);
-        command
-    } else {
-        std::process::Command::new("xdg-open")
-    };
-    command
+    let wsl = std::env::var_os("WSL_DISTRO_NAME").is_some()
+        || std::path::Path::new("/proc/sys/fs/binfmt_misc/WSLInterop").exists();
+    opener(wsl)
         .arg(url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -55,4 +48,34 @@ fn open_in_browser(url: &str) -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+/// The system's opener, given a link as its last argument; `wsl` says Linux runs under Windows'
+/// WSL, which has no browser of its own, so Windows' opens it.
+fn opener(wsl: bool) -> std::process::Command {
+    if cfg!(target_os = "macos") {
+        std::process::Command::new("open")
+    } else if cfg!(windows) || wsl {
+        let mut command = std::process::Command::new(if wsl { "cmd.exe" } else { "cmd" });
+        command.args(["/c", "start", ""]);
+        command
+    } else {
+        std::process::Command::new("xdg-open")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn opens_the_windows_browser_from_wsl() {
+        // WSL has no browser of its own: the link goes to Windows, which keeps its `#` part.
+        let command = opener(true);
+        assert_eq!(command.get_program(), "cmd.exe");
+        let args: Vec<_> = command.get_args().collect();
+        assert_eq!(args, ["/c", "start", ""]);
+        assert_eq!(opener(false).get_program(), "xdg-open");
+    }
 }
