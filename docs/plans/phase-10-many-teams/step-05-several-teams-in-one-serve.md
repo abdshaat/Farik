@@ -281,7 +281,7 @@ Tests:
 - ADR 0053 gains under its Decision: "Amended 2026-10-22 by ADR 0059 (phase 10 step 05): serve drives every team's project at once behind one port; Change project stops and removes one team."
 - The project plan's row 05 gains "planned and executed 2026-10-22 (`step-05-several-teams-in-one-serve.md`)".
 
-- [ ] `docs(spec): several teams in one serve, revision 0.144`
+- [x] `docs(spec): several teams in one serve, revision 0.144`
 
 ## Verification
 

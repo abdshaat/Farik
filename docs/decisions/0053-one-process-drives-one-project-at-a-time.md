@@ -11,6 +11,8 @@ The founder tests and improves Farik by running its team on real repositories. U
 
 ## Decision
 
+Amended 2026-10-22 by ADR 0059 (phase 10 step 05): serve drives every team's project at once behind one port; Change project stops and removes one team.
+
 - **One process still drives one project at a time, but it can switch.** Settings has "Change project…". It calls `project.leave`, which stops the orchestrator as `farik stop` does and tells serve the drive ended to switch, not to exit. Serve goes from drive to setup, carrying the project being left, on the same held port; the browser's session survives; the page lands on the wizard's project page, which offers "Stay on" the old project beside open and create.
 - **The take-on carries the team, fresh.** `team.yaml` with retired agents dropped and the rest active, pictures, pinned skills' folders (each confirmed again), the sandbox setting, and each kept agent's connector keys and the Procurement mailbox, copied under the new project's id. Not carried: the criteria (the new repository keeps its own `init` scan's), memory, the channel, chats, tasks, contracts, sprints, the retro, sessions, costs. No setup screens, no setup marker, the team not paused.
 - **A target with a team is refused** with `has_team` unless `replace: true`, then its `.farik/` is deleted before `init`; the user's own files are never touched. The old project is left as it is.
