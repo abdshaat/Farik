@@ -113,7 +113,7 @@ pub(crate) fn apply_through(
 
 /// The migrations of the machine-level index (`machine.db`), numbered apart from a project log's so
 /// the two never meet in one folder.
-const MACHINE_MIGRATIONS: [Migration; 9] = [
+const MACHINE_MIGRATIONS: [Migration; 10] = [
     Migration {
         version: 1,
         sql: include_str!("migrations/machine/0001_history.sql"),
@@ -149,6 +149,10 @@ const MACHINE_MIGRATIONS: [Migration; 9] = [
     Migration {
         version: 9,
         sql: include_str!("migrations/machine/0009_links.sql"),
+    },
+    Migration {
+        version: 10,
+        sql: include_str!("migrations/machine/0010_proposal.sql"),
     },
 ];
 

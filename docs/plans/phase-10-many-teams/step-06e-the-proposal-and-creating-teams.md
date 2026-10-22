@@ -123,7 +123,7 @@ Tests (`machine.rs`):
   - `made_teams` round-trips.
   - The migrations list ends at 10.
 
-- [ ] `feat(store): keep the proposal's edits and what catervas made`
+- [x] `feat(store): keep the proposal's edits and what catervas made`
 
 ### Task 3: Creating, adding and undoing
 

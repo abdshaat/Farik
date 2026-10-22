@@ -2018,6 +2018,198 @@ impl MachineIndex {
     }
 }
 
+/// What the owner changed on a card of "Your teams".
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProposalEdit {
+    /// The team's name.
+    pub name: Option<String>,
+    /// The built-in or saved team it starts from.
+    pub template: Option<String>,
+    /// What the team is for, in a sentence.
+    pub purpose: Option<String>,
+    /// Whether Claude suggested what is edited, and the owner has not changed it.
+    pub from_claude: bool,
+}
+
+/// A team Catervas made from a card.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MadeTeam {
+    /// Its slug in the hub.
+    pub slug: String,
+    /// Its project folder.
+    pub root: String,
+    /// The JSON of what was created.
+    pub made: String,
+}
+
+impl MachineIndex {
+    /// Keeps `edit` for the card `card_id`: a field that is `None` keeps what was there, and
+    /// `from_claude` is whatever `edit` says, so that the owner's own edit takes the label away.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn put_edit(&mut self, card_id: &str, edit: &ProposalEdit) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO proposal_edits (card_id, name, template, purpose, from_claude)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (card_id) DO UPDATE SET
+                 name = COALESCE(excluded.name, name),
+                 template = COALESCE(excluded.template, template),
+                 purpose = COALESCE(excluded.purpose, purpose),
+                 from_claude = excluded.from_claude",
+            (
+                card_id,
+                &edit.name,
+                &edit.template,
+                &edit.purpose,
+                i64::from(edit.from_claude),
+            ),
+        )?;
+        Ok(())
+    }
+
+    /// Every card's edits, by the card's id.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn edits(&self) -> Result<BTreeMap<String, ProposalEdit>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT card_id, name, template, purpose, from_claude FROM proposal_edits")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    ProposalEdit {
+                        name: row.get(1)?,
+                        template: row.get(2)?,
+                        purpose: row.get(3)?,
+                        from_claude: row.get::<_, i64>(4)? == 1,
+                    },
+                ))
+            })?
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Forgets the edits of a card.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn revert_edit(&mut self, card_id: &str) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM proposal_edits WHERE card_id = ?1", (card_id,))?;
+        Ok(())
+    }
+
+    /// Moves the project `key` out of the card `card_id`, and says No between it and each of
+    /// `others`, the projects that stay.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn move_out(
+        &mut self,
+        card_id: &str,
+        key: &str,
+        others: &[String],
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT OR IGNORE INTO moved_out (card_id, project_key) VALUES (?1, ?2)",
+            (card_id, key),
+        )?;
+        for other in others.iter().filter(|other| other.as_str() != key) {
+            self.put_link(key, other, crate::linking::Answer::No, &[], now)?;
+        }
+        Ok(())
+    }
+
+    /// The `(card id, project key)` pairs the owner moved out.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn moved_out(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT card_id, project_key FROM moved_out ORDER BY card_id, project_key")?;
+        let rows = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Forgets that the projects `keys` were moved out of a card: they are teams, or undone.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn clear_moved_out_of(&mut self, keys: &[String]) -> Result<(), StoreError> {
+        for key in keys {
+            self.connection
+                .execute("DELETE FROM moved_out WHERE project_key = ?1", (key,))?;
+        }
+        Ok(())
+    }
+
+    /// Keeps that Catervas made the team `slug` at `root`, and what it created for it.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn put_made_team(
+        &mut self,
+        slug: &str,
+        root: &str,
+        made: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        self.connection.execute(
+            "INSERT INTO made_teams (slug, root, made, at) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT (slug) DO UPDATE SET root = excluded.root, made = excluded.made,
+                                              at = excluded.at",
+            (slug, root, made, stamp(now)),
+        )?;
+        Ok(())
+    }
+
+    /// The teams Catervas made.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index cannot be read.
+    pub fn made_teams(&self) -> Result<Vec<MadeTeam>, StoreError> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT slug, root, made FROM made_teams ORDER BY at, slug")?;
+        let rows = statement
+            .query_map([], |row| {
+                Ok(MadeTeam {
+                    slug: row.get(0)?,
+                    root: row.get(1)?,
+                    made: row.get(2)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Forgets a made team.
+    ///
+    /// # Errors
+    ///
+    /// `Sqlite` when the index refuses.
+    pub fn forget_made_team(&mut self, slug: &str) -> Result<(), StoreError> {
+        self.connection
+            .execute("DELETE FROM made_teams WHERE slug = ?1", (slug,))?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use catervas_core::claude_history::fold_by_remote;
@@ -2040,13 +2232,13 @@ mod tests {
         let index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         );
         drop(index);
         let again = open_machine_index(&path, now()).expect("it opens again");
         assert_eq!(
             again.applied_migrations().expect("versions"),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9]
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
         );
         drop(again);
         let connection = Connection::open(&path).expect("the file opens");
@@ -2073,8 +2265,11 @@ mod tests {
                 "hand_routines",
                 "jobs",
                 "links",
+                "made_teams",
                 "moved",
+                "moved_out",
                 "projects",
+                "proposal_edits",
                 "replies",
                 "reply_copies",
                 "separations",
@@ -2089,6 +2284,108 @@ mod tests {
             crate::migrations::known_versions(),
             (1..=16).collect::<Vec<i64>>()
         );
+    }
+
+    #[test]
+    fn keeps_the_owner_s_edits_and_what_was_made() {
+        let temp = TempProject::new("keeps-proposal");
+        let path = temp.root.join(MACHINE_DB);
+        let mut index = open_machine_index(&path, now()).expect("the index opens");
+        assert_eq!(
+            index.applied_migrations().expect("versions").last(),
+            Some(&10)
+        );
+        index
+            .put_edit(
+                "card1",
+                &ProposalEdit {
+                    name: Some("Shop".into()),
+                    template: Some("online-store".into()),
+                    ..ProposalEdit::default()
+                },
+            )
+            .expect("an edit");
+        index
+            .put_edit(
+                "card1",
+                &ProposalEdit {
+                    purpose: Some("Sells things".into()),
+                    ..ProposalEdit::default()
+                },
+            )
+            .expect("a second edit keeps the first");
+        index
+            .put_edit(
+                "card2",
+                &ProposalEdit {
+                    name: Some("Books".into()),
+                    from_claude: true,
+                    ..ProposalEdit::default()
+                },
+            )
+            .expect("claude's edit");
+        index
+            .move_out("card1", "b", &["a".to_string(), "c".to_string()], now())
+            .expect("moved out");
+        index
+            .put_made_team(
+                "shop",
+                "/home/me/shop",
+                r#"{"created":[".catervas"]}"#,
+                now(),
+            )
+            .expect("made");
+        drop(index);
+
+        let mut index = open_machine_index(&path, now()).expect("it opens again");
+        let edits = index.edits().expect("edits");
+        assert_eq!(
+            edits["card1"],
+            ProposalEdit {
+                name: Some("Shop".into()),
+                template: Some("online-store".into()),
+                purpose: Some("Sells things".into()),
+                from_claude: false
+            }
+        );
+        assert!(edits["card2"].from_claude);
+        index.revert_edit("card2").expect("reverted");
+        assert!(!index.edits().expect("edits").contains_key("card2"));
+        assert_eq!(
+            index.moved_out().expect("moved"),
+            vec![("card1".to_string(), "b".to_string())]
+        );
+        let links = index.link_answers().expect("links");
+        let no: Vec<_> = links
+            .iter()
+            .map(|(pair, link)| (pair.clone(), link.answer))
+            .collect();
+        assert_eq!(
+            no,
+            vec![
+                (
+                    ("a".to_string(), "b".to_string()),
+                    crate::linking::Answer::No
+                ),
+                (
+                    ("b".to_string(), "c".to_string()),
+                    crate::linking::Answer::No
+                ),
+            ]
+        );
+        let made = index.made_teams().expect("made");
+        assert_eq!(made.len(), 1);
+        assert_eq!(
+            (made[0].slug.as_str(), made[0].root.as_str()),
+            ("shop", "/home/me/shop")
+        );
+        assert_eq!(made[0].made, r#"{"created":[".catervas"]}"#);
+        index.forget_made_team("shop").expect("forgotten");
+        assert!(index.made_teams().expect("made").is_empty());
+        index
+            .clear_moved_out_of(&["b".to_string()])
+            .expect("cleared");
+        assert!(index.moved_out().expect("moved").is_empty());
     }
 
     fn later(hours: i64) -> chrono::DateTime<Utc> {
@@ -2523,7 +2820,7 @@ mod tests {
         let mut index = open_machine_index(&path, now()).expect("the index opens");
         assert_eq!(
             index.applied_migrations().expect("versions").last(),
-            Some(&9)
+            Some(&10)
         );
         let c = &index.connection;
         seed_project(c, "/home/me/shop", true);
