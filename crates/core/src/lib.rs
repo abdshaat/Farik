@@ -47,6 +47,8 @@ pub mod pipeline;
 pub mod pricing;
 /// The teams to make from the projects the owner chose and the links between them.
 pub mod proposal;
+/// What needs the owner each day: forgotten sessions, crons ending, failed schedules, waiting teams.
+pub mod reminders;
 /// The renewals a register of vendors says are coming up.
 pub mod renewals;
 /// A project folder's member repositories and the rules for adding one.

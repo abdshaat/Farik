@@ -140,7 +140,7 @@ Tests (`reminders.rs`, a fixed `now`):
   - A snoozed item is hidden until its time and shows after it.
   - A dismissed item stays hidden while its fingerprint holds, and shows when a field changes (a new failure time).
 
-- [ ] `feat(core): decide what needs the owner each day`
+- [x] `feat(core): decide what needs the owner each day`
 
 ### Task 2: The input, from the index and git
 
