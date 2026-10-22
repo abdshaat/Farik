@@ -45,10 +45,14 @@ pub mod order;
 pub mod pipeline;
 /// The price table and the cost of model usage.
 pub mod pricing;
+/// The teams to make from the projects the owner chose and the links between them.
+pub mod proposal;
 /// The renewals a register of vendors says are coming up.
 pub mod renewals;
 /// A project folder's member repositories and the rules for adding one.
 pub mod repos;
+/// What is removed from a text before Claude is shown it.
+pub mod scrub;
 /// A skill's hash.
 pub mod skill;
 /// The team, its rules, and its validator.

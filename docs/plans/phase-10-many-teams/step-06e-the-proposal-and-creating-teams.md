@@ -112,7 +112,7 @@ Tests:
   - The ids are stable across input order.
   - A bookkeeping connector card's template is `financial-analysis` and its folder is `~/Catervas/bookkeeping`.
 
-- [ ] `feat(core): propose teams from links and scrub what claude would see`
+- [x] `feat(core): propose teams from links and scrub what claude would see`
 
 ### Task 2: Edits and made teams in the index
 
