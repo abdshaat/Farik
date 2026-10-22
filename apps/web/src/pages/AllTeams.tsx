@@ -9,6 +9,7 @@ import { useTeamList } from "../app/useTeamList.ts";
 import { sentence } from "../app/words.ts";
 import { t } from "../strings/t.ts";
 import styles from "./AllTeams.module.css";
+import { AllTeamsFinding } from "./find/AllTeamsFinding.tsx";
 import { ExportCard } from "./find/ExportCard.tsx";
 import { dollars } from "./Gate.tsx";
 
@@ -83,6 +84,7 @@ export function AllTeams() {
 		<div className={styles.page}>
 			<h1 className={styles.title}>{t("allTeams")}</h1>
 			{asleep && <p role="status">{t("teamsAsleep", { time: asleep })}</p>}
+			<AllTeamsFinding />
 			<ExportCard />
 			{list?.teams.length === 0 && <p>{t("teamsNone")}</p>}
 			<div className={styles.cards}>

@@ -146,7 +146,7 @@ Tests (`pages/ThisComputer.test.tsx`, `pages/AllTeams.test.tsx`):
   - With an empty index, the offer shows, and **Look for my projects** starts a scan.
   - `Stopped` shows "We stopped looking halfway".
 
-- [ ] `feat(web): finding in this computer and all teams`
+- [x] `feat(web): finding in this computer and all teams`
 
 ### Task 5: The journey
 

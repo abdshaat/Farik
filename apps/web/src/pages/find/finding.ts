@@ -1,3 +1,4 @@
+import type { MethodName } from "@catervas/protocol-client";
 import { useEffect, useState } from "react";
 import { useHub } from "../../app/connection.tsx";
 import { said } from "../../app/refusals.ts";
@@ -279,4 +280,30 @@ export function useCatalog(): CatalogService[] | undefined {
 		};
 	}, [client]);
 	return services;
+}
+
+/** Kept in this browser once the owner pressed "Not now" on All teams' offer to find projects. */
+export const FIND_NOT_NOW = "catervas.findNotNow";
+
+/** What a method of the hub answers, asked on mount and again on `again()`. */
+export function useHubCall<T>(method: MethodName): {
+	data: T | undefined;
+	again: () => void;
+} {
+	const { client } = useHub();
+	const [data, setData] = useState<T>();
+	const [round, setRound] = useState(0);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: round asks again
+	useEffect(() => {
+		if (!client) return;
+		let live = true;
+		client.call(method, {}).then(
+			(answer) => live && setData(answer as T),
+			() => {},
+		);
+		return () => {
+			live = false;
+		};
+	}, [client, method, round]);
+	return { data, again: () => setRound((n) => n + 1) };
 }
