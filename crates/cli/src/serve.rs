@@ -25,7 +25,7 @@ use futures_util::stream::FuturesUnordered;
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
 
-use crate::convert::convert;
+use crate::convert::{LOCK_WAIT, convert, lock_within};
 use crate::finding::CliFinder;
 use crate::project::{open_project, repository_root};
 use crate::run::{Ended, INTERRUPTED, OnIdle, Printer, finish, started, ticks};
@@ -685,9 +685,21 @@ impl<'s, 'io> Serving<'s, 'io> {
     /// Moves the team of the one-repo project at `old` into its project folder, now that its drive
     /// has finished, and drives the folder in its place. A move that fails is taken back, and the
     /// repository is driven again with the sentence for the page; every other team goes on.
-    fn converted(&mut self, old: &Path, conversion: &Conversion) {
+    fn converted(&mut self, old: &Path, conversion: &Conversion, slug: Option<TeamSlug>) {
         let now = self.io.clock.now();
-        match convert(old, conversion, &*self.io, now) {
+        let moved = convert(old, conversion, &*self.io, now);
+        // The team keeps its address, whichever folder it is driven in.
+        let at = moved
+            .as_ref()
+            .map_or_else(|_| old.to_path_buf(), Clone::clone);
+        // The lock the finished drive let go of may be held a moment longer by a process another
+        // thread forked while it was held; the drive that follows waits for it.
+        drop(lock_within(&at, LOCK_WAIT));
+        let waiting = slug.clone();
+        if let Some(slug) = slug {
+            self.named.insert(at.clone(), slug);
+        }
+        match moved {
             Ok(folder) => {
                 let message = format!(
                     "catervas: the team of {} moved into {}",
@@ -705,14 +717,23 @@ impl<'s, 'io> Serving<'s, 'io> {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .insert(folder.clone());
-                self.launch(folder, true, false, true);
+                self.launch(folder.clone(), true, false, true);
+                self.named.remove(&folder);
             }
             Err(why) => {
                 self.say(true, &format!("catervas: {}: {why}", old.display()));
                 self.said.insert(old.to_path_buf(), why);
                 self.launch(old.to_path_buf(), true, false, false);
+                self.named.remove(old);
             }
         }
+        // A drive that did not start leaves no address to wait for.
+        if let Some(slug) = &waiting
+            && !self.slugs.contains_key(&at)
+        {
+            self.hub.clear_moving(slug);
+        }
+        self.publish_idle();
     }
 
     /// Takes `root` out of the teams this serve has.
@@ -817,7 +838,10 @@ impl<'s, 'io> Serving<'s, 'io> {
             outcome,
         } = finished;
         self.stops.remove(&root);
-        self.slugs.remove(&root);
+        let slug = self.slugs.remove(&root);
+        if let (Some(slug), false) = (&slug, matches!(outcome, Ok(Driven::Converted(..)))) {
+            self.hub.clear_moving(slug);
+        }
         match outcome {
             Ok(Driven::Left(left)) => {
                 if let Some(directory) = &self.state_dir
@@ -837,7 +861,7 @@ impl<'s, 'io> Serving<'s, 'io> {
                 Some(Back::Left)
             }
             Ok(Driven::Converted(old, conversion)) => {
-                self.converted(&old, &conversion);
+                self.converted(&old, &conversion, slug);
                 None
             }
             Ok(Driven::Unready(unready)) => {
@@ -1007,6 +1031,16 @@ async fn run_team(
     let left = driver.daemon.left();
     let converting = driver.daemon.converting();
     let unready = matches!(ended, Ended::Unready(_));
+    // A team whose notes move stays on the list, under its address, until the folder's drive
+    // takes the address over, so that its page waits for it.
+    if converting.is_some() {
+        hub.mark_moving(IdleTeam {
+            slug: slug.clone(),
+            name: project.team.name.to_string(),
+            root: project.root.clone(),
+            status: IdleStatus::Moving,
+        });
+    }
     hub.remove(&slug);
     let code = finish(&project, driver, &mut printer, ended, presses).await;
     if unready && left.is_none() && code == 1 {

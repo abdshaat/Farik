@@ -30,8 +30,12 @@ export type Connection = {
 	events: Event[];
 	/** Revokes this browser's session and closes the socket; the page then asks for a start link. */
 	disconnect: () => Promise<void>;
-	/** Catervas is about to restart on the chosen project: its close is expected, and the page reconnects at once. */
-	reopen: () => void;
+	/**
+	 * Catervas is about to restart on the chosen project: its close is expected, and the page
+	 * reconnects at once, and keeps trying for `forMs` (30 seconds by default; a move that copies a
+	 * large folder asks for longer).
+	 */
+	reopen: (forMs?: number) => void;
 };
 
 const RETRY_MS = 5000;
@@ -75,7 +79,7 @@ export function ConnectionProvider(props: {
 	const [linkUsed, setLinkUsed] = useState(false);
 	const [events, setEvents] = useState<Event[]>([]);
 	const disconnect = useRef(async () => {});
-	const reopen = useRef(() => {});
+	const reopen = useRef((_forMs?: number) => {});
 	const socketFactory = useRef(props.socketFactory ?? outer);
 
 	// The path and `inner` are fixed for a provider: another team's page is a new provider, by key.
@@ -193,8 +197,8 @@ export function ConnectionProvider(props: {
 			setClient(null);
 			setStatus("no_session");
 		};
-		reopen.current = () => {
-			reopenUntil = Date.now() + REOPEN_FOR_MS;
+		reopen.current = (forMs = REOPEN_FOR_MS) => {
+			reopenUntil = Date.now() + forMs;
 			retried = false;
 			setStatus("reopening");
 		};
@@ -213,7 +217,7 @@ export function ConnectionProvider(props: {
 		linkUsed,
 		events,
 		disconnect: () => disconnect.current(),
-		reopen: () => reopen.current(),
+		reopen: (forMs) => reopen.current(forMs),
 	};
 	const body = (
 		<FactoryContext value={socketFactory.current}>

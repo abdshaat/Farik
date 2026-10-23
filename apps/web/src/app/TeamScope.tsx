@@ -44,6 +44,15 @@ function TeamGate({ team }: { team: string }) {
 	}, [row, team]);
 	// A team that was removed: the same page of another, or All teams.
 	if (data && !row) return <Navigate to="/" replace />;
+	// The team's notes are moving into a project folder, which the same address will serve.
+	if (row?.status === "moving")
+		return (
+			<main>
+				<h1>{t("movingTitle")}</h1>
+				<p>{t("movingBodyAway")}</p>
+				<p role="status">{t("movingNotice")}</p>
+			</main>
+		);
 	if (row && row.status !== "running" && row.status !== "paused")
 		return (
 			<main>

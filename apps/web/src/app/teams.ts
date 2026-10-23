@@ -13,7 +13,7 @@ export type TeamRow = {
 	name: string;
 	root: string;
 	/** `running` and `paused` are driven here; the others are not. */
-	status: "running" | "paused" | "elsewhere" | "missing" | "failed";
+	status: "running" | "paused" | "elsewhere" | "missing" | "failed" | "moving";
 	workingAgents: number;
 	waiting: number;
 	todayUsd: number;

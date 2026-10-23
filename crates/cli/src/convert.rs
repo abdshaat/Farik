@@ -41,13 +41,16 @@ use crate::state::{home_of, state_dir};
 /// go of it, but a process another thread of this one forked while it was held keeps the lock
 /// until that process runs `exec`, a few milliseconds under load.
 #[cfg(not(test))]
-const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+pub(crate) const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
 #[cfg(test)]
-const LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
+pub(crate) const LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// The run lock of `root`, tried again every 50 ms for up to `wait`; `None` when something else
 /// still holds it.
-fn lock_within(root: &Path, wait: std::time::Duration) -> Result<Option<RunLock>, String> {
+pub(crate) fn lock_within(
+    root: &Path,
+    wait: std::time::Duration,
+) -> Result<Option<RunLock>, String> {
     let deadline = std::time::Instant::now() + wait;
     loop {
         if let Some(lock) = try_lock(root)? {

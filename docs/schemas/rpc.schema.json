@@ -3291,7 +3291,7 @@
       }
     },
     "teamsListResult": {
-      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month), undoable (a team Catervas made from the proposal whose log has no session.started: teams.undo takes it back). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
+      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error, moving while its notes move into a project folder, between its drive and the folder's, which has the same address), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month), undoable (a team Catervas made from the proposal whose log has no session.started: teams.undo takes it back). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
       "type": "object",
       "additionalProperties": false,
       "required": ["teams", "current", "account_asleep_until"],
@@ -3306,7 +3306,7 @@
               "slug": { "type": "string" },
               "name": { "type": "string" },
               "root": { "type": "string" },
-              "status": { "enum": ["running", "paused", "elsewhere", "missing", "failed"] },
+              "status": { "enum": ["running", "paused", "elsewhere", "missing", "failed", "moving"] },
               "failed": { "type": "string" },
               "working_agents": { "type": "integer", "minimum": 0 },
               "waiting": { "type": "integer", "minimum": 0 },

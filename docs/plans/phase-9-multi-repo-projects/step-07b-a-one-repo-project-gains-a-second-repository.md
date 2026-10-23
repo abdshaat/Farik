@@ -289,7 +289,13 @@ Files: `Repositories.tsx`; `AddSecondRepository.tsx`; `Today.tsx`; `refusals.ts`
 - `reopens_for_longer_when_asked` (`connection.test.tsx`): `reopen(600_000)` keeps retrying past 30 s; `reopen()` stops at 30 s as today. RED.
 - `reminds_of_the_branch_to_merge` (`Today.test.tsx`): a `repos.list` row with `moved_out: "catervas/moved-out"` shows the reminder naming the repository and the branch. `null` shows none. RED.
 
-- [ ] `feat(web): add a second repository to a one-repo project`
+Built differently, 2026-10-23:
+- The Task 5 tests are in `Repositories.test.tsx`, where the page's tests are, not `settings.test.tsx`.
+- `repoNameOf` and `fillOf` of step 07 do not exist; `AddSecondRepository.tsx` holds `repoNameOf`, and fills the held-move sentence from the daemon's own.
+- The team keeps its address through the move, so there is no landing by `teams.list`'s root. While its notes move the hub lists the team as `moving` under that address (`Hub::mark_moving`; `teamsListResult` gains the status, and `TeamGate` shows "Moving your team's notes"), so that its page waits instead of leaving for All teams.
+- `AddSecondRepository` takes `second` (a repository chosen already) and `onMoved`, which Task 7's "Continue" uses.
+
+- [x] `feat(web): add a second repository to a one-repo project`
 
 ### Task 6: Spec
 
