@@ -32,7 +32,7 @@ fn internal(error: &dyn Display) -> Failure {
 }
 
 /// A refusal the page words by `code`, at the JSON pointer `pointer`.
-fn refusal(code: &str, pointer: &str, message: &str) -> Failure {
+pub(super) fn refusal(code: &str, pointer: &str, message: &str) -> Failure {
     let mut failure = Failure::new(REFUSED, message);
     failure.data =
         Some(json!({ "errors": [{ "path": pointer, "message": message, "code": code }] }));

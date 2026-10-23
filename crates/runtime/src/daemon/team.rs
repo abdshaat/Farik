@@ -2705,6 +2705,7 @@ pub(super) mod tests {
                 clock: Arc::new(FixedClock::new(at())),
                 take_on_error: std::sync::Mutex::default(),
                 leaving: std::sync::Mutex::default(),
+                converting: std::sync::Mutex::default(),
                 env: env
                     .iter()
                     .map(|(name, value)| ((*name).to_string(), (*value).to_string()))

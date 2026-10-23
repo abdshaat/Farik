@@ -75,6 +75,7 @@
         "files.tree",
         "files.read",
         "repos.list",
+        "project.convert_blockers",
         "teams.list",
         "computer.get"
       ]
@@ -325,6 +326,9 @@
             },
             {
               "$ref": "#/$defs/reposListQuery"
+            },
+            {
+              "$ref": "#/$defs/projectConvertBlockersQuery"
             },
             {
               "$ref": "#/$defs/teamsListQuery"
@@ -709,6 +713,9 @@
         },
         {
           "$ref": "#/$defs/repoLocateRequest"
+        },
+        {
+          "$ref": "#/$defs/projectConvertRequest"
         },
         {
           "$ref": "#/$defs/filesAskChangeRequest"
@@ -3178,6 +3185,60 @@
                     "task": { "type": ["string", "null"] }
                   }
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "projectConvertBlockersQuery": {
+      "title": "Project Convert Blockers Query",
+      "description": "What holds a one-repo project from gaining a second repository (docs/SPEC.md 4.4; phase 9 step 07b), as projectConvertBlockersResult shapes it. Asked so that the dialog says it before the owner fills anything in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "project.convert_blockers" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "projectConvertBlockersResult": {
+      "description": "tasks are the ids of the tasks in progress (assigned, in progress, blocked, verifying, rejected, accepted and awaiting integration, escalated with their branch still in the repository, and any task Catervas filed for the owner that is not accepted or cancelled), catervafication whether the Catervafication of the one repository is still open, and folder_changes the numbers of the changes to the team's notes neither integrated nor escalated. A move waits while any is set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks", "catervafication", "folder_changes"],
+      "properties": {
+        "tasks": { "type": "array", "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" } },
+        "catervafication": { "type": "boolean" },
+        "folder_changes": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "projectConvertRequest": {
+      "title": "Project Convert Request",
+      "description": "Adds a second repository to a project of one (docs/SPEC.md 4.4; phase 9 step 07b): first_name names the current repository as a member, parent and name place the project folder as project.create_folder's do, and second is the repository that joins, its path relative to home. Refused with -32005 and data.errors, each with path (a JSON pointer), message and code, in this order: not_one_repo (/), work_in_progress (/), project_name (/name), outside_home (/parent), folder_there (/name), repo_name (/first_name), holds_project_folder (/parent), then for second path_taken, not_there, outside_home, home_itself, not_a_repository, not_the_top, has_team, nested (/second/path), name_taken, repo_name (/second/name) and no_such_branch (/second/integration_branch). Nothing is made by the call: it stores the conversion and stops the team's run, and catervas serve makes the project folder, moves the team and documents into it, and drives it on the same port. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "project.convert" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["first_name", "parent", "name", "second"],
+          "properties": {
+            "first_name": { "type": "string" },
+            "parent": { "type": "string" },
+            "name": { "type": "string" },
+            "second": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "path"],
+              "properties": {
+                "name": { "type": "string" },
+                "path": { "type": "string", "description": "The repository's top folder, relative to home." },
+                "integration_branch": { "type": "string" }
               }
             }
           }

@@ -2090,6 +2090,21 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_a_blob_byte_for_byte() {
+        let repository = TempRepo::new("blob-bytes");
+        std::fs::write(repository.path.join("odd.bin"), [0xff_u8, 0x00]).expect("a file");
+        repository.commit("an odd file");
+        let git = repository.adapter();
+        let entries = git.tree_entries("HEAD", "odd.bin").expect("the tree reads");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            git.blob_bytes(&entries[0].blob).expect("the blob reads"),
+            [0xff, 0x00]
+        );
+    }
+
+    #[test]
     fn says_there_is_no_repository_before_it_runs_anything() {
         // Every method asks first, so that a user is told the one thing that is wrong rather than
         // whatever git prints about a directory it has never heard of.

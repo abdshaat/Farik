@@ -220,7 +220,7 @@ Files: `store/src/convert.rs`, `git.rs`, `team.rs`, `web.rs`, `daemon.rs`, `rpc.
   RED.
 - `stops_the_run_for_the_move`: with nothing in the way, `project.convert` answers `{}`, `converting()` holds the asked conversion, and the run is stopped as `project_leave_stops_the_run_and_marks_the_project_left` (`web.rs:2849`) checks. RED.
 
-- [ ] `feat(runtime): ask to move a one-repo project into a project folder`
+- [x] `feat(runtime): ask to move a one-repo project into a project folder`
 
 ### Task 3: The move
 

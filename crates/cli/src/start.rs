@@ -746,6 +746,7 @@ pub(crate) fn web_sharing(root: &Path, io: &CliIo<'_>, shared: &Shared) -> WebSt
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
         leaving: std::sync::Mutex::default(),
+        converting: std::sync::Mutex::default(),
         env: io.env.clone(),
         templates: state.map(|directory| Templates::new(directory.join("templates"))),
         #[cfg(feature = "e2e")]

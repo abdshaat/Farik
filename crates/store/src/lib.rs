@@ -17,6 +17,8 @@ pub mod claude_export;
 pub mod claude_history;
 /// Reading the connectors Claude's settings name into the machine index, never a key.
 pub mod claude_services;
+/// What holds a one-repo project from becoming a project folder.
+pub mod convert;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// Where the team's documents are read from.
