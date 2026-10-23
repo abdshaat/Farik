@@ -310,7 +310,7 @@ Built differently, 2026-10-23:
 
 `docs/design/multi-repo-projects.md`'s "A one-repo project gains a second repository" is changed: the removal is a branch for the owner to merge, not a change integrated by the team's policy; the move waits for work in progress; its Events list gives `project.converted` its `branch`.
 
-- [ ] `docs(spec): record a one-repo project gaining a second repository`
+- [x] `docs(spec): record a one-repo project gaining a second repository`
 
 ## Verification
 
