@@ -3366,13 +3366,20 @@ fn a_scanned_serve(
 
 /// Every team `teams.list` shows, by slug.
 fn listed_teams(serving: &Serving) -> Vec<Value> {
-    let listed = call_at(
-        serving.port,
-        "/hub/rpc",
-        &serving.cookie,
-        "query",
-        json!({ "name": "teams.list", "params": {} }),
-    );
+    // The hub restarts, closing its sockets, when the wizard takes a project on; a query cut off
+    // by that restart is asked again on a new socket.
+    let listed = a_runtime().block_on(async {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut socket = socket_at(serving.port, "/hub/rpc", &serving.cookie).await;
+            let params = json!({ "name": "teams.list", "params": {} });
+            match try_ask(&mut socket, 1, "query", params).await {
+                Ok(listed) => break listed,
+                Err(why) if Instant::now() >= deadline => panic!("teams.list: {why}"),
+                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
+    });
     listed["result"]["teams"]
         .as_array()
         .cloned()
