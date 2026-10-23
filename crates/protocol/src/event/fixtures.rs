@@ -339,6 +339,11 @@ pub fn a_body_wire(kind: EventKind) -> Value {
             "name": "shop-api",
             "path": "/home/me/Code/shop-api"
         }),
+        EventKind::ProjectConverted => json!({
+            "project_folder": "/home/me/Catervas/corner-bakery",
+            "first_repo": "corner-bakery",
+            "branch": "catervas/moved-out"
+        }),
         EventKind::DocumentRewriteStarted => json!({ "tasks": ["CTV-1", "CTV-2"] }),
         EventKind::WorktreeTidied => json!({ "put_back": ["tsconfig.json"], "removed": [] }),
         EventKind::PullRequestConflicted => json!({

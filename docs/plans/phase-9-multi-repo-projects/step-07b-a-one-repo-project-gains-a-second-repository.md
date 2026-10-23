@@ -197,7 +197,7 @@ Files: the event's files; `projections.rs`'s pass arm.
 
 - `reads_a_project_converted_event`: `{ project_folder: "/home/me/Catervas/corner-bakery", first_repo: "corner-bakery", branch: "catervas/moved-out" }` reads and writes back unchanged. `first_repo: "Corner"` is refused at `/body/first_repo`, an empty `project_folder` at `/body/project_folder`, and `branch: "main"` at `/body/branch`. It is about no contract; `EVERY_KIND`'s length asserts move by one. RED.
 
-- [ ] `feat(protocol): record a project's move to a project folder`
+- [x] `feat(protocol): record a project's move to a project folder`
 
 ### Task 2: Asking for the move
 
