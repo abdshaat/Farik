@@ -60,11 +60,25 @@ impl SecretAt {
         }
     }
 
+    /// What a key of the computer's own is kept under (phase 10 step 06d), such as the GitHub
+    /// token: the account `machine:<name>`, in no project.
+    #[must_use]
+    pub fn machine(name: &str) -> SecretAt {
+        SecretAt {
+            project_id: String::new(),
+            agent_id: String::new(),
+            server: name.to_string(),
+        }
+    }
+
     /// The keychain account, and the key in `connectors.json`:
     /// `connector:<project_id>:<agent_id>:<server>`; a mailbox's, which has no agent, is
-    /// `mailbox:<project_id>:<purpose>`.
+    /// `mailbox:<project_id>:<purpose>`; a computer's own is `machine:<name>`.
     #[must_use]
     pub fn account(&self) -> String {
+        if self.project_id.is_empty() {
+            return format!("machine:{}", self.server);
+        }
         if self.agent_id.is_empty() {
             return format!("mailbox:{}:{}", self.project_id, self.server);
         }
@@ -604,6 +618,10 @@ pub fn keys_copied(root: &std::path::Path) -> Option<(String, usize)> {
 /// Where the connections the user said Not now to are kept, under the project's root: this
 /// computer's own preference, so it is not in the team file that travels with the repository.
 pub const CONNECTOR_SUGGESTIONS: &str = ".catervas/local/connector-suggestions.json";
+
+/// The services the owner was found to use with Claude, `[{ service_id, name }]`, written when the
+/// team was made from the proposal (spec 4.4, 6.7): this computer's own, under the project's root.
+pub const FOUND_SERVICES: &str = ".catervas/local/found-services.json";
 
 /// Adds the agent's server to `root`'s [`CONNECTOR_SUGGESTIONS`], once, so Today stops suggesting
 /// it; makes the folder and writes the file private. A file that cannot be read is replaced.

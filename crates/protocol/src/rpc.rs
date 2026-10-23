@@ -178,7 +178,6 @@ mod tests {
                 Some(q("folders.list", json!({ "path": 3 }))),
             ),
             (q("computer.check", json!({})), None),
-            (q("account.status", json!({})), None),
             (
                 request(
                     2,
@@ -199,14 +198,6 @@ mod tests {
                     &json!({ "parent": "code", "name": "a", "no_sandbox": true }),
                 )),
             ),
-            (
-                request(
-                    4,
-                    "account.connect",
-                    &json!({ "kind": "api_key", "secret": "sk-ant-api-x" }),
-                ),
-                Some(request(4, "account.connect", &json!({ "kind": "api_key" }))),
-            ),
             (request(5, "sandbox.build", &json!({})), None),
         ];
         for (good, bad) in cases {
@@ -215,12 +206,40 @@ mod tests {
                 assert!(rpc_request_from_value(&bad).is_err(), "{bad} was read");
             }
         }
-        let wrong_kind = request(
-            4,
-            "account.connect",
-            &json!({ "kind": "password", "secret": "x" }),
-        );
-        assert!(rpc_request_from_value(&wrong_kind).is_err());
+    }
+
+    #[test]
+    fn holds_the_account_methods_to_the_schema() {
+        let q = |name: &str| request(1, "query", &json!({ "name": name, "params": {} }));
+        for good in [
+            q("account.status"),
+            request(2, "account.sign_in", &json!({ "console": false })),
+            request(3, "account.sign_in_code", &json!({ "code": "abc" })),
+            request(4, "account.check", &json!({})),
+            request(5, "account.sign_out", &json!({})),
+        ] {
+            rpc_request_from_value(&good).unwrap_or_else(|e| panic!("{good} refused: {e:?}"));
+        }
+        for bad in [
+            request(3, "account.sign_in_code", &json!({})),
+            request(3, "account.sign_in_code", &json!({ "code": "" })),
+            request(
+                3,
+                "account.sign_in_code",
+                &json!({ "code": "x".repeat(513) }),
+            ),
+            request(2, "account.sign_in", &json!({})),
+            request(
+                6,
+                "account.connect",
+                &json!({ "kind": "api_key", "secret": "x" }),
+            ),
+        ] {
+            assert!(rpc_request_from_value(&bad).is_err(), "{bad} was read");
+        }
+        let result = super::validator_for("accountCheckResult");
+        assert!(result.is_valid(&json!({ "outcome": "working" })));
+        assert!(!result.is_valid(&json!({ "outcome": "fine" })));
     }
 
     #[test]
@@ -309,6 +328,65 @@ mod tests {
         let mut without_seq = event.clone();
         without_seq.as_object_mut().expect("object").remove("seq");
         assert!(rpc_notification_from_value(&note(&without_seq)).is_err());
+    }
+
+    #[test]
+    fn reads_the_hub_methods() {
+        let q = |name: &str| request(1, "query", &json!({ "name": name, "params": {} }));
+        for frame in [
+            q("teams.list"),
+            q("computer.get"),
+            request(2, "teams.current", &json!({ "slug": "bakery" })),
+            request(
+                3,
+                "teams.remove",
+                &json!({ "slug": "bakery", "confirmed": true }),
+            ),
+            request(4, "teams.remove", &json!({ "slug": "bakery" })),
+            request(
+                5,
+                "computer.set",
+                &json!({ "agents_at_once": 2, "daily_cap_usd": 25.5 }),
+            ),
+            request(6, "computer.set", &json!({ "agents_at_once": null })),
+            request(7, "computer.set", &json!({})),
+        ] {
+            rpc_request_from_value(&frame).unwrap_or_else(|e| panic!("{frame} refused: {e:?}"));
+        }
+        for refused in [
+            request(1, "teams.current", &json!({})),
+            request(2, "teams.remove", &json!({ "confirmed": true })),
+            request(3, "computer.set", &json!({ "agents_at_once": "two" })),
+            request(4, "computer.set", &json!({ "turbo": true })),
+        ] {
+            assert!(rpc_request_from_value(&refused).is_err(), "{refused}");
+        }
+        let teams = json!({
+            "teams": [{
+                "slug": "bakery", "name": "Bakery", "root": "/h/bakery", "status": "running",
+                "working_agents": 1, "waiting": 0, "today_usd": 0.5, "month_usd": 4.0,
+                "undoable": true,
+            }, {
+                "slug": "shop", "name": "Shop", "root": "/h/shop", "status": "failed",
+                "failed": "the log is gone", "working_agents": 0, "waiting": 0,
+                "today_usd": 0, "month_usd": 0, "undoable": false,
+            }],
+            "current": "bakery",
+            "account_asleep_until": null,
+        });
+        let computer =
+            json!({ "agents_at_once": null, "daily_cap_usd": 25, "spent_today_usd": 1.5 });
+        for (definition, value) in [
+            ("teamsListResult", teams),
+            ("computerGetResult", computer),
+            ("teamsRemoveResult", json!({ "removed": true })),
+        ] {
+            let errors: Vec<String> = super::validator_for(definition)
+                .iter_errors(&value)
+                .map(|e| e.to_string())
+                .collect();
+            assert!(errors.is_empty(), "{definition}: {errors:?}");
+        }
     }
 
     #[test]

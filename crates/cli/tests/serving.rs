@@ -149,7 +149,10 @@ fn remembers_the_project_it_serves() {
     let root = repository.path.canonicalize().expect("the root");
     assert_eq!(
         written,
-        json!({ "last_project": root.display().to_string() })
+        json!({
+            "last_project": root.display().to_string(),
+            "projects": [root.display().to_string()],
+        })
     );
 
     let stopped = run(&repository.path, &["stop"]);
@@ -434,7 +437,7 @@ fn connected(port: u16, code: &str) -> String {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn serve_status_has_no_credential_under_a_given_engine() {
+fn serve_status_is_not_signed_in_without_a_claude_code() {
     use futures_util::{SinkExt as _, StreamExt as _};
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
@@ -491,7 +494,7 @@ fn serve_status_has_no_credential_under_a_given_engine() {
         json!({
             "project_root": root.display().to_string(),
             "paused": false,
-            "credential": null,
+            "signed_in": false,
             "port": port,
             "take_on_error": null,
             "setup_pending": false,
@@ -856,6 +859,175 @@ fn answers_the_setup_page_while_docker_info_hangs() {
 }
 
 #[cfg(feature = "e2e")]
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn waits_in_the_wizard_for_a_missing_sandbox_image() {
+    use std::io::{BufRead as _, BufReader};
+    use std::process::{Command, Stdio};
+
+    // A `docker` that answers, whose sandbox image is there only once `built` is.
+    let directory = scratch("serve-image-missing-bin");
+    let built = directory.join("built");
+    let source = directory.join("docker.txt");
+    std::fs::write(
+        &source,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n  version|rm|run) exit 0 ;;\n  image) [ -f '{}' ] ;;\n  \
+             *) exit 1 ;;\nesac\n",
+            built.display()
+        ),
+    )
+    .expect("written");
+    // Copied rather than written in place, as `a_claude_saying` says.
+    let program = directory.join("docker");
+    let copied = Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    // A task in progress in a sandboxed project: the first tick makes its sandbox.
+    let repository = a_team("serve-image-missing");
+    std::fs::write(
+        repository.path.join(".catervas/local/settings.json"),
+        r#"{"sandbox":"docker"}"#,
+    )
+    .expect("the settings are written");
+    let request = repository.path.join("request.yaml");
+    std::fs::write(&request, project::a_request("Write done.txt")).expect("written");
+    let filed = run(
+        &repository.path,
+        &["task", "create", request.to_str().expect("a path")],
+    );
+    assert_eq!(filed.code, 0, "{}", filed.err);
+    std::fs::remove_file(&request).expect("removed");
+    project::record(
+        &repository,
+        "CTV-1",
+        "request.triaged",
+        &json!({ "size": "small", "reason": "One file.", "triaged_by": "human" }),
+    );
+    let people = json!({ "assignee": "dev-a", "reviewer": "dev-b" });
+    for (from, to) in [
+        ("draft", "refining"),
+        ("refining", "ready"),
+        ("ready", "assigned"),
+        ("assigned", "in_progress"),
+    ] {
+        project::moved(&repository, "CTV-1", from, to, &people);
+    }
+
+    let (home, state) = (
+        scratch("serve-image-missing-home"),
+        scratch("serve-image-missing-state"),
+    );
+    let errors = state.join("stderr.txt");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_catervas-e2e-serve"))
+        .args([
+            "--port",
+            &free_port(),
+            "--no-keychain",
+            "--sandbox-image",
+            "catervas-sandbox-unused",
+        ])
+        .env("PATH", path)
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &state)
+        .current_dir(&repository.path)
+        .stdout(Stdio::piped())
+        .stderr(std::fs::File::create(&errors).expect("the error file"))
+        .spawn()
+        .expect("the binary starts");
+    let out = Arc::new(Mutex::new(String::new()));
+    let kept = Arc::clone(&out);
+    let (linked, link) = channel();
+    let stdout = child.stdout.take().expect("stdout");
+    let reader = std::thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if let Some(found) = link_of(&line) {
+                let _ = linked.send(found);
+            }
+            let mut out = kept.lock().expect("the output");
+            out.push_str(&line);
+            out.push('\n');
+        }
+    });
+    let (port, code) = link
+        .recv_timeout(Duration::from_secs(60))
+        .expect("the link is printed");
+    let cookie = connected(port, &code);
+
+    // The sandbox cannot be made: serve goes back to the wizard, waiting on the project, on the
+    // same port, so the owner can prepare the image there.
+    let mut status = Value::Null;
+    let mut exited = None;
+    until("serve is back in setup mode", || {
+        exited = child.try_wait().expect("the binary is asked");
+        status = serve_status_across_a_restart(port, &cookie).unwrap_or_default();
+        exited.is_some() || status.is_object() && status["project_root"].is_null()
+    });
+    if let Some(exited) = exited {
+        joined(reader, "the output");
+        let said = std::fs::read_to_string(&errors).unwrap_or_default();
+        panic!(
+            "serve ended ({exited}):\n{}{said}",
+            out.lock().expect("the output")
+        );
+    }
+    let check = |cookie: &str| {
+        call(
+            port,
+            cookie,
+            "query",
+            json!({ "name": "computer.check", "params": {} }),
+        )
+    };
+    let missing = check(&cookie);
+    assert_eq!(
+        missing["result"]["sandbox_image"]["state"], "missing",
+        "{missing}"
+    );
+    assert_eq!(missing["result"]["taking_on"], false, "{missing}");
+
+    // Once the image is there, the check takes the project on again.
+    std::fs::write(&built, "").expect("written");
+    let ready = check(&cookie);
+    assert_eq!(ready["result"]["taking_on"], true, "{ready}");
+    until("the project is driven again", || {
+        status = serve_status_across_a_restart(port, &cookie).unwrap_or_default();
+        status["project_root"].is_string()
+    });
+    // Its task's session waits until it is aborted, which the second Ctrl-C does.
+    let interrupt = || {
+        let sent = Command::new("kill")
+            .args(["-INT", &child.id().to_string()])
+            .status()
+            .expect("kill runs");
+        assert!(sent.success());
+    };
+    interrupt();
+    std::thread::sleep(Duration::from_millis(500));
+    interrupt();
+    let ended = child.wait().expect("the binary ends");
+    joined(reader, "the output");
+    let out = out.lock().expect("the output").clone();
+    assert_eq!(ended.code(), Some(130), "{out}");
+    assert!(
+        out.contains(&format!(
+            "the sandbox is not ready: prepare it in the browser, on 127.0.0.1:{port}"
+        )),
+        "{out}"
+    );
+    assert_eq!(links(&out).len(), 1, "{out}");
+}
+
+#[cfg(feature = "e2e")]
 /// The raw answer to `GET <path>` sent to the daemon on `port` with `Host: <host>`, and `cookie`
 /// when there is one.
 fn get_as(port: u16, host: &str, path: &str, cookie: Option<&str>) -> String {
@@ -990,9 +1162,14 @@ fn a_runtime() -> tokio::runtime::Runtime {
 /// The browser's socket on `port`, with the session `cookie`; retried for 30 s, since across a
 /// take-on the daemon is briefly not there.
 async fn socket(port: u16, cookie: &str) -> Socket {
+    socket_at(port, "/rpc", cookie).await
+}
+
+/// `socket`, to the page `path` of the hub: `/rpc`, `/hub/rpc` or `/t/<team>/rpc`.
+async fn socket_at(port: u16, path: &str, cookie: &str) -> Socket {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        match try_socket(port, cookie).await {
+        match try_socket_at(port, path, cookie).await {
             Ok(socket) => return socket,
             Err(error) => assert!(Instant::now() < deadline, "the socket opens: {error}"),
         }
@@ -1003,9 +1180,14 @@ async fn socket(port: u16, cookie: &str) -> Socket {
 /// The browser's socket on `port`, with the session `cookie`, tried once. The handshake is given
 /// up after 5 s: a port that is held but never served takes the connection and never answers.
 async fn try_socket(port: u16, cookie: &str) -> Result<Socket, String> {
+    try_socket_at(port, "/rpc", cookie).await
+}
+
+/// `try_socket`, to the page `path`.
+async fn try_socket_at(port: u16, path: &str, cookie: &str) -> Result<Socket, String> {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest as _;
 
-    let mut request = format!("ws://127.0.0.1:{port}/rpc")
+    let mut request = format!("ws://127.0.0.1:{port}{path}")
         .into_client_request()
         .expect("a request");
     let headers = request.headers_mut();
@@ -1081,6 +1263,24 @@ fn serve_status_across_a_restart(port: u16, cookie: &str) -> Option<Value> {
     })
 }
 
+/// `serve.status` of the page `path`, tried once: `None` when nothing answers there now.
+fn status_at(port: u16, path: &str, cookie: &str) -> Option<Value> {
+    a_runtime().block_on(async {
+        let mut socket = try_socket_at(port, path, cookie).await.ok()?;
+        let status = json!({ "name": "serve.status", "params": {} });
+        let answer = try_ask(&mut socket, 1, "query", status).await.ok()?;
+        Some(answer["result"].clone())
+    })
+}
+
+/// `method` on the page `path`, answering the reply.
+fn call_at(port: u16, path: &str, cookie: &str, method: &str, params: Value) -> Value {
+    a_runtime().block_on(async {
+        let mut socket = socket_at(port, path, cookie).await;
+        ask(&mut socket, 1, method, params).await
+    })
+}
+
 /// `method` on a socket of its own, answering the reply.
 fn call(port: u16, cookie: &str, method: &str, params: Value) -> Value {
     a_runtime().block_on(async {
@@ -1121,18 +1321,22 @@ struct Serving {
     cookie: String,
 }
 
-/// `catervas serve` in `cwd`, with `PATH`, `HOME` at `home`, the state folder at `state`, an API key
-/// in the environment, and interrupts the test sends.
+/// `catervas serve` in `cwd`, with `HOME` at `home`, the state folder at `state`, a signed-in fake
+/// Claude Code on `PATH`, and interrupts the test sends.
 fn serving_setup(cwd: &Path, home: &Path, state: &Path) -> Serving {
     let mut env = setup_env(home, state);
-    env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-ant-api03-test".to_string(),
-    );
+    signed_in(&mut env, &format!("serving-setup-{}", name_of(home)));
     serving_in(cwd, env, true)
 }
 
-/// `PATH`, `HOME` at `home`, and the state folder at `state`: no credential.
+/// Puts a fake `claude` that is signed in first on `env`'s `PATH`: Claude Code's sign-in is what
+/// serve asks (ADR 0084).
+fn signed_in(env: &mut std::collections::BTreeMap<String, String>, name: &str) {
+    let (_directory, path) = project::a_claude_saying(name, "2.1.300 (Claude Code)");
+    env.insert("PATH".to_string(), path);
+}
+
+/// `PATH`, `HOME` at `home`, and the state folder at `state`: whatever `claude` the `PATH` finds.
 fn setup_env(home: &Path, state: &Path) -> std::collections::BTreeMap<String, String> {
     let mut env = project::a_bare_env();
     env.insert("HOME".to_string(), home.display().to_string());
@@ -1147,6 +1351,27 @@ fn serving_in(
     env: std::collections::BTreeMap<String, String>,
     recorded_engine: bool,
 ) -> Serving {
+    serving_in_with(cwd, env, recorded_engine, None)
+}
+
+/// `serving_in`, trying a team driven elsewhere again after `retry` when it is given.
+fn serving_in_with(
+    cwd: &Path,
+    env: std::collections::BTreeMap<String, String>,
+    recorded_engine: bool,
+    retry: Option<Duration>,
+) -> Serving {
+    serving_custom(cwd, env, recorded_engine, retry, Box::new(|_| {}))
+}
+
+/// `serving_in_with`, then `customize` of the harness before serve starts.
+fn serving_custom(
+    cwd: &Path,
+    env: std::collections::BTreeMap<String, String>,
+    recorded_engine: bool,
+    retry: Option<Duration>,
+    customize: Box<dyn FnOnce(&mut catervas::CliIo<'_>) + Send>,
+) -> Serving {
     let (out, err) = (SharedOut::default(), SharedOut::default());
     let (interrupt, interrupts) = tokio::sync::mpsc::unbounded_channel();
     let (cwd, port) = (cwd.to_path_buf(), free_port());
@@ -1157,9 +1382,13 @@ fn serving_in(
                 io.engine = recorded(Vec::new());
             }
             io.env = env;
+            if let Some(retry) = retry {
+                io.elsewhere_retry = retry;
+            }
             io.stdout = Box::new(shared_out);
             io.stderr = Box::new(shared_err);
             io.interrupts = catervas::Interrupts::Channel(interrupts);
+            customize(io);
         })
     });
     until("the link is printed", || {
@@ -1651,8 +1880,10 @@ fn refuses_paths_outside_home_and_bad_names() {
     catervas_store::git::fixtures::git_in(&shop, &["init", "-b", "main"]);
     // Home a git project itself, as some keep their dotfiles: Catervas's settings would be in it.
     catervas_store::git::fixtures::git_in(&home, &["init", "-b", "main"]);
-    // No credential kept, and none in the environment.
-    let serving = serving_in(&cwd, setup_env(&home, &state), true);
+    let (claude, path) = project::a_claude_saying("setup-guards-claude", "2.1.300 (Claude Code)");
+    let mut env = setup_env(&home, &state);
+    env.insert("PATH".to_string(), path);
+    let serving = serving_in(&cwd, env, true);
     let description = "A shop for bread, with an order page and a daily menu.";
     let create = |parent: &str, name: &str| json!({ "parent": parent, "name": name, "description": description, "no_sandbox": false });
     let open = |path: &str| json!({ "path": path, "no_sandbox": false });
@@ -1682,21 +1913,22 @@ fn refuses_paths_outside_home_and_bad_names() {
             create("", "shop"),
             "a folder with that name is already there",
         ),
-        (
-            "project.open",
-            open("shop"),
-            "connect your AI account first",
-        ),
-        (
-            "project.create",
-            create("", "bakery"),
-            "connect your AI account first",
-        ),
     ];
     let answers: Vec<Value> = asked
         .iter()
         .map(|(method, params, _)| call(serving.port, &serving.cookie, method, params.clone()))
         .collect();
+    // Claude Code signed out: the project steps wait on the account.
+    std::fs::write(claude.join("signed-out"), "").expect("a marker");
+    let signed_out = [
+        call(serving.port, &serving.cookie, "project.open", open("shop")),
+        call(
+            serving.port,
+            &serving.cookie,
+            "project.create",
+            create("", "bakery"),
+        ),
+    ];
     let (ran, out, err) = serving.interrupted();
     for ((method, params, sentence), answer) in asked.iter().zip(&answers) {
         assert_eq!(
@@ -1704,6 +1936,13 @@ fn refuses_paths_outside_home_and_bad_names() {
             "{method} {params}: {answer}"
         );
         assert_eq!(answer["error"]["message"], *sentence, "{method} {params}");
+    }
+    for answer in &signed_out {
+        assert_eq!(answer["error"]["code"], -32005, "{answer}");
+        assert_eq!(
+            answer["error"]["message"], "connect your AI account first",
+            "{answer}"
+        );
     }
     assert!(!home.join("bakery").exists());
     assert!(
@@ -1721,27 +1960,26 @@ fn refuses_paths_outside_home_and_bad_names() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn connecting_the_account_takes_the_waiting_project_on() {
-    let repository = a_team("setup-connect-takes-on");
-    let (_home, state) = setup_folders("setup-connect-takes-on");
-    let (_claude, path) = project::a_claude_saying("setup-connect-claude", "2.1.300 (Claude Code)");
+fn signing_in_takes_the_waiting_project_on() {
+    let repository = a_team("setup-sign-in-takes-on");
+    let (_home, state) = setup_folders("setup-sign-in-takes-on");
+    let (claude, path) = project::a_claude_saying("setup-sign-in-claude", "2.1.300 (Claude Code)");
+    // Not signed in: serve shows the wizard, with the project it found waiting on the account.
+    std::fs::write(claude.join("signed-out"), "").expect("a marker");
     let mut env = setup_env(&repository.path, &state);
     env.insert("PATH".to_string(), path);
-    // Run in a project with no credential, on Claude Code's engine: setup waits on the account.
     let serving = serving_in(&repository.path, env, false);
     let before = serve_status(serving.port, &serving.cookie);
     assert_eq!(before["project_root"], Value::Null, "{before}");
+    assert_eq!(before["signed_in"], false, "{before}");
 
-    let connected = call(
-        serving.port,
-        &serving.cookie,
-        "account.connect",
-        json!({ "kind": "api_key", "secret": "sk-ant-api03-test" }),
-    );
+    // Claude Code is signed in (as its login would leave it), and the check takes the project on.
+    std::fs::remove_file(claude.join("signed-out")).expect("the marker goes");
+    let checked = call(serving.port, &serving.cookie, "account.check", json!({}));
     assert_eq!(
-        connected["result"],
-        json!({ "stored_in": "keychain", "taking_on": true }),
-        "{connected}"
+        checked["result"],
+        json!({ "outcome": "working", "taking_on": true }),
+        "{checked}"
     );
     until("the team is driven", || daemon_file(&repository).exists());
     let status = serve_status(serving.port, &serving.cookie);
@@ -1769,19 +2007,15 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
     let repository = a_team("setup-waits-again");
     std::fs::write(repository.path.join(".catervas/prices.json"), "not JSON").expect("written");
     let (_home, state) = setup_folders("setup-waits-again");
-    let (_claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
+    let (claude, path) = project::a_claude_saying("setup-waits-claude", "2.1.300 (Claude Code)");
+    std::fs::write(claude.join("signed-out"), "").expect("a marker");
     let mut env = setup_env(&repository.path, &state);
     env.insert("PATH".to_string(), path);
     let serving = serving_in(&repository.path, env, false);
-    let connect = json!({ "kind": "api_key", "secret": "sk-ant-api03-test" });
+    std::fs::remove_file(claude.join("signed-out")).expect("the marker goes");
     let prober = Prober::on(serving.port);
 
-    let first = call(
-        serving.port,
-        &serving.cookie,
-        "account.connect",
-        connect.clone(),
-    );
+    let first = call(serving.port, &serving.cookie, "account.check", json!({}));
     assert_eq!(first["result"]["taking_on"], true, "{first}");
     let mut status = Value::Null;
     until("serve is back in setup mode with the reason", || {
@@ -1789,8 +2023,8 @@ fn keeps_waiting_on_the_project_after_a_failed_take_on() {
         status["take_on_error"].is_string()
     });
     let took = prober.stopped();
-    // The project is still the one setup waits on: connecting again takes it on again.
-    let again = call(serving.port, &serving.cookie, "account.connect", connect);
+    // The project is still the one setup waits on: checking again takes it on again.
+    let again = call(serving.port, &serving.cookie, "account.check", json!({}));
     let (ran, out, err) = serving.interrupted();
     assert_eq!(again["result"]["taking_on"], true, "{again}");
     assert_eq!(ran.code, 130, "{out}\n{err}");
@@ -1917,10 +2151,7 @@ fn serving_a_team(name: &str) -> (TempRepo, Serving) {
     let repository = a_team(name);
     let (home, state) = setup_folders(name);
     let mut env = setup_env(&home, &state);
-    env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-ant-api03-test".to_string(),
-    );
+    signed_in(&mut env, &format!("serving-a-team-{name}"));
     let serving = serving_in(&repository.path, env, true);
     (repository, serving)
 }
@@ -2019,10 +2250,7 @@ fn serving_a_team_under_home(name: &str) -> (TempRepo, Serving, std::path::PathB
     let repository = a_team(name);
     let state = scratch(&format!("{name}-state"));
     let mut env = setup_env(&std::env::temp_dir(), &state);
-    env.insert(
-        "ANTHROPIC_API_KEY".to_string(),
-        "sk-ant-api03-test".to_string(),
-    );
+    signed_in(&mut env, &format!("serving-under-home-{name}"));
     let serving = serving_in(&repository.path, env, true);
     (repository, serving, state)
 }
@@ -2107,4 +2335,1330 @@ fn prints_a_new_link_from_the_running_driver() {
     assert_eq!(printed.len(), 1, "{}", ran.out);
     assert_eq!(printed[0].0, port);
     assert_ne!(printed[0].1, first);
+}
+
+/// The team id the log of `repository` says its events belong to.
+fn team_id_of(repository: &TempRepo) -> String {
+    let log = catervas_store::open_event_log(
+        &repository.path.join(".catervas/local/catervas.db"),
+        project::at(),
+    )
+    .expect("the log opens");
+    log.read(&catervas_store::EventQuery {
+        limit: Some(1),
+        ..catervas_store::EventQuery::default()
+    })
+    .expect("the log reads")
+    .first()
+    .expect("the log has an event")
+    .envelope
+    .ids
+    .team_id
+    .clone()
+}
+
+/// The slugs the hub gives `repositories`' teams, in order.
+fn slugs_of(repositories: &[&TempRepo]) -> Vec<String> {
+    let ids: Vec<String> = repositories.iter().map(|each| team_id_of(each)).collect();
+    catervas_runtime::daemon::hub::slugs_for(&ids)
+        .iter()
+        .map(|slug| slug.as_str().to_string())
+        .collect()
+}
+
+/// Whether another process holds the run lock of `repository`.
+fn run_lock_is_held(repository: &TempRepo) -> bool {
+    let file = std::fs::File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(repository.path.join(".catervas/local/run.lock"))
+        .expect("the lock file opens");
+    matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock))
+}
+
+/// `catervas serve` outside any project, with `state.json` listing `repositories`, under a home
+/// that holds them.
+fn serving_teams(name: &str, repositories: &[&TempRepo]) -> (Serving, std::path::PathBuf) {
+    let (cwd, state) = setup_folders(name);
+    std::fs::create_dir_all(state.join("catervas")).expect("the state folder");
+    let projects: Vec<String> = repositories
+        .iter()
+        .map(|each| {
+            each.path
+                .canonicalize()
+                .expect("a root")
+                .display()
+                .to_string()
+        })
+        .collect();
+    std::fs::write(
+        state.join("catervas/state.json"),
+        json!({ "last_project": projects[0], "projects": projects }).to_string(),
+    )
+    .expect("state.json");
+    let mut env = setup_env(&std::env::temp_dir(), &state);
+    signed_in(&mut env, &format!("serving-teams-{name}"));
+    (serving_in(&cwd, env, true), state)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn drives_two_teams_at_once() {
+    let (first, second) = (a_team("serve-two-a"), a_team("serve-two-b"));
+    let (serving, _state) = serving_teams("serve-two", &[&first, &second]);
+    until("both teams are driven", || {
+        daemon_file(&first).exists() && daemon_file(&second).exists()
+    });
+    assert!(run_lock_is_held(&first) && run_lock_is_held(&second));
+
+    let slugs = slugs_of(&[&first, &second]);
+    for (slug, repository) in slugs.iter().zip([&first, &second]) {
+        let status = status_at(serving.port, &format!("/t/{slug}/rpc"), &serving.cookie)
+            .expect("the team answers");
+        let root = repository.path.canonicalize().expect("the root");
+        assert_eq!(status["project_root"], json!(root.display().to_string()));
+        assert_eq!(status["port"], serving.port, "{status}");
+    }
+    // Stopping one team leaves the other driven, and serve running.
+    let stopped = run(&first.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    the_run_lock_frees(&first);
+    assert!(run_lock_is_held(&second));
+    assert!(
+        status_at(
+            serving.port,
+            &format!("/t/{}/rpc", slugs[1]),
+            &serving.cookie
+        )
+        .is_some(),
+        "the other team answers"
+    );
+    assert!(!serving.thread.is_finished());
+    let stopped = run(&second.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn adds_a_team_from_the_wizard_beside_the_running_one() {
+    let (repository, serving, state) = serving_a_team_under_home("serve-adds");
+    let target = TempRepo::new("serve-adds-target");
+    let root = target.path.canonicalize().expect("the root");
+
+    let opened = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&target.path), "no_sandbox": false }),
+    );
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    until("the new team is driven", || {
+        daemon_file(&target).exists() && run_lock_is_held(&target)
+    });
+    assert!(run_lock_is_held(&repository), "the first team goes on");
+    let mut written = Value::Null;
+    until("both teams are listed", || {
+        written = std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        written["projects"]
+            .as_array()
+            .is_some_and(|all| all.len() == 2)
+    });
+    assert_eq!(written["last_project"], json!(root.display().to_string()));
+
+    let again = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "project.open",
+        json!({ "path": name_of(&target.path), "no_sandbox": false }),
+    );
+    let said = again["error"]["message"].as_str().unwrap_or_default();
+    assert!(said.contains("team_already_here"), "{again}");
+    assert!(said.contains("already one of your teams"), "{again}");
+
+    let stopped = run(&root, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    the_run_lock_frees(&target);
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn leaves_one_team_and_keeps_the_other() {
+    let (first, second) = (a_team("serve-leave-a"), a_team("serve-leave-b"));
+    let (serving, state) = serving_teams("serve-leave", &[&first, &second]);
+    until("both teams are driven", || {
+        daemon_file(&first).exists() && daemon_file(&second).exists()
+    });
+    let slugs = slugs_of(&[&first, &second]);
+
+    let (left, closed) = a_runtime().block_on(async {
+        use futures_util::StreamExt as _;
+        let mut socket = socket_at(
+            serving.port,
+            &format!("/t/{}/rpc", slugs[0]),
+            &serving.cookie,
+        )
+        .await;
+        let left = ask(&mut socket, 1, "project.leave", json!({})).await;
+        let closed = tokio::time::timeout(Duration::from_secs(30), async {
+            while let Some(Ok(_)) = socket.next().await {}
+        })
+        .await
+        .is_ok();
+        (left, closed)
+    });
+    assert_eq!(left["result"], json!({}), "{left}");
+    assert!(closed, "the team's daemon closes the socket");
+    the_run_lock_frees(&first);
+    assert!(run_lock_is_held(&second));
+    let root = second.path.canonicalize().expect("the root");
+    until("the other team still answers", || {
+        status_at(
+            serving.port,
+            &format!("/t/{}/rpc", slugs[1]),
+            &serving.cookie,
+        )
+        .is_some_and(|status| status["project_root"] == json!(root.display().to_string()))
+    });
+    let written: Value = serde_json::from_str(
+        &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
+    )
+    .expect("JSON");
+    assert_eq!(written["projects"], json!([root.display().to_string()]));
+
+    let stopped = run(&second.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn skips_a_team_driven_elsewhere() {
+    let (held, free) = (a_team("serve-else-a"), a_team("serve-else-b"));
+    let lock = hold_the_run_lock(&held);
+    let (cwd, state) = setup_folders("serve-else");
+    std::fs::create_dir_all(state.join("catervas")).expect("the state folder");
+    let projects: Vec<String> = [&held, &free]
+        .iter()
+        .map(|each| {
+            each.path
+                .canonicalize()
+                .expect("a root")
+                .display()
+                .to_string()
+        })
+        .collect();
+    std::fs::write(
+        state.join("catervas/state.json"),
+        json!({ "last_project": projects[1], "projects": projects }).to_string(),
+    )
+    .expect("state.json");
+    let mut env = setup_env(&std::env::temp_dir(), &state);
+    signed_in(&mut env, "serving-teams-serve-else");
+    let serving = serving_in_with(&cwd, env, true, Some(Duration::from_millis(200)));
+
+    until("the free team is driven", || daemon_file(&free).exists());
+    assert!(!daemon_file(&held).exists(), "the held team is not driven");
+    let listed = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "query",
+        json!({ "name": "teams.list", "params": {} }),
+    );
+    let held_root = held
+        .path
+        .canonicalize()
+        .expect("the root")
+        .display()
+        .to_string();
+    let row = listed["result"]["teams"]
+        .as_array()
+        .and_then(|teams| teams.iter().find(|team| team["root"] == json!(held_root)))
+        .unwrap_or_else(|| panic!("the held team is listed: {listed}"));
+    assert_eq!(row["status"], "elsewhere", "{listed}");
+
+    drop(lock);
+    until("the team is driven once its lock is free", || {
+        daemon_file(&held).exists()
+    });
+    for repository in [&held, &free] {
+        let stopped = run(&repository.path, &["stop"]);
+        assert_eq!(stopped.code, 0, "{}", stopped.err);
+    }
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn sets_the_computer_s_limits() {
+    let (repository, serving, state) = serving_a_team_under_home("serve-limits");
+    let written = || -> Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
+        )
+        .expect("JSON")
+    };
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let query = |name: &str| hub("query", json!({ "name": name, "params": {} }))["result"].clone();
+
+    let set = hub(
+        "computer.set",
+        json!({ "agents_at_once": 2, "daily_cap_usd": 25 }),
+    );
+    assert_eq!(set["result"], json!({}), "{set}");
+    let kept = written();
+    assert_eq!(kept["agents_at_once"], 2, "{kept}");
+    assert_eq!(kept["daily_cap_usd"], 25.0, "{kept}");
+    let computer = query("computer.get");
+    assert_eq!(computer["agents_at_once"], 2, "{computer}");
+    assert_eq!(computer["daily_cap_usd"], 25.0, "{computer}");
+
+    // Out of range values are refused, and change nothing.
+    for (params, said) in [
+        (
+            json!({ "agents_at_once": 17 }),
+            "agents_at_once_out_of_range",
+        ),
+        (
+            json!({ "agents_at_once": 0 }),
+            "agents_at_once_out_of_range",
+        ),
+        (json!({ "daily_cap_usd": 0 }), "daily_cap_out_of_range"),
+        (
+            json!({ "daily_cap_usd": 100_001 }),
+            "daily_cap_out_of_range",
+        ),
+    ] {
+        let refused = hub("computer.set", params);
+        let message = refused["error"]["message"].as_str().unwrap_or_default();
+        assert!(message.contains(said), "{refused}");
+    }
+    assert_eq!(written()["agents_at_once"], 2);
+
+    // A field that is left out is kept, and null clears one.
+    hub("computer.set", json!({ "daily_cap_usd": null }));
+    let kept = written();
+    assert_eq!(kept["agents_at_once"], 2, "{kept}");
+    assert!(kept.get("daily_cap_usd").is_none(), "{kept}");
+    hub("computer.set", json!({ "agents_at_once": null }));
+    let computer = query("computer.get");
+    assert_eq!(computer["agents_at_once"], Value::Null, "{computer}");
+    assert_eq!(computer["daily_cap_usd"], Value::Null, "{computer}");
+
+    let stopped = run(&repository.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn removes_a_team_and_keeps_its_files() {
+    let (first, second) = (a_team("serve-remove-a"), a_team("serve-remove-b"));
+    let (serving, state) = serving_teams("serve-remove", &[&first, &second]);
+    until("both teams are driven", || {
+        daemon_file(&first).exists() && daemon_file(&second).exists()
+    });
+    let slugs = slugs_of(&[&first, &second]);
+
+    let asked = |params: Value| {
+        call_at(
+            serving.port,
+            "/hub/rpc",
+            &serving.cookie,
+            "teams.remove",
+            params,
+        )
+    };
+    let refused = asked(json!({ "slug": slugs[0] }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("confirmation_needed")),
+        "{refused}"
+    );
+    assert!(run_lock_is_held(&first), "nothing was stopped");
+    let removed = asked(json!({ "slug": slugs[0], "confirmed": true }));
+    assert_eq!(removed["result"], json!({ "removed": true }), "{removed}");
+    the_run_lock_frees(&first);
+    let root = second.path.canonicalize().expect("the root");
+    until("the team is forgotten", || {
+        std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|written| written["projects"] == json!([root.display().to_string()]))
+    });
+    assert!(
+        first.path.join(".catervas/team.yaml").exists(),
+        "no file is deleted"
+    );
+    assert!(run_lock_is_held(&second));
+    let unknown = asked(json!({ "slug": slugs[0], "confirmed": true }));
+    assert!(
+        unknown["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("team_unknown")),
+        "{unknown}"
+    );
+
+    let stopped = run(&second.path, &["stop"]);
+    assert_eq!(stopped.code, 0, "{}", stopped.err);
+    let ran = joined(serving.thread, "the serve");
+    assert_eq!(ran.code, 0, "{}", serving.err.text());
+}
+
+/// A home folder with a `shop` folder under it and one session worked in `shop` a while ago, as
+/// Claude Code's history holds it, and a `settings.json` of Claude Code's with two keys.
+fn a_home_with_history(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    use catervas_core::claude_history::fixtures::{a_reply_line, a_turn_line};
+    use catervas_core::pricing::Usage;
+
+    let (home, state) = setup_folders(name);
+    let home = home.canonicalize().expect("a home");
+    std::fs::create_dir_all(home.join("shop")).expect("a project folder");
+    let history = home.join(".claude/projects/-shop");
+    std::fs::create_dir_all(&history).expect("a history folder");
+    let id = "11111111-1111-4111-8111-111111111111";
+    let at = (Utc::now() - chrono::Duration::hours(2))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let cwd = home.join("shop").display().to_string();
+    let usage = Usage {
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+    };
+    std::fs::write(
+        history.join(format!("{id}.jsonl")),
+        format!(
+            "{}\n{}\n",
+            a_turn_line(id, &cwd, &at),
+            a_reply_line(id, &cwd, &at, "msg_1", "claude-opus-5-5", usage)
+        ),
+    )
+    .expect("a transcript");
+    let settings = home.join(".claude/settings.json");
+    std::fs::write(&settings, r#"{"theme":"dark","model":"opus"}"#).expect("settings");
+    std::fs::set_permissions(&settings, std::fs::Permissions::from_mode(0o600)).expect("a mode");
+    (home, state)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_projects_through_serve() {
+    let (home, state) = a_home_with_history("serve-finding");
+    let serving = serving_setup(&home, &home, &state);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let written = || -> Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
+        )
+        .expect("JSON")
+    };
+
+    assert_eq!(
+        hub("finding.offer", json!({}))["result"],
+        json!({ "history": "claude_code", "sessions_dir_exists": true })
+    );
+    assert_eq!(hub("finding.start", json!({}))["result"]["started"], true);
+    let mut status = Value::Null;
+    until("the scan is done", || {
+        status = hub("finding.status", json!({}))["result"].clone();
+        status["phase"] == "done"
+    });
+    assert_eq!(status["files_read"], 1, "{status}");
+    assert_eq!(status["sessions"], 1, "{status}");
+    let listed = hub("finding.list", json!({}));
+    let row = &listed["result"]["main"][0];
+    assert_eq!(row["name"], "shop", "{listed}");
+    assert_eq!(row["suggested"], "team", "{listed}");
+    assert_eq!(
+        row["folders"],
+        json!([home.join("shop").display().to_string()])
+    );
+
+    // Pausing is kept for the next serve, and stops the next scan from starting.
+    hub("finding.pause", json!({ "paused": true }));
+    assert_eq!(written()["finding_paused"], true);
+    let refused = hub("finding.start", json!({}));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("finding_paused")),
+        "{refused}"
+    );
+    hub("finding.pause", json!({ "paused": false }));
+    assert!(written().get("finding_paused").is_none(), "{}", written());
+    hub("finding.export_dismissed", json!({}));
+    assert_eq!(written()["export_card"], "dismissed");
+
+    // Keeping the history longer is the one write into Claude Code's settings.
+    let settings = home.join(".claude/settings.json");
+    assert_eq!(
+        hub("finding.retention", json!({}))["result"],
+        json!({ "cleanup_period_days": 30, "default": true })
+    );
+    let kept = hub("finding.keep_longer", json!({ "days": 365 }));
+    assert_eq!(kept["result"]["cleanup_period_days"], 365, "{kept}");
+    let text = std::fs::read_to_string(&settings).expect("settings");
+    let after: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        after,
+        json!({ "theme": "dark", "model": "opus", "cleanupPeriodDays": 365 })
+    );
+    let mode = std::fs::metadata(&settings)
+        .expect("settings")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+    let refused = hub("finding.keep_longer", json!({ "days": 30 }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("retention_not_offered")),
+        "{refused}"
+    );
+
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+/// `git` with `args` in `folder`, as a test's own author, answering its output.
+fn git_in(folder: &Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
+        .args(args)
+        .current_dir(folder)
+        .output()
+        .expect("git runs");
+    assert!(
+        output.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one test of a copy from its bare repository to the project it becomes"
+)]
+fn copies_a_repository_to_this_computer() {
+    use catervas_runtime::claude::Secret;
+    use catervas_runtime::connectors::MemoryConnectorSecrets;
+    use catervas_runtime::github::{CloneCall, GithubPlaces, run_git, save_connection};
+
+    let (home, state) = setup_folders("serve-github-copy");
+    let home = home.canonicalize().expect("a home");
+    // The "GitHub" the clone talks to is a bare repository on this computer, under owner/name.git.
+    let remote = scratch("serve-github-copy-remote")
+        .canonicalize()
+        .expect("a remote folder");
+    let made = remote.join("made");
+    std::fs::create_dir_all(&made).expect("a folder");
+    git_in(&made, &["init", "-b", "main"]);
+    std::fs::write(made.join("README.md"), "# An invented shop\n").expect("a file");
+    git_in(&made, &["add", "README.md"]);
+    git_in(&made, &["commit", "-m", "Start"]);
+    std::fs::create_dir_all(remote.join("octo")).expect("an owner folder");
+    let bare = remote.join("octo/shop.git");
+    git_in(
+        &remote,
+        &[
+            "clone",
+            "--bare",
+            &made.display().to_string(),
+            &bare.display().to_string(),
+        ],
+    );
+
+    let token = "ghp_invented_for_the_copy_test";
+    let secrets = Arc::new(MemoryConnectorSecrets::default());
+    save_connection(secrets.as_ref(), &Secret::new(token.to_string()), "octo").expect("a token");
+    let spawned: Arc<Mutex<Vec<CloneCall>>> = Arc::default();
+    let places = GithubPlaces {
+        // Nothing here asks GitHub's API: the token is already kept.
+        api: "http://127.0.0.1:1".to_string(),
+        clone_base: format!("file://{}", remote.display()),
+        spawn: {
+            let spawned = Arc::clone(&spawned);
+            Arc::new(move |call| {
+                spawned.lock().expect("calls").push(call.clone());
+                run_git(call)
+            })
+        },
+    };
+    let mut env = setup_env(&home, &state);
+    signed_in(&mut env, "serving-github-copy");
+    let serving = serving_custom(
+        &home,
+        env,
+        true,
+        None,
+        Box::new(move |io| {
+            io.github = places;
+            io.connector_secrets = secrets;
+        }),
+    );
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+
+    let copied = hub(
+        "github.copy",
+        json!({ "full_name": "octo/shop", "parent": "work" }),
+    );
+    let folder = home.join("work/shop");
+    assert_eq!(
+        copied["result"]["folder"],
+        json!(folder.display().to_string()),
+        "{copied}"
+    );
+    // The folder is a git repository whose origin is the given address.
+    assert_eq!(
+        git_in(&folder, &["remote", "get-url", "origin"]),
+        format!("file://{}/octo/shop.git", remote.display())
+    );
+    assert!(folder.join("README.md").exists());
+    // The token went to git through its environment alone.
+    let calls = spawned.lock().expect("calls").clone();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert!(
+        calls[0]
+            .args
+            .iter()
+            .all(|argument| !argument.contains(token)),
+        "{:?}",
+        calls[0].args
+    );
+    assert!(
+        calls[0]
+            .env
+            .iter()
+            .any(|(name, value)| name == "GIT_CONFIG_VALUE_0" && value.contains(token)),
+        "{:?}",
+        calls[0]
+            .env
+            .iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+    );
+    // The folder is a project now, and a name that is taken is refused.
+    let listed = hub("finding.list", json!({}));
+    assert!(
+        listed["result"]["main"].as_array().is_some_and(|rows| rows
+            .iter()
+            .any(|row| row["folders"] == json!([folder.display().to_string()]))),
+        "{listed}"
+    );
+    let again = hub(
+        "github.copy",
+        json!({ "full_name": "octo/shop", "parent": "work" }),
+    );
+    assert!(
+        again["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("folder_taken")),
+        "{again}"
+    );
+
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+/// `POST /hub/export` with `body`, from the page's own origin and with `cookie` when it is given:
+/// the status and the text of the answer.
+fn post_export(port: u16, cookie: Option<&str>, body: &[u8]) -> (u16, String) {
+    use std::io::Read as _;
+
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).expect("connects");
+    let cookie = cookie.map_or_else(String::new, |cookie| format!("Cookie: {cookie}\r\n"));
+    write!(
+        stream,
+        "POST /hub/export HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nOrigin: http://127.0.0.1:{port}\r\n\
+         {cookie}Content-Type: application/zip\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .expect("sent");
+    stream.write_all(body).expect("sent");
+    let mut answer = Vec::new();
+    stream.read_to_end(&mut answer).expect("read");
+    let answer = String::from_utf8_lossy(&answer).into_owned();
+    let status = answer
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .expect("a status");
+    let text = answer.split_once("\r\n\r\n").map_or("", |(_, text)| text);
+    (status, text.to_string())
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn imports_an_export_posted_to_the_hub() {
+    use catervas_store::claude_export::fixtures::the_2026_10_export;
+
+    let (home, state) = setup_folders("serve-export");
+    let serving = serving_setup(&home, &home, &state);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+
+    // The export is read, and its Project is in the list.
+    let (status, text) = post_export(serving.port, Some(&serving.cookie), &the_2026_10_export());
+    assert_eq!(status, 200, "{text}");
+    let summary: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(summary["conversations"], 3, "{summary}");
+    assert_eq!(summary["new_projects"], 2, "{summary}");
+    let listed = hub("finding.list", json!({}));
+    let names: Vec<&str> = listed["result"]["main"]
+        .as_array()
+        .expect("rows")
+        .iter()
+        .filter(|row| row["kind"] == "claude_ai")
+        .filter_map(|row| row["name"].as_str())
+        .collect();
+    assert!(names.contains(&"Shop launch"), "{listed}");
+    // The file it was read from is gone, whatever the result.
+    let left: Vec<String> = std::fs::read_dir(state.join("catervas"))
+        .expect("the state folder")
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("export"))
+        .collect();
+    assert!(left.is_empty(), "{left:?}");
+
+    // Without the session's cookie it is refused, and what is not a zip is said not to be one.
+    let (status, _) = post_export(serving.port, None, &the_2026_10_export());
+    assert_eq!(status, 401);
+    let (status, text) = post_export(serving.port, Some(&serving.cookie), b"not a zip");
+    let refused: Value = serde_json::from_str(&text).expect("JSON");
+    assert_eq!(
+        (status, &refused["error"]),
+        (422, &json!("not_an_export")),
+        "{text}"
+    );
+    let left = std::fs::read_dir(state.join("catervas"))
+        .expect("the state folder")
+        .flatten()
+        .any(|entry| entry.file_name().to_string_lossy().contains("export"));
+    assert!(!left, "no temporary file after a refusal");
+
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+/// A home with these folders, each a git repository with one commit of its own and one recent
+/// session of Claude Code's worked in it.
+fn a_home_with_repos(name: &str, folders: &[&str]) -> (std::path::PathBuf, std::path::PathBuf) {
+    use catervas_core::claude_history::fixtures::{a_reply_line, a_turn_line};
+    use catervas_core::pricing::Usage;
+
+    let (home, state) = setup_folders(name);
+    let home = home.canonicalize().expect("a home");
+    for (number, folder) in folders.iter().enumerate() {
+        let root = home.join(folder);
+        std::fs::create_dir_all(&root).expect("a project folder");
+        git_in(&root, &["init", "-b", "main"]);
+        // The repository is the owner's: its commits are by the person git knows there.
+        git_in(&root, &["config", "user.email", "test@example.com"]);
+        std::fs::write(
+            root.join("README.md"),
+            format!("# {folder}\nAn invented project.\n"),
+        )
+        .expect("a readme");
+        git_in(&root, &["add", "README.md"]);
+        git_in(&root, &["commit", "-m", "Start"]);
+        let history = home.join(format!(".claude/projects/-{folder}"));
+        std::fs::create_dir_all(&history).expect("a history folder");
+        let id = format!("2222222{number}-2222-4222-8222-222222222222");
+        let at = (Utc::now() - chrono::Duration::hours(2 + i64::try_from(number).expect("a few")))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let cwd = root.display().to_string();
+        let usage = Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+        std::fs::write(
+            history.join(format!("{id}.jsonl")),
+            format!(
+                "{}\n{}\n",
+                a_turn_line(&id, &cwd, &at),
+                a_reply_line(&id, &cwd, &at, "msg_1", "claude-opus-5-5", usage)
+            ),
+        )
+        .expect("a transcript");
+    }
+    (home, state)
+}
+
+/// The owner's Yes about `a` and `b`, kept as the hub keeps it, with no proof (a pair chosen from
+/// the list of those with hints only).
+fn said_yes(state: &Path, a: &Path, b: &Path) {
+    let mut index = catervas_store::machine::open_machine_index(
+        &state
+            .join("catervas")
+            .join(catervas_store::machine::MACHINE_DB),
+        Utc::now(),
+    )
+    .expect("the machine index");
+    index
+        .put_link(
+            &a.display().to_string(),
+            &b.display().to_string(),
+            catervas_store::linking::Answer::Yes,
+            &[],
+            Utc::now(),
+        )
+        .expect("a link");
+}
+
+/// Serve over a home of `folders`, scanned.
+fn a_scanned_serve(
+    name: &str,
+    folders: &[&str],
+) -> (Serving, std::path::PathBuf, std::path::PathBuf) {
+    let (home, state) = a_home_with_repos(name, folders);
+    let serving = serving_setup(&home, &home, &state);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    assert_eq!(hub("finding.start", json!({}))["result"]["started"], true);
+    until("the scan is done", || {
+        hub("finding.status", json!({}))["result"]["phase"] == "done"
+    });
+    (serving, home, state)
+}
+
+/// Every team `teams.list` shows, by slug.
+fn listed_teams(serving: &Serving) -> Vec<Value> {
+    let listed = call_at(
+        serving.port,
+        "/hub/rpc",
+        &serving.cookie,
+        "query",
+        json!({ "name": "teams.list", "params": {} }),
+    );
+    listed["result"]["teams"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// The proposal of a home with `api` and `web` that work together, `solo` alone, and a bookkeeping
+/// project the owner says they use Zoho Books for, created.
+fn a_created_proposal(
+    name: &str,
+    keeper: bool,
+) -> (Serving, std::path::PathBuf, std::path::PathBuf, Value) {
+    let folders: &[&str] = if keeper {
+        &["api", "web", "solo", "keeper"]
+    } else {
+        &["api", "web", "solo"]
+    };
+    let (serving, home, state) = a_scanned_serve(name, folders);
+    said_yes(&state, &home.join("api"), &home.join("web"));
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    hub("finding.declare_services", json!({ "ids": ["zoho_books"] }));
+    if keeper {
+        // Another team that is driven all along: the last team removed would send serve back to
+        // its wizard and close the socket the answer comes on.
+        hub(
+            "finding.choose",
+            json!({ "key": home.join("keeper").display().to_string(), "choice": "watch" }),
+        );
+    }
+    let proposed = hub("proposal.get", json!({}));
+    let cards = proposed["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        cards.len(),
+        3,
+        "{proposed} {}",
+        hub("finding.list", json!({}))
+    );
+    assert!(
+        cards.iter().all(|card| card["kind"] == "new_team"),
+        "{proposed}"
+    );
+    let made = hub("proposal.create", json!({ "confirmed": true }));
+    if keeper {
+        let opened = hub(
+            "project.open",
+            json!({ "path": "keeper", "no_sandbox": true }),
+        );
+        assert!(opened.get("error").is_none(), "{opened}");
+        until("the keeper is driven", || listed_teams(&serving).len() == 4);
+    }
+    (serving, home, state, made)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn creates_paused_teams_from_the_proposal() {
+    let (serving, home, _state, made) = a_created_proposal("proposal-create", false);
+    assert_eq!(
+        made["result"]["made"].as_array().map(Vec::len),
+        Some(3),
+        "{made}"
+    );
+    assert_eq!(made["result"]["failed"], json!([]), "{made}");
+
+    let teams = listed_teams(&serving);
+    assert_eq!(teams.len(), 3, "{teams:?}");
+    assert!(
+        teams.iter().all(|team| team["status"] == "paused"),
+        "{teams:?}"
+    );
+    assert!(
+        teams.iter().all(|team| team["undoable"] == true),
+        "{teams:?}"
+    );
+
+    // The group is a project folder that lists both members.
+    let group = home.join("Catervas/api");
+    let repos = std::fs::read_to_string(group.join(".catervas/repos.yaml")).expect("repos.yaml");
+    assert!(repos.contains("api") && repos.contains("web"), "{repos}");
+    // The lone repository has the template's roles in its own folder.
+    let team = std::fs::read_to_string(home.join("solo/.catervas/team.yaml")).expect("team.yaml");
+    assert!(
+        team.contains("architect") && team.contains("software_developer"),
+        "{team}"
+    );
+    // The bookkeeping project is a new git repository with Catervas's commit, on the Financial
+    // analysis team.
+    let books = home.join("Catervas/bookkeeping");
+    assert_eq!(git_in(&books, &["log", "--format=%an"]), "catervas");
+    let team = std::fs::read_to_string(books.join(".catervas/team.yaml")).expect("team.yaml");
+    assert!(team.contains("finance_specialist"), "{team}");
+    let found = std::fs::read_to_string(books.join(".catervas/local/found-services.json"))
+        .expect("found-services.json");
+    assert!(found.contains("zoho_books"), "{found}");
+    // No team has started a session.
+    for root in [&group, &home.join("solo"), &books] {
+        let log = catervas_store::open_event_log(
+            &root.join(".catervas/local/catervas.db"),
+            project::at(),
+        )
+        .expect("the log opens");
+        let started = log
+            .read(&catervas_store::EventQuery {
+                kinds: vec![EventKind::SessionStarted],
+                ..catervas_store::EventQuery::default()
+            })
+            .expect("the log reads");
+        assert!(started.is_empty(), "{root:?}");
+    }
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn undoes_a_team_until_it_starts() {
+    let (serving, home, _state, made) = a_created_proposal("proposal-undo", true);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let slug_of = |name: &str| -> String {
+        made["result"]["made"]
+            .as_array()
+            .and_then(|all| all.iter().find(|each| each["name"] == name))
+            .and_then(|each| each["slug"].as_str())
+            .unwrap_or_else(|| panic!("{name} in {made}"))
+            .to_string()
+    };
+
+    // A team in the owner's own folder: only `.catervas/` goes.
+    let solo = hub("teams.undo", json!({ "slug": slug_of("solo") }));
+    assert_eq!(solo["result"]["removed"], true, "{solo}");
+    assert!(!home.join("solo/.catervas").exists());
+    assert!(home.join("solo/README.md").exists());
+
+    // A folder Catervas made, with only Catervas's commits: all of it goes.
+    let books = hub("teams.undo", json!({ "slug": slug_of("Bookkeeping") }));
+    assert_eq!(books["result"]["removed"], true, "{books}");
+    assert!(!home.join("Catervas/bookkeeping").exists());
+
+    // A folder with a commit of the owner's is left, and the owner is told.
+    let group = home.join("Catervas/api");
+    std::fs::write(group.join("notes.md"), "mine\n").expect("a file");
+    git_in(&group, &["add", "notes.md"]);
+    git_in(&group, &["commit", "-m", "My notes"]);
+    let left = hub("teams.undo", json!({ "slug": slug_of("api") }));
+    assert_eq!(left["result"]["removed"], true, "{left}");
+    assert_eq!(
+        left["result"]["left"],
+        json!(format!(
+            "Catervas left {}: it has changes of yours.",
+            group.display()
+        )),
+        "{left}"
+    );
+    assert!(group.join("notes.md").exists());
+    until("the teams are gone", || listed_teams(&serving).len() == 1);
+
+    // The projects are on the proposal again.
+    let again = hub("proposal.get", json!({}));
+    assert_eq!(
+        again["result"]["cards"].as_array().map(Vec::len),
+        Some(3),
+        "{again}"
+    );
+
+    // A team that has started a session cannot be undone.
+    let made = hub("proposal.create", json!({ "confirmed": true }));
+    let slug = made["result"]["made"][0]["slug"]
+        .as_str()
+        .expect("a slug")
+        .to_string();
+    let root =
+        std::path::PathBuf::from(made["result"]["made"][0]["root"].as_str().expect("a root"));
+    let log =
+        catervas_store::open_event_log(&root.join(".catervas/local/catervas.db"), project::at())
+            .expect("the log opens");
+    let first = log
+        .read(&catervas_store::EventQuery {
+            limit: Some(1),
+            ..catervas_store::EventQuery::default()
+        })
+        .expect("the log reads");
+    let ids = first[0].envelope.ids.clone();
+    let wire = json!({
+        "seq": 1,
+        "recorded_at": project::at().to_rfc3339(),
+        "team_id": ids.team_id,
+        "project_id": ids.project_id,
+        "agent_id": "pm",
+        "session_id": "s-1",
+        "kind": "session.started",
+        "body": { "purpose": "refine", "model": "claude-opus-5", "effort": "high" },
+    });
+    let event = catervas_protocol::event::event_from_value(&wire).expect("a session.started");
+    log.append(&catervas_protocol::event::NewEvent {
+        recorded_at: event.envelope.recorded_at,
+        ids: event.envelope.ids,
+        body: event.body,
+    })
+    .expect("appends");
+    let refused = hub("teams.undo", json!({ "slug": slug }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("team_has_started")),
+        "{refused}"
+    );
+    assert!(root.join(".catervas").exists());
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn adds_a_linked_project_to_the_team_it_works_with() {
+    let (serving, home, state) = a_scanned_serve(
+        "proposal-add",
+        &["shop", "shopfront", "extra", "single", "other"],
+    );
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    // A team of two repositories, and a team of one, both driven now.
+    let folder = hub(
+        "project.create_folder",
+        json!({
+            "parent": "suite", "name": "suite", "no_sandbox": true,
+            "repos": [{ "name": "shop", "path": "shop" }, { "name": "shopfront", "path": "shopfront" }]
+        }),
+    );
+    assert!(folder.get("error").is_none(), "{folder}");
+    until("the first team is driven", || {
+        listed_teams(&serving).len() == 1
+    });
+    let one = hub(
+        "project.open",
+        json!({ "path": "single", "no_sandbox": true }),
+    );
+    assert!(one.get("error").is_none(), "{one}");
+    until("both teams are listed", || {
+        listed_teams(&serving).len() == 2
+    });
+    // A new scan finds the work of the folder and of nothing else; the projects keep their keys.
+    said_yes(&state, &home.join("shop"), &home.join("extra"));
+    said_yes(&state, &home.join("single"), &home.join("other"));
+
+    let proposed = hub("proposal.get", json!({}));
+    let cards = proposed["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let adds: Vec<&Value> = cards
+        .iter()
+        .filter(|card| card["kind"] == "add_to_team")
+        .collect();
+    assert_eq!(adds.len(), 2, "{proposed}");
+    assert!(
+        cards.iter().all(|card| card["kind"] == "add_to_team"),
+        "{proposed}"
+    );
+
+    let made = hub("proposal.create", json!({ "confirmed": true }));
+    let added = made["result"]["added"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(added.len(), 1, "{made}");
+    let repos =
+        std::fs::read_to_string(home.join("suite/suite/.catervas/repos.yaml")).expect("repos.yaml");
+    assert!(repos.contains("extra"), "{repos}");
+    // A team of one repository cannot take a second until a project folder is made of it.
+    let failed = made["result"]["failed"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(failed.len(), 1, "{made}");
+    assert!(
+        failed[0]["reason"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("conversion_not_available")),
+        "{made}"
+    );
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+/// A directory holding a `claude` that is signed in, and for `-p` records its arguments in
+/// `args.txt` (one line a run) and its standard input in `stdin.txt`, then prints `answer.json`
+/// (or, once `fail` is made beside it, an error), and the `PATH` that finds it first.
+fn a_recording_claude(name: &str) -> (std::path::PathBuf, String) {
+    let directory = scratch(name);
+    let source = directory.join("claude.txt");
+    std::fs::write(
+        &source,
+        "#!/bin/sh\n\
+         d=\"$(dirname \"$0\")\"\n\
+         if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n\
+           echo '{\"loggedIn\": true, \"authMethod\": \"oauth_token\"}'; exit 0\n\
+         fi\n\
+         if [ \"$1\" = -p ]; then\n\
+           echo \"$@\" >> \"$d/args.txt\"\n\
+           cat > \"$d/stdin.txt\"\n\
+           if [ -f \"$d/fail\" ]; then\n\
+             echo '{\"type\":\"result\",\"is_error\":true,\"result\":\"Credit balance is too low\"}'; exit 1\n\
+           fi\n\
+           cat \"$d/answer.json\"; exit 0\n\
+         fi\n\
+         echo '2.1.300 (Claude Code)'\n",
+    )
+    .expect("written");
+    let program = directory.join("claude");
+    let copied = std::process::Command::new("cp")
+        .arg(&source)
+        .arg(&program)
+        .status()
+        .expect("cp runs");
+    assert!(copied.success());
+    std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).expect("executable");
+    let path = format!(
+        "{}:{}",
+        directory.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    (directory, path)
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one test of the estimate, the one run, what it was shown and what it changed"
+)]
+fn asks_claude_for_names_with_nothing_secret() {
+    let (home, state) = a_home_with_repos("proposal-names", &["api", "web", "solo"]);
+    // A README with a key in it, committed.
+    let api = home.join("api");
+    std::fs::write(
+        api.join("README.md"),
+        "# api\nAn invented shop api.\nAPI_KEY=sk-test-123\n",
+    )
+    .expect("a readme");
+    git_in(&api, &["add", "README.md"]);
+    git_in(&api, &["commit", "-m", "Say what it is"]);
+    let (claude, path) = a_recording_claude("proposal-names-claude");
+    let mut env = setup_env(&home, &state);
+    env.insert("PATH".to_string(), path);
+    let serving = serving_in(&home, env, true);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    assert_eq!(hub("finding.start", json!({}))["result"]["started"], true);
+    until("the scan is done", || {
+        hub("finding.status", json!({}))["result"]["phase"] == "done"
+    });
+    said_yes(&state, &home.join("api"), &home.join("web"));
+    hub("finding.declare_services", json!({ "ids": ["zoho_books"] }));
+
+    let estimate = hub("proposal.names_estimate", json!({}));
+    let usd = estimate["result"]["usd"].as_f64().expect("a price");
+    assert!(usd > 0.0 && usd < 0.10, "{estimate}");
+    assert!(
+        estimate["result"]["input_tokens"].as_u64().unwrap_or(0) > 0,
+        "{estimate}"
+    );
+
+    let refused = hub("proposal.names", json!({ "confirmed": false }));
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("confirmation_needed")),
+        "{refused}"
+    );
+    assert!(
+        !claude.join("args.txt").exists(),
+        "nothing ran without the owner's yes"
+    );
+
+    let proposed = hub("proposal.get", json!({}));
+    let cards = proposed["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(cards.len(), 3, "{proposed}");
+    let id_of = |name: &str| -> String {
+        cards
+            .iter()
+            .find(|card| card["name"] == name)
+            .and_then(|card| card["id"].as_str())
+            .unwrap_or_else(|| panic!("{name} in {proposed}"))
+            .to_string()
+    };
+    let (pair, solo, books) = (id_of("api"), id_of("solo"), id_of("Bookkeeping"));
+    let answer = json!([
+        { "id": pair, "name": "Shop", "purpose": "Sells things online", "template": "online-store",
+          "link": ["a", "b"], "projects": ["x"] },
+        { "id": solo, "name": "N".repeat(60), "purpose": "P".repeat(200), "template": "no-such-team" },
+        { "id": "not-a-card", "name": "Ghost" },
+    ]);
+    let wrapped = json!({
+        "type": "result", "subtype": "success", "is_error": false,
+        "result": format!("Here you go:\n```json\n{answer}\n```"), "total_cost_usd": 0.02,
+    });
+    std::fs::write(claude.join("answer.json"), wrapped.to_string()).expect("an answer");
+
+    let names = hub("proposal.names", json!({ "confirmed": true }));
+    assert_eq!(names["result"]["cost_usd"], 0.02, "{names}");
+    let calls = std::fs::read_to_string(claude.join("args.txt")).expect("one run");
+    assert_eq!(calls.lines().count(), 1, "{calls}");
+    assert!(calls.contains("--model haiku"), "{calls}");
+    let seen = std::fs::read_to_string(claude.join("stdin.txt")).expect("its input");
+    for wanted in ["api", "web", "solo", "An invented project"] {
+        assert!(seen.contains(wanted), "{wanted} in {seen}");
+    }
+    assert!(
+        !seen.contains("sk-test-123") && !seen.contains("API_KEY"),
+        "{seen}"
+    );
+
+    let after = hub("proposal.get", json!({}));
+    let cards = after["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(
+        cards.len(),
+        3,
+        "a link-like key in the answer changes nothing: {after}"
+    );
+    let card = |id: &str| {
+        cards
+            .iter()
+            .find(|card| card["id"] == id)
+            .expect("a card")
+            .clone()
+    };
+    let shop = card(&pair);
+    assert_eq!(
+        (
+            shop["name"].as_str(),
+            shop["purpose"].as_str(),
+            shop["template"].as_str()
+        ),
+        (
+            Some("Shop"),
+            Some("Sells things online"),
+            Some("online-store")
+        )
+    );
+    assert_eq!(shop["from_claude"], true);
+    assert_eq!(shop["projects"].as_array().map(Vec::len), Some(2), "{shop}");
+    let lone = card(&solo);
+    assert_eq!(
+        lone["name"].as_str().map(|name| name.chars().count()),
+        Some(40),
+        "{lone}"
+    );
+    assert_eq!(
+        lone["purpose"].as_str().map(|text| text.chars().count()),
+        Some(120),
+        "{lone}"
+    );
+    assert_eq!(
+        lone["template"], "software-product",
+        "a template not in the list is ignored"
+    );
+    assert_eq!(card(&books)["from_claude"], false);
+
+    // Keep the folder name reverts one card.
+    hub("proposal.revert", json!({ "id": pair }));
+    let reverted = hub("proposal.get", json!({}));
+    let kept = reverted["result"]["cards"]
+        .as_array()
+        .and_then(|all| all.iter().find(|card| card["id"] == json!(pair)))
+        .expect("the card");
+    assert_eq!(
+        (kept["name"].as_str(), kept["from_claude"].clone()),
+        (Some("api"), json!(false))
+    );
+
+    // A run that fails says so in Claude Code's words, and changes nothing.
+    std::fs::write(claude.join("fail"), "").expect("a failure");
+    let failed = hub("proposal.names", json!({ "confirmed": true }));
+    let said = failed["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        said.starts_with("names_failed") && said.contains("Credit balance is too low"),
+        "{failed}"
+    );
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
 }

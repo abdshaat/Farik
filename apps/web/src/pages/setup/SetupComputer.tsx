@@ -6,6 +6,8 @@ import { daemonSaid } from "../../app/refusals.ts";
 import { useQuery } from "../../app/store.ts";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
+import { FindOffer } from "../find/FindOffer.tsx";
+import { useFindingStatus, useOffer } from "../find/finding.ts";
 import styles from "./setup.module.css";
 import { keepNoSandbox, Wizard } from "./Wizard.tsx";
 
@@ -25,6 +27,8 @@ type Check = {
 	sandboxImage: Item;
 	/** Only for a team with a UI/UX Designer. */
 	designerBrowser?: Item;
+	/** A project that stopped on the safe box is being taken on: Catervas restarts on it. */
+	takingOn?: boolean;
 };
 type Key = keyof typeof en;
 
@@ -78,9 +82,22 @@ function Row(props: {
 
 /** Setup's first step: the programs Catervas needs, and what to do about each one missing. */
 export function SetupComputer() {
-	const { client } = useConnection();
+	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
 	const { data, again } = useQuery<Check>("computer.check", {});
+	const [opening, setOpening] = useState(false);
+	const takingOn = !!data?.takingOn;
+	const reopenOnce = useRef(reopen);
+	reopenOnce.current = reopen;
+	useEffect(() => {
+		if (!takingOn) return;
+		reopenOnce.current();
+		setOpening(true);
+	}, [takingOn]);
+	// Once the page is connected to the restarted Catervas, it goes home.
+	useEffect(() => {
+		if (opening && status === "open") navigate("/", { replace: true });
+	}, [opening, status, navigate]);
 	const [building, setBuilding] = useState(false);
 	const askAgain = useRef(again);
 	askAgain.current = again;
@@ -97,12 +114,23 @@ export function SetupComputer() {
 		return () => clearTimeout(timer);
 	}, [data, preparing]);
 
+	// Claude Code history on this computer is offered once: not while a scan has run or is running.
+	const offer = useOffer();
+	const { status: finding } = useFindingStatus();
+	const [skipped, setSkipped] = useState(false);
+	const offered =
+		offer === "claude_code" &&
+		finding?.phase === "idle" &&
+		!finding.indexExists &&
+		!skipped;
+
 	const basics = data?.claude.state === "ready" && data.git.state === "ready";
 	const docker = data?.docker.state === "ready";
 	const boxed = docker && data?.sandboxImage.state === "ready";
 	const onward = (without: boolean) => {
 		keepNoSandbox(without);
-		navigate("/setup/account");
+		// Without Claude Code history, the owner says where Claude is used first (journey C).
+		navigate(offer === "none" ? "/setup/where" : "/setup/account");
 	};
 	const prepare = async () => {
 		if (!client) return;
@@ -131,6 +159,13 @@ export function SetupComputer() {
 			again();
 		}
 	};
+
+	if (opening)
+		return (
+			<Wizard step={0} title={t("computerTitle")} lead={t("computerLead")}>
+				<p role="status">{t("opening")}</p>
+			</Wizard>
+		);
 
 	return (
 		<Wizard step={0} title={t("computerTitle")} lead={t("computerLead")}>
@@ -209,6 +244,7 @@ export function SetupComputer() {
 					</Row>
 				)}
 			</ul>
+			{offered && <FindOffer onSkip={() => setSkipped(true)} />}
 			{data && !boxed && <p className={styles.warn}>{t("noDockerWarning")}</p>}
 			<div className={styles.foot}>
 				<Button onClick={again}>{t("checkAgain")}</Button>

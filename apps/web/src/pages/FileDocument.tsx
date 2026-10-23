@@ -1,7 +1,7 @@
 import { Avatar, type AvatarKey, Button, TextArea } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { refusalsOf, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { DocumentFrame } from "../components/DocumentFrame.tsx";

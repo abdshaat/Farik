@@ -59,12 +59,18 @@ use catervas_core::delivery::{DeliveryTrigger, TASKS_PER_DELIVERY};
 const NOTHING_TO_DO: &str = "nothing on the board needs doing";
 /// What a tick says when the only rules that matched would have started a session on a spent day.
 const DAY_SPENT: &str = "the team's daily budget is spent";
+/// What a tick says when the computer's daily cap, all the teams' spending together, stopped it.
+const COMPUTER_DAY_SPENT: &str =
+    "all your teams together reached this computer's daily limit; they go on tomorrow (UTC)";
 
 /// What kept the rules of one tick from starting a session, gathered as they pass work over.
 #[derive(Debug, Default)]
 pub(super) struct Waiting {
     /// Whether the team's daily budget stopped one (`spent`).
     pub(super) day_spent: bool,
+    /// Whether it was the computer's daily cap, all the teams together, that stopped it
+    /// (ADR 0059).
+    pub(super) computer_day_spent: bool,
     /// The earliest time a sleeping agent whose session was not started wakes, and that agent
     /// (`unavailable`).
     pub(super) slept: Option<(DateTime<Utc>, String)>,
@@ -337,6 +343,7 @@ pub(super) async fn tick(
     if let Some(report) = super::goal::goal_rules(deps, scope, &team, &board, &mut waiting).await? {
         return Ok(report);
     }
+    waiting.computer_day_spent = waiting.day_spent && computer_day_spent(deps);
     Ok(idle(&waiting))
 }
 
@@ -450,6 +457,7 @@ fn catervafy_a_new_project(
 /// sleeping agent, and the time the first sleeping agent wakes whichever it names.
 fn idle(waiting: &Waiting) -> TickReport {
     let why = match &waiting.slept {
+        _ if waiting.computer_day_spent => COMPUTER_DAY_SPENT.to_string(),
         _ if waiting.day_spent => DAY_SPENT.to_string(),
         Some((until, agent)) => format!(
             "waiting for {agent}, asleep until {} (its model's usage limit)",
@@ -929,6 +937,14 @@ pub(super) const CEREMONY_TOOLS: &[&str] = &[
     "catervas_write_folder_doc",
 ];
 
+/// Whether the computer's daily cap is reached: the teams of this serve together spent it today
+/// (ADR 0059).
+pub(super) fn computer_day_spent(deps: &OrchestratorDeps) -> bool {
+    deps.slots
+        .as_ref()
+        .is_some_and(|slots| slots.day_capped(deps.tools.clock.now().date_naive()))
+}
+
 /// Whether the day's dollars stop a session about no task from starting; `day_spent` is set when
 /// they do, as `spent` sets it.
 pub(super) fn day_is_spent(
@@ -938,7 +954,8 @@ pub(super) fn day_is_spent(
     day_spent: &mut bool,
 ) -> Result<bool, OrchestratorError> {
     let spent =
-        crate::cost::day_spent(&deps.tools.projections, team, role, deps.tools.clock.now())?;
+        crate::cost::day_spent(&deps.tools.projections, team, role, deps.tools.clock.now())?
+            || computer_day_spent(deps);
     *day_spent |= spent;
     Ok(spent)
 }
@@ -1593,7 +1610,7 @@ pub(super) fn spent(
         .into_iter()
         .map(|exhausted| exhausted.scope)
         .collect();
-    if exhausted.contains(&BudgetScope::DayUsd) {
+    if exhausted.contains(&BudgetScope::DayUsd) || computer_day_spent(deps) {
         *day_spent = true;
         return Ok(true);
     }
@@ -7466,6 +7483,118 @@ mod tests {
             sleeps(&harness),
             vec![(Some("dev-a".to_string()), at() + chrono::Duration::hours(1))]
         );
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn every_team_waits_for_the_account_s_reset() {
+        use crate::orchestrator::fixtures::MovingSleeper;
+
+        let clock = Arc::new(MovableClock::new(at()));
+        let slots = crate::slots::Slots::with_sleeper(
+            None,
+            None,
+            Arc::clone(&clock) as Arc<dyn catervas_protocol::clock::Clock + Send + Sync>,
+            Arc::new(MovingSleeper(Arc::clone(&clock))),
+        );
+        let reset = at() + chrono::Duration::minutes(30);
+        let (first, second) = (
+            Harness::new("orch-account-a", |_| {}),
+            Harness::new("orch-account-b", |_| {}),
+        );
+        for harness in [&first, &second] {
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
+        }
+        let limited = first.orchestrator_sharing(
+            first.recorded(vec![refused_until(reset)]),
+            Arc::clone(&clock),
+            Arc::clone(&slots),
+        );
+        let waiting = second.orchestrator_sharing(
+            second.recorded(vec![reads_a_file()]),
+            Arc::clone(&clock),
+            Arc::clone(&slots),
+        );
+
+        limited.tick().await.expect("the tick runs");
+        assert_eq!(sleeps(&first), vec![(Some("dev-a".to_string()), reset)]);
+        waiting.tick().await.expect("the tick runs");
+
+        // The other team's session started once the account's limit had reset, and its agent was
+        // not put to sleep for a limit it did not hit.
+        let started = second.events(&[EventKind::SessionStarted]);
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].envelope.recorded_at, reset);
+        assert!(sleeps(&second).is_empty(), "{:?}", sleeps(&second));
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn stops_every_team_at_the_computer_s_cap() {
+        use crate::orchestrator::fixtures::MovingSleeper;
+
+        let clock = Arc::new(MovableClock::new(at()));
+        let slots = crate::slots::Slots::with_sleeper(
+            None,
+            None,
+            Arc::clone(&clock) as Arc<dyn catervas_protocol::clock::Clock + Send + Sync>,
+            Arc::new(MovingSleeper(Arc::clone(&clock))),
+        );
+        let usage = |tokens: u64| Usage {
+            input_tokens: tokens,
+            ..Usage::default()
+        };
+        let (first, second) = (
+            Harness::new("orch-cap-a", |_| {}),
+            Harness::new("orch-cap-b", |_| {}),
+        );
+        for harness in [&first, &second] {
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
+        }
+        let adapters = (
+            Arc::new(UsageThenWaitAdapter::completing(usage(30_000))),
+            Arc::new(UsageThenWaitAdapter::completing(usage(20_000))),
+        );
+        let teams = [
+            first.orchestrator_sharing(adapters.0.clone(), Arc::clone(&clock), Arc::clone(&slots)),
+            second.orchestrator_sharing(adapters.1.clone(), Arc::clone(&clock), Arc::clone(&slots)),
+        ];
+        let spent = |harness: &Harness| -> f64 {
+            harness
+                .events(&[EventKind::CostRecorded])
+                .iter()
+                .map(|event| match &event.body {
+                    EventBody::CostRecorded(body) => body.cost_usd,
+                    other => panic!("not a cost: {other:?}"),
+                })
+                .sum()
+        };
+
+        // The first team's session costs `before`; the computer's cap is one and a half times it,
+        // which the second team's session, two thirds of that, takes the two over.
+        teams[0].tick().await.expect("the tick runs");
+        let before = spent(&first);
+        assert!(before > 0.0, "the session cost nothing");
+        slots.set_daily_cap(Some(before * 1.5));
+        teams[1].tick().await.expect("the tick runs");
+        assert!(spent(&second) > 0.0);
+        assert!(slots.day_capped(at().date_naive()));
+
+        for team in &teams {
+            match team.tick().await.expect("the tick runs") {
+                TickReport::Idle { why, .. } => assert_eq!(why, super::COMPUTER_DAY_SPENT),
+                other => panic!("{other:?}"),
+            }
+        }
+        assert_eq!(adapters.0.started().len(), 1);
+        assert_eq!(adapters.1.started().len(), 1);
+
+        // The next UTC day starts them again.
+        clock.set(at() + chrono::Duration::days(1));
+        teams[0].tick().await.expect("the tick runs");
+        teams[1].tick().await.expect("the tick runs");
+        assert_eq!(adapters.0.started().len(), 2);
+        assert_eq!(adapters.1.started().len(), 2);
     }
 
     #[tokio::test]

@@ -2,25 +2,26 @@
 //! for as long as it drives, and a command typed anywhere else is sent to that process's daemon,
 //! or handled here, under the lock, when nothing drives.
 
+use std::collections::BTreeMap;
 use std::fs::{File, TryLockError};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::Arc;
 use std::time::Duration;
 
+use catervas_core::claude_account::AccountKind;
 use catervas_protocol::command::{Command, command_to_value, reply_from_value};
-use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, CredentialKind, SharedCredential};
-use catervas_runtime::credential::{Source, load_credential};
+use catervas_runtime::account::{AccountPort, ClaudeAccount};
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, credential_variable};
 use catervas_runtime::daemon::web::{BrowserSessions, ConnectCodes, WebState};
-use catervas_runtime::daemon::{
-    DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve, serve_held,
-};
+use catervas_runtime::daemon::{DaemonConfig, DaemonHandle, DaemonState, PortChoice, serve};
 use catervas_runtime::forge::Forge;
 use catervas_runtime::orchestrator::{
     CommandError, CommandReport, Orchestrator, OrchestratorDeps, OrchestratorError, RecoveryReport,
     command_handler, result_of, sandbox_recreator,
 };
 use catervas_runtime::sleep::{Sleeper, TokioSleeper};
+use catervas_runtime::slots::Slots;
 use catervas_runtime::{
     AVAILABLE_FOR, DockerPreviewFactory, DockerSandboxFactory, HostSandboxFactory, NoPreviews,
     PolledPreviews, PreviewFactory, RuntimeAdapter, RuntimeError, SANDBOX_IMAGE, SandboxFactory,
@@ -250,6 +251,7 @@ pub(crate) fn command_deps(
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
         work: Arc::default(),
+        slots: None,
     })
 }
 
@@ -342,19 +344,62 @@ pub(crate) const NO_SANDBOX_WARNING: &str = "warning: no-sandbox mode (.catervas
     you gave a connector, which they can also read from a running connector's /proc/<pid>/environ. \
     The governor still checks every path and permission it is asked about.";
 
-/// The variables of the environment a Claude Code session is given besides its credential.
-const SESSION_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
+/// The variables of the environment a Claude Code session is given, each copied only when set:
+/// Claude Code finds its own sign-in (`CLAUDE_CONFIG_DIR` says where), and a key the user set
+/// passes through unread (ADR 0084).
+const SESSION_ENV: [&str; 9] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "TERM",
+    "TMPDIR",
+    "CLAUDE_CONFIG_DIR",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
+
+/// What a start calls with the daemon's state once it listens.
+pub(crate) type Listening<'l> = &'l dyn Fn(&Arc<DaemonState>);
 
 /// What a start is told besides the project: how the process differs from `run`'s.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct StartOptions<'l> {
-    /// The socket `catervas serve` holds for all its daemons, which the daemon listens on; without
-    /// one, it listens on a port the system picks.
-    pub(crate) listener: Option<&'l std::net::TcpListener>,
-    /// Whether the daemon answers the browser routes (`catervas serve` alone), with a first connect
-    /// code for the link it prints.
-    pub(crate) web: bool,
+    /// What `catervas serve` shares among the teams it drives (ADR 0059). With it the daemon
+    /// answers the browser routes, over the hub's sessions and port; without it, as `run`'s,
+    /// it answers none.
+    pub(crate) shared: Option<&'l Shared>,
+    /// Called with the daemon's state as soon as it listens and has its browser routes, so that
+    /// the hub routes the team's pages to it from then on.
+    pub(crate) listening: Option<Listening<'l>>,
 }
+
+/// What every team of one `catervas serve` shares (ADR 0059): the hub's port and the browser
+/// sessions and connect codes it issues, so that a browser connects once for all the teams.
+#[derive(Clone)]
+pub(crate) struct Shared {
+    /// The browsers that traded a code.
+    pub(crate) sessions: BrowserSessions,
+    /// The live connect code.
+    pub(crate) codes: ConnectCodes,
+    /// The hub's port, which every page's `Origin` and `Host` name.
+    pub(crate) port: u16,
+    /// The places for sessions, the AI account's sleep and the computer's day, which every team's
+    /// sessions share.
+    pub(crate) slots: Arc<Slots>,
+}
+
+/// The AI account a start found Claude Code signed in with.
+#[derive(Clone, Copy)]
+pub(crate) struct AccountSeen {
+    /// The kind of sign-in.
+    pub(crate) kind: AccountKind,
+    /// The variable it comes from, when it comes from the user's environment.
+    pub(crate) variable: Option<&'static str>,
+}
+
+/// What a start is refused with while Claude Code is not signed in.
+pub(crate) const NOT_SIGNED_IN: &str = "Claude Code is not signed in: sign in on the AI account page of the web app, or run claude auth login, or set ANTHROPIC_API_KEY where you start Catervas";
 
 /// A process driving the project: its lock, its served daemon, its orchestrator, and where it
 /// hears Ctrl-C.
@@ -365,14 +410,12 @@ pub(crate) struct Driver {
     pub(crate) daemon: Arc<DaemonState>,
     /// One `()` per interrupt.
     pub(crate) interrupts: UnboundedReceiver<()>,
-    /// The credential it chose and where it came from, when the engine is Claude Code.
-    pub(crate) credential: Option<(CredentialKind, Source)>,
+    /// The Claude Code account it found signed in, when the engine is Claude Code.
+    pub(crate) account: Option<AccountSeen>,
     /// Whether it runs in no-sandbox mode.
     pub(crate) sandbox: Sandbox,
     /// What recovery found and did.
     pub(crate) recovered: RecoveryReport,
-    /// The first connect code, when the browser routes are on.
-    pub(crate) connect_code: Option<String>,
     handle: DaemonHandle,
     /// The watch on the marketing plans' Google Ads spend, which runs beside the ticks.
     watch: tokio::task::JoinHandle<Result<(), OrchestratorError>>,
@@ -393,11 +436,6 @@ fn watch_failure(
 }
 
 impl Driver {
-    /// The port the daemon listens on.
-    pub(crate) fn port(&self) -> u16 {
-        self.handle.info.port
-    }
-
     /// Shuts the daemon down, removing `daemon.json`, then gives the lock back.
     ///
     /// # Errors
@@ -493,23 +531,22 @@ async fn start_listening(
     if settings.sandbox == Sandbox::None {
         let _ = writeln!(io.stderr, "{NO_SANDBOX_WARNING}");
     }
-    let claude = match &io.engine {
+    let (claude, account) = match &io.engine {
         Engine::Claude => {
-            let found = load_credential(&io.env, &(io.credential_stores)()).ok_or(
-                "no credential for Claude Code: connect your AI account in the browser catervas \
-                 serve opens, or set ANTHROPIC_API_KEY to an API key, or \
-                 CLAUDE_CODE_OAUTH_TOKEN to the token claude setup-token prints",
-            )?;
             let path = on_path("claude", io)
                 .ok_or("Claude Code is not installed: there is no claude on PATH")?;
-            Some((found, path))
+            let status = crate::start::account(io).status().await;
+            if !status.signed_in {
+                return Err(NOT_SIGNED_IN.to_string());
+            }
+            let seen = status.kind.map(|kind| AccountSeen {
+                kind,
+                variable: credential_variable(&session_env(io)),
+            });
+            (Some(path), seen)
         }
-        Engine::Given(_) => None,
+        Engine::Given(_) => (None, None),
     };
-    let credential = claude
-        .as_ref()
-        .map(|((credential, source), _)| (credential.kind(), *source));
-    let claude = claude.map(|((credential, _), path)| (Arc::new(Mutex::new(credential)), path));
     // Every session reads the prices, so a table that cannot be read is refused here, once.
     for sentence in unpriced(project)? {
         let _ = writeln!(
@@ -524,28 +561,23 @@ async fn start_listening(
     tools.transitions.set_sandbox(settings.sandbox);
     let (sandboxes, previews) = told_factories(&tools, settings.sandbox, sandbox_image(io)).await?;
     let daemon = connected_daemon(&tools, io);
-    let in_use = claude.as_ref().map(|(shared, _)| Arc::clone(shared));
     let web = options
-        .web
-        .then(|| web(&project.root, io, in_use))
-        .transpose()?;
-    let daemon_file = Some(project.root.join(DAEMON_FILE));
-    let handle = if let Some(listener) = options.listener {
-        serve_held(listener, daemon_file, Arc::clone(&daemon)).await
-    } else {
-        let config = DaemonConfig {
-            port: PortChoice::Any,
-            daemon_file,
-        };
-        serve(config, Arc::clone(&daemon)).await
-    }
-    .map_err(|error| error.to_string())?;
-    // The port is known once the daemon listens, and the routes read the state on each request.
-    let connect_code = web.map(|(mut web, code)| {
-        web.port = handle.info.port;
+        .shared
+        .map(|shared| web_sharing(&project.root, io, shared));
+    let config = DaemonConfig {
+        port: PortChoice::Any,
+        daemon_file: Some(project.root.join(DAEMON_FILE)),
+    };
+    let handle = serve(config, Arc::clone(&daemon))
+        .await
+        .map_err(|error| error.to_string())?;
+    // The routes read the state on each request, and the hub's port is what a page names.
+    if let Some(web) = web {
         daemon.set_web(web);
-        code
-    });
+    }
+    if let Some(listening) = options.listening {
+        listening(&daemon);
+    }
     let adapter = match adapter(project, io, claude, &daemon, &handle) {
         Ok(adapter) => adapter,
         Err(error) => {
@@ -563,6 +595,7 @@ async fn start_listening(
         forge: Arc::new(forge(&project.root, io)),
         sleeper: sleeper(io),
         work: Arc::default(),
+        slots: options.shared.map(|shared| Arc::clone(&shared.slots)),
     }));
     daemon.set_command_handler(command_handler(Arc::clone(&orchestrator)));
     daemon.set_sandbox_recreator(sandbox_recreator(Arc::clone(&orchestrator)));
@@ -583,10 +616,9 @@ async fn start_listening(
         orchestrator,
         daemon,
         interrupts: tokio::sync::mpsc::unbounded_channel().1,
-        credential,
+        account,
         sandbox: settings.sandbox,
         recovered,
-        connect_code,
         handle,
         _lock: lock,
     })
@@ -682,48 +714,74 @@ fn factories(sandbox: Sandbox, image: &str) -> (Arc<dyn SandboxFactory>, Arc<dyn
     }
 }
 
-/// What the browser routes need but the port, and the first connect code, issued. `in_use` is the
-/// credential the sessions start with, shared so that connecting the account again replaces it.
-/// The sessions are kept in the state folder, made here when it is not there yet, or in memory
-/// when there is none.
-pub(crate) fn web(
-    root: &Path,
-    io: &CliIo<'_>,
-    in_use: Option<SharedCredential>,
-) -> Result<(WebState, String), String> {
-    let state = state_dir(&io.env);
-    let file = match &state {
+/// The sessions and codes a serve shares among its teams, behind the hub's `port`. The sessions
+/// are kept in the state folder, made here when it is not there yet, or in memory when there is
+/// none.
+pub(crate) fn shared_web(io: &CliIo<'_>, port: u16, slots: Arc<Slots>) -> Result<Shared, String> {
+    let file = match state_dir(&io.env) {
         Some(directory) => {
-            make_state_dir(directory)?;
+            make_state_dir(&directory)?;
             Some(directory.join("browser-sessions.json"))
         }
         None => None,
     };
-    let sessions = BrowserSessions::open(file).map_err(|error| error.to_string())?;
-    let codes = ConnectCodes::default();
-    let code = codes.issue().map_err(|error| error.to_string())?;
-    let web = WebState {
-        codes,
-        sessions,
+    Ok(Shared {
+        sessions: BrowserSessions::open(file).map_err(|error| error.to_string())?,
+        codes: ConnectCodes::default(),
+        port,
+        slots,
+    })
+}
+
+/// `web`'s state for the project at `root`, over `shared`'s sessions, codes and port.
+pub(crate) fn web_sharing(root: &Path, io: &CliIo<'_>, shared: &Shared) -> WebState {
+    let state = state_dir(&io.env);
+    WebState {
+        codes: shared.codes.clone(),
+        sessions: shared.sessions.clone(),
         project_root: root.to_path_buf(),
-        credential: in_use.as_ref().map(|credential| {
-            credential
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .kind()
-        }),
-        port: 0,
+        account: account(io),
+        kept_key_removed: io.kept_key_removed,
+        port: shared.port,
         clock: Arc::clone(&io.clock),
         take_on_error: std::sync::Mutex::default(),
         leaving: std::sync::Mutex::default(),
-        stores: (io.credential_stores)(),
         env: io.env.clone(),
-        in_use,
         templates: state.map(|directory| Templates::new(directory.join("templates"))),
         #[cfg(feature = "e2e")]
         admit_local_preview: io.admit_local_preview,
-    };
-    Ok((web, code))
+    }
+}
+
+/// What the browser routes ask of Claude Code's account (ADR 0084): the `claude` found on `PATH`,
+/// run with the environment a session gets, and the check run in an empty folder of its own in
+/// the state folder.
+pub(crate) fn account(io: &CliIo<'_>) -> Arc<dyn AccountPort> {
+    let check_dir = state_dir(&io.env).map_or_else(
+        || std::env::temp_dir().join("catervas-account-check"),
+        |directory| directory.join("account-check"),
+    );
+    Arc::new(ClaudeAccount::new(
+        on_path("claude", io).unwrap_or_else(|| PathBuf::from("claude")),
+        session_env(io),
+        check_dir,
+    ))
+}
+
+/// The environment a `claude` program is run in: `SESSION_ENV`'s variables, each only when set.
+fn session_env(io: &CliIo<'_>) -> BTreeMap<String, String> {
+    session_env_of(&io.env)
+}
+
+/// `env` cut down to `SESSION_ENV`'s variables.
+pub(crate) fn session_env_of(env: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    SESSION_ENV
+        .iter()
+        .filter_map(|name| {
+            env.get(*name)
+                .map(|value| ((*name).to_string(), value.clone()))
+        })
+        .collect()
 }
 
 /// The adapter sessions start through: the engine's factory's, or Claude Code's once its version
@@ -731,13 +789,13 @@ pub(crate) fn web(
 fn adapter(
     project: &Project,
     io: &CliIo<'_>,
-    claude: Option<(SharedCredential, PathBuf)>,
+    claude: Option<PathBuf>,
     daemon: &Arc<DaemonState>,
     handle: &DaemonHandle,
 ) -> Result<Arc<dyn RuntimeAdapter>, String> {
     match (&io.engine, claude) {
         (Engine::Given(factory), _) => Ok(factory(Arc::clone(daemon))),
-        (Engine::Claude, Some((credential, claude_path))) => {
+        (Engine::Claude, Some(claude_path)) => {
             let config = ClaudeConfig {
                 claude_path,
                 hook_command: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("catervas")),
@@ -755,17 +813,9 @@ fn adapter(
                     })
                     .unwrap_or_default(),
                 team_file: project.root.join(".catervas/team.yaml"),
-                env: SESSION_ENV
-                    .iter()
-                    .filter_map(|name| {
-                        io.env
-                            .get(*name)
-                            .map(|value| ((*name).to_string(), value.clone()))
-                    })
-                    .collect(),
+                env: session_env(io),
             };
-            let adapter =
-                ClaudeAdapter::new(credential, config).map_err(|error| error.to_string())?;
+            let adapter = ClaudeAdapter::new(config).map_err(|error| error.to_string())?;
             Ok(Arc::new(adapter))
         }
         (Engine::Claude, None) => {

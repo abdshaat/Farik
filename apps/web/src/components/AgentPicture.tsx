@@ -1,5 +1,5 @@
 import { Avatar, type AvatarKey } from "@catervas/ui";
-import { Link } from "react-router";
+import { Link } from "../app/links.tsx";
 import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import styles from "./AgentPicture.module.css";
 

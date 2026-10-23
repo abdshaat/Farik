@@ -10,6 +10,8 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	realpathSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { type AddressInfo, createServer } from "node:net";
@@ -174,8 +176,9 @@ export function mergeByHand(project: string, branch: string): void {
 /**
  * `catervas-e2e-serve` on a free port. By default on a new project with its team, sandboxing off.
  * With `project: false` it starts in an empty folder, for the first-run wizard: `HOME` is `home`,
- * which holds Catervas's state folder too, the fake `claude` and `docker` come first on `PATH`, no
- * key is in the environment, and the key is kept in a file, never the keychain. A team with a
+ * which holds Catervas's state folder too, the fake `claude` (signed out until its login is given
+ * the code `e2e-code`) and `docker` come first on `PATH`, no key is in the environment, and the
+ * OS keychain is left alone. A team with a
  * Designer runs in Docker's sandbox, and its first `docker info` answers after 8 seconds.
  */
 export async function startServe(o: {
@@ -193,10 +196,23 @@ export async function startServe(o: {
 	 * changelog task, which would take an id the journey's transcripts name (ADR 0062).
 	 */
 	deliveryClosed?: boolean;
+	/**
+	 * With `project: false`: a small Claude Code history under the test's home (`.claude/projects`),
+	 * of two projects, `corner-bakery` and `recipe-cards` (both git repositories), each
+	 * under `Projects`, with one session in the last day.
+	 */
+	claudeHistory?: boolean;
+	/**
+	 * How many teams the computer has: with 2, a second project with its team is written beside the
+	 * first, and both are listed in `state.json`, so that serve drives both (ADR 0059).
+	 */
+	teams?: 1 | 2;
 }): Promise<{
 	url: string;
 	port: number;
 	project: string;
+	/** Every project of the computer's teams, the first being the one serve ran in. */
+	projects: string[];
 	stop(): Promise<void>;
 }> {
 	const project = mkdtempSync(join(tmpdir(), "catervas-e2e-project-"));
@@ -208,11 +224,13 @@ export async function startServe(o: {
 		const {
 			ANTHROPIC_API_KEY: _key,
 			CLAUDE_CODE_OAUTH_TOKEN: _token,
+			CLAUDE_CONFIG_DIR: _claude,
 			XDG_CONFIG_HOME: _config,
 			...rest
 		} = process.env;
 		const home = o.home ?? mkdtempSync(join(tmpdir(), "catervas-e2e-home-"));
 		if (!o.home) made.push(home);
+		if (o.claudeHistory) writeClaudeHistory(home);
 		serveEnv = {
 			...rest,
 			HOME: home,
@@ -239,6 +257,25 @@ export async function startServe(o: {
 		}
 	}
 
+	const projects = [project];
+	// The teams an earlier test remembered are not this test's: each serve starts with its own.
+	if (o.project !== false)
+		rmSync(join(stateFolder, "state.json"), { force: true });
+	if (o.teams === 2 && o.project !== false) {
+		const second = mkdtempSync(join(tmpdir(), "catervas-e2e-project-"));
+		made.push(second);
+		setUp(second, false, false);
+		projects.push(second);
+		mkdirSync(stateFolder, { recursive: true, mode: 0o700 });
+		writeFileSync(
+			join(stateFolder, "state.json"),
+			JSON.stringify({
+				last_project: realpathSync(project),
+				projects: projects.map((one) => realpathSync(one)),
+			}),
+		);
+	}
+
 	const port = await freePort();
 	args.push("--port", String(port));
 	if (o.transcripts.length > 0)
@@ -256,6 +293,7 @@ export async function startServe(o: {
 		url,
 		port,
 		project,
+		projects,
 		async stop() {
 			// The first Ctrl-C waits for the session running now; once the named sessions are
 			// played it never ends, and the second aborts it.
@@ -269,6 +307,76 @@ export async function startServe(o: {
 			await test.info().attach(FOLDERS, { body: JSON.stringify(made) });
 		},
 	};
+}
+
+/**
+ * The history of two projects under `home`, as Claude Code writes it: a folder of transcripts per
+ * project, one session each, with invented content. Both are git repositories whose
+ * owner is whoever git says, so that a team can be made of either.
+ */
+function writeClaudeHistory(home: string): void {
+	const sessions = [
+		{
+			folder: join(realpathSync(home), "Projects", "corner-bakery"),
+			git: true,
+			id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			hoursAgo: 3,
+		},
+		{
+			folder: join(realpathSync(home), "Projects", "recipe-cards"),
+			git: true,
+			id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+			hoursAgo: 20,
+		},
+	];
+	for (const { folder, git, id, hoursAgo } of sessions) {
+		if (git) {
+			gitProject(folder);
+			// The commit is the owner's: git's user is the one who made it.
+			execFileSync("git", ["config", "user.email", "t@example.com"], {
+				cwd: folder,
+			});
+		} else {
+			mkdirSync(folder, { recursive: true });
+			writeFileSync(join(folder, "cards.txt"), "pancakes\n");
+		}
+		const history = join(
+			home,
+			".claude",
+			"projects",
+			folder.replace(/[^A-Za-z0-9]/g, "-"),
+		);
+		mkdirSync(history, { recursive: true });
+		const at = new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
+		const line = (type: string, message: object) =>
+			JSON.stringify({
+				type,
+				sessionId: id,
+				cwd: folder,
+				timestamp: at,
+				gitBranch: "main",
+				version: "2.1.296",
+				entrypoint: "cli",
+				message,
+			});
+		writeFileSync(
+			join(history, `${id}.jsonl`),
+			`${[
+				line("user", { role: "user", content: "hello" }),
+				line("assistant", {
+					id: `msg_${hoursAgo}`,
+					model: "claude-opus-5-5",
+					content: [{ type: "text", text: "hello" }],
+					usage: {
+						input_tokens: 10,
+						output_tokens: 5,
+						cache_read_input_tokens: 0,
+						cache_creation_input_tokens: 0,
+					},
+				}),
+			].join("\n")}\n`,
+		);
+	}
 }
 
 /**

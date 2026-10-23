@@ -1,7 +1,7 @@
 import { Button, InfoTip } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
-import { useConnection } from "../../app/connection.tsx";
+import { useHub } from "../../app/connection.tsx";
+import { Link } from "../../app/links.tsx";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
 import { Bullets } from "../../components/Bullets.tsx";
 import { t } from "../../strings/t.ts";
@@ -10,7 +10,7 @@ import styles from "../pages.module.css";
 
 /** This computer: where Catervas runs, the project it works on, and Disconnect for this browser. */
 export function Computer() {
-	const { disconnect } = useConnection();
+	const { disconnect } = useHub();
 	const { data } = useQuery<ServeStatus>("serve.status", {});
 	const [leaving, setLeaving] = useState(false);
 	const leave = async () => {

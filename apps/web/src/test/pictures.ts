@@ -12,7 +12,7 @@ export function picturesOpenTheirAgents(
 			`img[src="${AVATAR_URLS[avatar as AvatarKey]}"]`,
 		)) {
 			seen++;
-			expect(img.closest("a")?.getAttribute("href")).toBe(`/team/${id}`);
+			expect(img.closest("a")?.getAttribute("href")).toBe(`/t/shop/team/${id}`);
 		}
 	expect(seen).toBeGreaterThan(0);
 }

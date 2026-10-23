@@ -1,0 +1,6 @@
+services:
+  checkout:
+    build:
+      context: ../shop-checkout
+    ports:
+      - "8080:80"

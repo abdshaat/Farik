@@ -1,7 +1,8 @@
 import { Button, Choice, TextArea, TextField, uiStrings } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { daemonSaid } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { active, sentence } from "../app/words.ts";

@@ -1,6 +1,6 @@
 import { Button, Segmented, TextField } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
+import { Link } from "../app/links.tsx";
 import { ShowAdvanced } from "../components/ShowAdvanced.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";

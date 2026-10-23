@@ -1,8 +1,9 @@
 import type { Event } from "@catervas/protocol-client";
 import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import { type FormEvent, useEffect, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { useLocation } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { useEvents, useQuery } from "../app/store.ts";
 import { isStatus, movedWords, sentence } from "../app/words.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";

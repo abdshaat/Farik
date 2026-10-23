@@ -1,8 +1,14 @@
 //! Catervas's agent runtime: a session is started, read, talked to, and stopped through one trait
 //! (`docs/SPEC.md` section 8.2), whatever program or recording is behind it.
 
+/// Claude Code's account, asked of Claude Code: signed in or not, the connection check, signing
+/// in and signing out (ADR 0084).
+#[cfg(unix)]
+pub mod account;
 /// A kit connector's allowances: the period, the count and what a connect may set.
 pub mod allowances;
+/// What the analytics read from a team's own log and its repositories.
+pub mod analytics;
 /// An attached PDF, Word or text file turned into the Markdown the owner's document is made of.
 pub mod attach;
 /// The Catervafication: the epic that has the team document the project, its fixed tasks, and when
@@ -16,7 +22,7 @@ pub mod channel;
 pub mod chat;
 /// What the human may do about an escalation, in words, one choice suggested.
 pub mod choices;
-/// The Claude Code program as a runtime: its command line, credential, and version.
+/// The Claude Code program as a runtime: its command line, environment, and version.
 #[cfg(unix)]
 pub mod claude;
 /// What the first-run wizard finds on the computer, and the sandbox image it builds.
@@ -27,7 +33,7 @@ pub mod computer;
 pub mod connectors;
 /// What a session cost, and what each budget has left.
 pub mod cost;
-/// Where the model credential is kept: the environment, the keychain, or a private file.
+/// The keychain's errors, and the removal of the key an earlier version kept (ADR 0084).
 #[cfg(unix)]
 pub mod credential;
 /// Contract exit criteria, run and judged.
@@ -45,6 +51,12 @@ pub mod exec;
 pub mod forge;
 /// Catervas's own server over the central banks' exchange rates (ADR 0038).
 pub mod fx;
+/// The owner's GitHub: their repositories, and the branches and pull requests Claude on the web made.
+pub mod github;
+/// A stand-in for GitHub's API, for the tests of the GitHub client.
+#[cfg(test)]
+#[path = "../tests/support/github_fixture.rs"]
+mod github_fixture;
 /// The owner's goal: its book, its planner and reader, and the owner's commands (ADR 0075).
 pub mod goals;
 /// Catervas's own Google Ads connector: the client for Google's API and what each tool sends (ADR
@@ -65,6 +77,8 @@ pub mod mailbox;
 /// The owner's decisions on marketing plans, the ends that dates bring, and how a plan is worded
 /// on the wire.
 pub mod marketing;
+/// The notification sent through the operating system when a digest is due and no tab is open.
+pub mod notify;
 /// An OAuth authorization server and a protected MCP server for the sign-in tests.
 #[cfg(all(test, unix))]
 #[path = "../tests/support/oauth_fixture.rs"]
@@ -106,6 +120,8 @@ pub mod sign_in;
 pub mod skills;
 /// An agent asleep until its model provider's limit resets.
 pub mod sleep;
+/// What several teams in one serve share: places for sessions, the AI account's sleep, the computer's day.
+pub mod slots;
 /// The Claude Code program's `stream-json` lines, read as session events.
 pub mod stream;
 /// Saved team templates, kept privately in Catervas's state folder.

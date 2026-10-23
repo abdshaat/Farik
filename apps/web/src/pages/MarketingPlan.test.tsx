@@ -88,7 +88,7 @@ describe("marketing plan page", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: en.backToToday }).getAttribute("href"),
-		).toBe("/");
+		).toBe("/t/shop/");
 
 		// The letter, signed by the agent that wrote it.
 		const letter = screen.getByRole("region", {
@@ -191,7 +191,7 @@ describe("marketing plan page", () => {
 			expect(within(about).getByText(text)).toBeTruthy();
 		expect(
 			within(about).getByRole("link", { name: "CTV-31" }).getAttribute("href"),
-		).toBe("/tasks/CTV-31");
+		).toBe("/t/shop/tasks/CTV-31");
 
 		// Everything the agent wrote is text: its markup and its markdown are shown as typed.
 		const whole = screen.getByRole("region", {
@@ -219,7 +219,7 @@ describe("marketing plan page", () => {
 		await screen.findByRole("heading", { level: 1, name: TITLE });
 		const frame = container.querySelector("iframe") as HTMLIFrameElement;
 		expect(frame.getAttribute("src")).toBe(
-			`/documents/raw?path=${encodeURIComponent("docs/catervas/marketing/plans/MP-3.html")}&task=${PLAN.task_id}`,
+			`/t/shop/documents/raw?path=${encodeURIComponent("docs/catervas/marketing/plans/MP-3.html")}&task=${PLAN.task_id}`,
 		);
 		expect(frame.getAttribute("sandbox")).toBe("");
 		expect(container.querySelector("pre")).toBeNull();
@@ -498,7 +498,7 @@ describe("marketing plan page", () => {
 			ended("replaced", "2026-11-16T00:00:01Z", { replaced_by: "MP-5" }),
 		);
 		const took = await screen.findByRole("link", { name: "MP-5" });
-		expect(took.getAttribute("href")).toBe("/marketing/plans/MP-5");
+		expect(took.getAttribute("href")).toBe("/t/shop/marketing/plans/MP-5");
 		expect(took.closest("p")?.textContent).toBe(
 			"This plan ended on Monday 16 November, when MP-5 took over",
 		);

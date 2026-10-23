@@ -229,6 +229,24 @@ fn stop_when_the_day_is_crossed(
     }
 }
 
+/// Why a session is stopped when the teams together spend the computer's day (ADR 0059).
+const COMPUTER_DAY_STOP: &str = "all your teams together reached this computer's daily limit";
+
+/// Counts `usd`, a session's cost, toward the computer's daily cap. The team whose cost reaches
+/// the cap stops its other sessions, as it does for its own day; the other teams' sessions finish.
+fn note_spend(deps: &OrchestratorDeps, own: &str, usd: f64) {
+    let Some(slots) = &deps.slots else {
+        return;
+    };
+    let now = deps.tools.clock.now();
+    let today = now.date_naive();
+    let was = slots.day_capped(today);
+    slots.record_spend(&deps.tools.ids.project_id, usd, now);
+    if !was && slots.day_capped(today) {
+        stop_the_others(deps, own, COMPUTER_DAY_STOP);
+    }
+}
+
 /// Asks every session the daemon answers for in this process, but `own`, to stop for `reason`;
 /// each ends `aborted` through its own end, its task keeping its status.
 fn stop_the_others(deps: &OrchestratorDeps, own: &str, reason: &str) {
@@ -861,6 +879,10 @@ fn sleep(
         .resets_at
         .filter(|resets_at| *resets_at > now)
         .unwrap_or(now + SLEEP_WITHOUT_A_RESET);
+    // Every team of the serve waits for the account, not just this agent (ADR 0059).
+    if let Some(slots) = &deps.slots {
+        slots.account_asleep_until(until);
+    }
     append_stamped(
         tools,
         EventIds {
@@ -1581,6 +1603,12 @@ async fn drive(
     thread: Option<Thread>,
     spec: &SessionSpec,
 ) -> Result<SessionEnd, OrchestratorError> {
+    // A place among the teams of one serve first, and nothing is recorded until it is given
+    // (ADR 0059). It is given back when the session has ended.
+    let _place = match &deps.slots {
+        Some(slots) => Some(slots.take(&deps.tools.ids.project_id).await),
+        None => None,
+    };
     let tools = &deps.tools;
     let clock = &*tools.clock;
     let ids = EventIds {
@@ -1596,14 +1624,16 @@ async fn drive(
         model_id: &spec.model,
     };
     let cost = |usage: &Usage| {
-        record_session_cost(
+        let usd = record_session_cost(
             &tools.log,
             &tools.projections,
             &source,
             usage,
             &prices,
             clock,
-        )
+        )?;
+        note_spend(deps, &spec.session_id, usd);
+        Ok(usd)
     };
     record_session_started(&tools.log, spec, in_reply_to, thread, &tools.ids, clock)?;
     let mut costed = false;

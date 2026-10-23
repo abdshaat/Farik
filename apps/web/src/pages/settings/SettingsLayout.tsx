@@ -1,5 +1,7 @@
-import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router";
+import { Outlet, useLocation } from "react-router";
+import { Link, Navigate, NavLink } from "../../app/links.tsx";
 import { useQuery } from "../../app/store.ts";
+import { pageOf } from "../../app/teams.ts";
 import { useWide } from "../../shell/Shell.tsx";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
@@ -28,6 +30,11 @@ export const SECTIONS: readonly Section[] = [
 		summary: "sectionSpendingSummary",
 	},
 	{ path: "work", name: "sectionWork", summary: "sectionWorkSummary" },
+	{
+		path: "repositories",
+		name: "sectionRepositories",
+		summary: "sectionRepositoriesSummary",
+	},
 	{
 		path: "your-app",
 		name: "sectionYourApp",
@@ -95,7 +102,8 @@ export function SettingsIndex() {
 
 export function SettingsLayout() {
 	const wide = useWide();
-	const atList = useLocation().pathname.replace(/\/$/, "") === "/settings";
+	const atList =
+		pageOf(useLocation().pathname).replace(/\/$/, "") === "/settings";
 	return (
 		<div className={`${styles.page} ${styles.settingsPage}`}>
 			<h1 className={styles.title}>{t("settings")}</h1>

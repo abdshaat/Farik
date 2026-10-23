@@ -2,19 +2,15 @@
 //! 4.1): the CLI's side of runtime's `SetupHost`, which opens or makes the project, keeps the
 //! credential, and says on a watch which project the wizard chose.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use catervas_core::repos::{MAX_REPOS, MemberRefusal, Repo, Repos, check_member, validate_repos};
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{EventBody, ProjectStartedBody, RepoAddedBody};
-use catervas_runtime::claude::CredentialKind;
 use catervas_runtime::computer::on_path;
 use catervas_runtime::connectors::ConnectorSecrets;
-use catervas_runtime::credential::{
-    CredentialError, CredentialStore, Source, credential_of_kind, load_credential, save_credential,
-};
 use catervas_runtime::daemon::{MemberRequest, SETUP_PENDING, SetupError, SetupHost};
 use catervas_store::Git;
 use catervas_store::files::{LocalSettings, ProjectFiles, Sandbox};
@@ -27,13 +23,11 @@ use tokio::sync::watch;
 use crate::carry::carry;
 use crate::project::{Project, open_project, repository_root};
 use crate::start::try_lock;
-use crate::state::{make_state_dir, state_dir};
+use crate::state::{read_state, state_dir, write_state};
 use crate::{HUMAN, init};
 
 /// What `open` and `create` refuse a project another process drives with.
 const BUSY: &str = "another catervas is already running this project";
-/// What `open` and `create` refuse with before a credential is kept.
-const NO_ACCOUNT: &str = "connect your AI account first";
 /// What `open` refuses a folder that already has a team with, while a project is being left, unless
 /// the user chose to replace it. The page recognises the prefix `has_team`.
 pub(crate) const HAS_TEAM: &str = "has_team: that folder already has a Catervas team";
@@ -46,6 +40,8 @@ const NOT_A_NAME: &str =
     "a project's name is lowercase letters, digits, and -, up to 64 characters";
 /// What `open` refuses a folder outside home with.
 const OUTSIDE_HOME: &str = "that folder is outside your home folder";
+/// What `open` refuses a project that is one of the teams already with.
+const TEAM_ALREADY_HERE: &str = "team_already_here: that project is already one of your teams";
 /// What `open` refuses home itself with: Catervas's settings folder, `~/.config/catervas`, would be in
 /// the project, where a commit could write it (re-review 2 m1).
 const HOME_ITSELF: &str = "your home folder itself cannot be a project; choose a folder inside it";
@@ -58,16 +54,19 @@ pub(crate) struct CliHost {
     pub(crate) home: PathBuf,
     /// The time the events it records are stamped with.
     pub(crate) clock: Arc<dyn Clock + Send + Sync>,
-    /// Where the credential is kept.
-    pub(crate) stores: Vec<Arc<dyn CredentialStore>>,
     /// Where the chosen project is said.
     pub(crate) chosen: watch::Sender<Option<PathBuf>>,
-    /// A project already chosen, which has no credential yet: `connect` takes it on.
+    /// A project already chosen, which waits on an AI account: `take_on_waiting` takes it on.
     pub(crate) waiting: Option<PathBuf>,
+    /// The projects whose drive stopped because this computer's sandbox is not ready, which
+    /// `sandbox_ready` takes on again.
+    pub(crate) unready: Arc<Mutex<BTreeSet<PathBuf>>>,
     /// The root the team just left from the browser: opening it again stays on it as it is.
     pub(crate) leaving: Option<PathBuf>,
     /// Where the connector keys are kept, for the team taken to another project.
     pub(crate) secrets: Arc<dyn ConnectorSecrets>,
+    /// The project of every team this serve has (ADR 0059): a team is added once.
+    pub(crate) teams: Arc<std::sync::Mutex<std::collections::BTreeSet<PathBuf>>>,
 }
 
 impl CliHost {
@@ -166,18 +165,14 @@ impl CliHost {
         })
     }
 
-    /// Refuses unless a credential is kept.
-    fn has_account(&self) -> Result<(), SetupError> {
-        match load_credential(&self.env, &self.stores) {
-            Some(_) => Ok(()),
-            None => Err(refused(NO_ACCOUNT)),
-        }
-    }
-
     /// Makes `root` a Catervas project when it is not one: `init`, then the old team carried while a
     /// project is being left, else the team paused and the marker. Answers the project, and
     /// whether it was made.
-    fn taken_on(&self, root: &Path, no_sandbox: bool) -> Result<(Project, bool), SetupError> {
+    pub(crate) fn taken_on(
+        &self,
+        root: &Path,
+        no_sandbox: bool,
+    ) -> Result<(Project, bool), SetupError> {
         let now = self.clock.now();
         let made = !root.join(".catervas/team.yaml").exists();
         if made {
@@ -234,7 +229,7 @@ impl CliHost {
     }
 
     /// Runs `git <args>` in `directory`, as catervas, with `git` from the environment's `PATH`.
-    fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
+    pub(crate) fn git(&self, directory: &Path, args: &[&str]) -> Result<(), SetupError> {
         let program = on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
         let output = std::process::Command::new(program)
             .args(catervas_store::git::CATERVAS_IDENTITY)
@@ -270,7 +265,6 @@ impl SetupHost for CliHost {
                 Some(lock) => drop(lock),
                 None => return Err(refused(BUSY)),
             }
-            self.has_account()?;
             return Ok(self.choose(old));
         }
         let folder = self.inside_home(path)?;
@@ -287,12 +281,19 @@ impl SetupHost for CliHost {
         if std::fs::canonicalize(&self.home).is_ok_and(|home| home == root) {
             return Err(refused(HOME_ITSELF));
         }
+        if self
+            .teams
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(&root)
+        {
+            return Err(refused(TEAM_ALREADY_HERE));
+        }
         // Checked before anything is changed; the lock is given back for the driver to take.
         match try_lock(&root).map_err(failed)? {
             Some(lock) => drop(lock),
             None => return Err(refused(BUSY)),
         }
-        self.has_account()?;
         // Only while a project is being left: a folder with a team is the user's to replace,
         // unless it is a project folder, whose team is never replaced.
         if self.leaving.is_some() {
@@ -349,7 +350,6 @@ impl SetupHost for CliHost {
         if root.exists() {
             return Err(refused("a folder with that name is already there"));
         }
-        self.has_account()?;
         on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
 
         std::fs::create_dir(&root)
@@ -427,7 +427,6 @@ impl SetupHost for CliHost {
             return Err(refused("a folder with that name is already there"));
         }
         let members = self.members_of(&root, repos)?;
-        self.has_account()?;
         on_path("git", &self.env).ok_or_else(|| refused("git is not installed"))?;
 
         std::fs::create_dir_all(&parent)
@@ -466,21 +465,42 @@ impl SetupHost for CliHost {
         Ok(self.choose(root))
     }
 
-    fn connect(&self, kind: CredentialKind, secret: &str) -> Result<(Source, bool), SetupError> {
-        let credential = credential_of_kind(kind, secret).map_err(|why| refused(&why))?;
-        if let Some(directory) = state_dir(&self.env) {
-            make_state_dir(&directory).map_err(failed)?;
-        }
-        let source = save_credential(&credential, &self.stores).map_err(|error| match error {
-            CredentialError::Failed(why) => refused(&why),
-            CredentialError::NoKeychain => {
-                refused("this computer has no keychain and no folder to keep the key in")
-            }
-        })?;
+    fn take_on_waiting(&self) -> Result<bool, SetupError> {
         if let Some(root) = &self.waiting {
             self.choose(root.clone());
         }
-        Ok((source, self.waiting.is_some()))
+        Ok(self.waiting.is_some())
+    }
+
+    fn set_limits(
+        &self,
+        agents_at_once: Option<Option<usize>>,
+        daily_cap_usd: Option<Option<f64>>,
+    ) -> Result<(), SetupError> {
+        let directory = state_dir(&self.env)
+            .ok_or_else(|| refused("there is no folder to keep the limits in"))?;
+        let mut state = read_state(&directory);
+        if let Some(limit) = agents_at_once {
+            state.agents_at_once = limit;
+        }
+        if let Some(cap) = daily_cap_usd {
+            state.daily_cap_usd = cap;
+        }
+        write_state(&directory, &state).map_err(failed)
+    }
+
+    fn sandbox_ready(&self) -> bool {
+        // The serve loop takes on the project chosen, and with it every other that waits.
+        let first = self
+            .unready
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .first()
+            .cloned();
+        if let Some(root) = &first {
+            self.choose(root.clone());
+        }
+        first.is_some()
     }
 
     fn home(&self) -> PathBuf {
@@ -489,11 +509,6 @@ impl SetupHost for CliHost {
 
     fn env(&self) -> BTreeMap<String, String> {
         self.env.clone()
-    }
-
-    fn account(&self) -> Option<(CredentialKind, Source)> {
-        load_credential(&self.env, &self.stores)
-            .map(|(credential, source)| (credential.kind(), source))
     }
 }
 
@@ -542,7 +557,7 @@ mod tests {
     use chrono::Utc;
     use serde_json::{Value, json};
 
-    use super::{BUSY, CliHost, HAS_TEAM, NO_ACCOUNT};
+    use super::{BUSY, CliHost, HAS_TEAM};
     use crate::project::open_project;
     use crate::start::try_lock;
     use crate::{HUMAN, init};
@@ -604,11 +619,12 @@ mod tests {
                 env: self.env.clone(),
                 home: home(),
                 clock: Arc::new(FixedClock::new(Utc::now())),
-                stores: Vec::new(),
                 chosen: tokio::sync::watch::channel(None).0,
                 waiting: None,
+                unready: Arc::default(),
                 leaving: leaving.map(Path::to_path_buf),
                 secrets: self.secrets.clone(),
+                teams: Arc::default(),
             }
         }
 
@@ -1042,19 +1058,6 @@ mod tests {
     }
 
     #[test]
-    fn staying_on_still_needs_an_account() {
-        let mut world = World::new("stay-no-account");
-        world.env.remove("ANTHROPIC_API_KEY");
-        let old = scratch("stay-no-account-old");
-
-        let refused = world
-            .host(Some(&old))
-            .open(&old.display().to_string(), false, false);
-
-        assert_eq!(refused, Err(SetupError::Refused(NO_ACCOUNT.to_string())));
-    }
-
-    #[test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
     fn leaving_creates_a_project_with_the_carried_team() {
         let world = World::new("create");
@@ -1354,12 +1357,6 @@ mod tests {
             )
         );
 
-        let mut without_account = World::new("folder-refuses-no-account");
-        without_account.env.remove("ANTHROPIC_API_KEY");
-        assert_eq!(
-            refused(&without_account.host(None), &parent, "shop", &both),
-            NO_ACCOUNT
-        );
         assert!(!home().join(&parent).exists(), "the parent was made");
     }
 

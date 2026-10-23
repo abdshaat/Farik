@@ -197,6 +197,74 @@ It holds the calm green under reduced motion. */
 	text-align: left;
 }
 
+/* The team switcher: a button with the current team's name, and its menu beneath. */
+.switcher {
+	position: relative;
+	margin: 0 0 var(--catervas-space-3);
+}
+.switcherButton {
+	width: 100%;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: var(--catervas-space-2);
+	padding: var(--catervas-space-2);
+	border: 1px solid currentColor;
+	border-radius: var(--catervas-radius-control);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.switcherButton::after {
+	content: "▾";
+}
+.menu {
+	position: absolute;
+	z-index: 10;
+	top: 100%;
+	left: 0;
+	min-width: 100%;
+	box-sizing: border-box;
+	display: grid;
+	padding: var(--catervas-space-1);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+	background: var(--catervas-color-page);
+	color: var(--catervas-color-ink);
+}
+.menu hr {
+	width: 100%;
+	margin: var(--catervas-space-1) 0;
+	border: 0;
+	border-top: 1px solid var(--catervas-color-rule);
+}
+.menu button {
+	display: grid;
+	gap: 2px;
+	padding: var(--catervas-space-2);
+	border: 0;
+	border-radius: var(--catervas-radius-control);
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.menu button[aria-current="page"] {
+	font-weight: 600;
+}
+.menu button:hover,
+.menu button:focus-visible {
+	background: var(--catervas-color-band);
+	color: var(--catervas-color-band-ink);
+}
+.menu span {
+	font-size: 0.85em;
+	opacity: 0.8;
+}
+
 .top {
 	display: flex;
 	justify-content: space-between;

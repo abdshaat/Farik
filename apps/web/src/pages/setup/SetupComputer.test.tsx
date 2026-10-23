@@ -129,4 +129,18 @@ describe("SetupComputer", () => {
 		expect(screen.getByRole("button", { name: en.prepare })).toBeTruthy();
 		await expectNoAxeViolations(failed.container);
 	}, 15000);
+
+	it("opens_the_project_that_waited_on_the_safe_box", async () => {
+		// Catervas stopped on a missing safe box: once it is ready, the check takes the project on.
+		const { socket } = await renderApp("/setup/computer");
+		await answerQuery(socket as FakeSocket, "computer.check", {
+			claude: READY,
+			git: READY,
+			docker: { state: "ready" },
+			sandbox_image: { state: "ready" },
+			taking_on: true,
+		});
+		expect(await screen.findByText(en.opening)).toBeTruthy();
+		expect(screen.queryByRole("button", { name: en.continue })).toBeNull();
+	});
 });

@@ -12,6 +12,7 @@ import {
 	useRef,
 	useState,
 } from "react";
+import { type Due, showDue } from "./notices.ts";
 
 type Status =
 	| "checking"
@@ -20,7 +21,7 @@ type Status =
 	| "open"
 	| "lost"
 	| "reopening";
-type Connection = {
+export type Connection = {
 	status: Status;
 	client: DaemonClient | null;
 	/** The link's code was refused: the link was used before. */
@@ -39,30 +40,46 @@ const REOPEN_FOR_MS = 30_000;
 // ponytail: the event list view needs no more than the last 500.
 const KEEP = 500;
 
-const Context = createContext<Connection>({
+const idle: Connection = {
 	status: "checking",
 	client: null,
 	linkUsed: false,
 	events: [],
 	disconnect: async () => {},
 	reopen: () => {},
-});
+};
+const Context = createContext<Connection>(idle);
+/** The hub's connection, which a team's own provider does not replace (ADR 0059). */
+const HubContext = createContext<Connection>(idle);
+type Factory = (url: string) => SocketLike;
+const FactoryContext = createContext<Factory>((url) => new WebSocket(url));
 
-/** One per page, around the router: it owns the one socket and the one event subscription. */
+/**
+ * A connection: it owns one socket and one event subscription. The page has one around the router
+ * for the hub (`/hub/rpc`, the default), and one for the team in the address (`/t/<team>/rpc`,
+ * `inner`), which is replaced when the address changes team. The hooks read the nearest.
+ */
 export function ConnectionProvider(props: {
 	children: ReactNode;
-	socketFactory?: (url: string) => SocketLike;
+	socketFactory?: Factory;
+	/** The socket's address; the hub's by default. */
+	path?: string;
+	/** Inside the hub's provider: the start link is the hub's to trade, not this one's. */
+	inner?: boolean;
 }) {
+	const outer = useContext(FactoryContext);
+	const path = props.path ?? "/hub/rpc";
+	const inner = props.inner ?? false;
 	const [status, setStatus] = useState<Status>("checking");
 	const [client, setClient] = useState<DaemonClient | null>(null);
 	const [linkUsed, setLinkUsed] = useState(false);
 	const [events, setEvents] = useState<Event[]>([]);
 	const disconnect = useRef(async () => {});
 	const reopen = useRef(() => {});
-	const socketFactory = useRef(
-		props.socketFactory ?? ((url: string) => new WebSocket(url)),
-	);
+	const socketFactory = useRef(props.socketFactory ?? outer);
 
+	// The path and `inner` are fixed for a provider: another team's page is a new provider, by key.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: see above
 	useEffect(() => {
 		let stopped = false;
 		let lastSeq: number | undefined;
@@ -71,6 +88,8 @@ export function ConnectionProvider(props: {
 		// While Catervas restarts on a chosen project: until when to keep trying, and whether it was tried yet.
 		let reopenUntil: number | undefined;
 		let retried = false;
+		// The digests already shown as a browser notice.
+		const noticed = new Set<string>();
 
 		const lose = () => {
 			if (stopped) return;
@@ -86,11 +105,14 @@ export function ConnectionProvider(props: {
 			retry = setTimeout(check, RETRY_MS);
 		};
 		const open = () => {
-			const url = `ws://${location.host}/rpc`;
+			const url = `ws://${location.host}${path}`;
 			const c = connect(url, socketFactory.current(url));
 			current = c;
 			setClient(c);
 			if (reopenUntil === undefined) setStatus("connecting");
+			// The hub tells every page when the daily digest is due; a team's socket is never told.
+			if (!inner)
+				c.onNotice("reminders.due", (due) => showDue(due as Due, noticed));
 			c.onStatus((s) => {
 				if (stopped || c !== current) return;
 				if (s === "closed") return lose();
@@ -148,7 +170,7 @@ export function ConnectionProvider(props: {
 			}
 		}
 		async function start() {
-			await redeem();
+			if (!inner) await redeem();
 			await check();
 		}
 		// A start link opened in this tab only changes the hash.
@@ -157,7 +179,7 @@ export function ConnectionProvider(props: {
 				if (!stopped && current === null) check();
 			});
 		};
-		addEventListener("hashchange", onHash);
+		if (!inner) addEventListener("hashchange", onHash);
 		disconnect.current = async () => {
 			const answer = await fetch("/disconnect", {
 				method: "POST",
@@ -185,22 +207,32 @@ export function ConnectionProvider(props: {
 		};
 	}, []);
 
-	return (
-		<Context
-			value={{
-				status,
-				client,
-				linkUsed,
-				events,
-				disconnect: () => disconnect.current(),
-				reopen: () => reopen.current(),
-			}}
-		>
-			{props.children}
-		</Context>
+	const value: Connection = {
+		status,
+		client,
+		linkUsed,
+		events,
+		disconnect: () => disconnect.current(),
+		reopen: () => reopen.current(),
+	};
+	const body = (
+		<FactoryContext value={socketFactory.current}>
+			<Context value={value}>{props.children}</Context>
+		</FactoryContext>
 	);
+	return inner ? body : <HubContext value={value}>{body}</HubContext>;
+}
+
+/** The hub's connection: the computer's, whatever team the address names. */
+export function useHub(): Connection {
+	return useContext(HubContext);
 }
 
 export function useConnection(): Connection {
 	return useContext(Context);
+}
+
+/** Opens a socket the way this page does; a team's page asks it for a socket of its own. */
+export function useSocketFactory(): Factory {
+	return useContext(FactoryContext);
 }

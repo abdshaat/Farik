@@ -19,9 +19,7 @@ use catervas_core::team::fixtures::{a_team_wire, an_agent_wire};
 use catervas_core::team::{CustomServer, Effort, custom_server, spec_sha256, validate_team};
 use catervas_protocol::clock::Clock;
 use catervas_protocol::event::{EventIds, EventKind};
-use catervas_runtime::claude::{
-    ClaudeAdapter, ClaudeConfig, ClaudeCredential, Secret, allowed_builtins, credential_from_env,
-};
+use catervas_runtime::claude::{ClaudeAdapter, ClaudeConfig, Secret, allowed_builtins};
 use catervas_runtime::connectors::{
     ConnectorEntry, ConnectorSecrets as _, MemoryConnectorSecrets, SecretAt,
 };
@@ -44,8 +42,19 @@ const CONNECTOR_KEY: &str = "fixture-key-value";
 /// The stdio MCP server the custom connector runs (`fixtures/mcp_server.sh`).
 const FIXTURE_SERVER: &str = include_str!("../../runtime/tests/fixtures/mcp_server.sh");
 
-/// The variables of this process's environment a session is given besides its credential.
-const BASE_ENV: [&str; 6] = ["PATH", "HOME", "USER", "LANG", "TERM", "TMPDIR"];
+/// The variables of this process's environment a session is given: Claude Code finds its own
+/// sign-in (ADR 0084), and a key the user set passes through unread.
+const BASE_ENV: [&str; 9] = [
+    "PATH",
+    "HOME",
+    "USER",
+    "LANG",
+    "TERM",
+    "TMPDIR",
+    "CLAUDE_CONFIG_DIR",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
 
 /// The time as it is: the session is real, and so is its log.
 struct Now;
@@ -319,12 +328,7 @@ impl Run {
 }
 
 /// Runs one session of `spec` against a served daemon.
-fn run(
-    project: &Project,
-    spec: SessionSpec,
-    credential: ClaudeCredential,
-    env: &BTreeMap<String, String>,
-) -> Run {
+fn run(project: &Project, spec: SessionSpec, env: &BTreeMap<String, String>) -> Run {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -358,11 +362,7 @@ fn run(
             })
             .collect(),
     };
-    let adapter = ClaudeAdapter::new(
-        std::sync::Arc::new(std::sync::Mutex::new(credential)),
-        config,
-    )
-    .expect("claude is new enough");
+    let adapter = ClaudeAdapter::new(config).expect("claude is new enough");
     let events = runtime.block_on(async {
         let mut session = adapter.start_session(spec).expect("the session starts");
         let mut events = Vec::new();
@@ -409,12 +409,10 @@ fn live_session_reads_is_denied_and_completes() {
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
-    let credential = credential_from_env(&env)
-        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     let project = Project::new();
     let spec = project.spec();
     let builtin_tools = spec.builtin_tools.clone();
-    let run = run(&project, spec, credential, &env);
+    let run = run(&project, spec, &env);
     let events = &run.events;
     let init = init_tools(&run.stream);
     assert!(
@@ -490,15 +488,13 @@ fn live_session_reads_is_denied_and_completes() {
 
 #[test]
 #[ignore = "a live Claude Code session needs the founder's credential: CATERVAS_LIVE_TESTS=1 with \
-            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
+            a signed-in Claude Code (or ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN), by hand"]
 fn a_live_session_calls_a_custom_connector() {
     if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
         eprintln!("skipped: set CATERVAS_LIVE_TESTS=1 to run a live Claude Code session");
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
-    let credential = credential_from_env(&env)
-        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     let project = Project::with_team(|wire, root| {
         let script = root.join(".catervas/local/fixture-server.sh");
         std::fs::create_dir_all(root.join(".catervas/local")).expect("the folder");
@@ -521,7 +517,7 @@ fn a_live_session_calls_a_custom_connector() {
                            Second, call the mcp__fixture__delete_repo tool. Then reply with what \
                            the search returned."
         .to_string();
-    let run = run(&project, spec, credential, &env);
+    let run = run(&project, spec, &env);
     let init = init_tools(&run.stream);
     assert!(
         init.iter().any(|tool| tool == "mcp__fixture__search"),
@@ -563,15 +559,13 @@ mod oauth_fixture;
 
 #[test]
 #[ignore = "a live Claude Code session needs the founder's credential: CATERVAS_LIVE_TESTS=1 with \
-            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand"]
+            a signed-in Claude Code (or ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN), by hand"]
 fn a_live_session_calls_a_signed_in_connector() {
     if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
         eprintln!("skipped: set CATERVAS_LIVE_TESTS=1 to run a live Claude Code session");
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
-    let credential = credential_from_env(&env)
-        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     // The fixture's server runs on this runtime, kept alive for the whole test.
     let serving = tokio::runtime::Runtime::new().expect("a runtime");
     let fixture = serving.block_on(oauth_fixture::Fixture::start());
@@ -613,7 +607,7 @@ fn a_live_session_calls_a_signed_in_connector() {
     }];
     spec.initial_prompt =
         "Call the mcp__fixture__whoami tool, then reply with what it returned.".to_string();
-    let run = run(&project, spec, credential, &env);
+    let run = run(&project, spec, &env);
     let init = init_tools(&run.stream);
     assert!(
         init.iter().any(|tool| tool == "mcp__fixture__whoami"),
@@ -676,7 +670,7 @@ const SKILL_BODY_MARKER: &str = "FIXTURE-SKILL-BODY-MARKER";
 
 #[test]
 #[ignore = "a live Claude Code session needs the founder's credential: CATERVAS_LIVE_TESTS=1 with \
-            ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN, by hand; the credential-free equivalent \
+            a signed-in Claude Code (or ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN), by hand; the credential-free equivalent \
             is the readiness review's fake-API probe (ADR 0034)"]
 fn a_live_session_loads_a_skill_on_use() {
     if std::env::var("CATERVAS_LIVE_TESTS").as_deref() != Ok("1") {
@@ -684,8 +678,6 @@ fn a_live_session_loads_a_skill_on_use() {
         return;
     }
     let env: BTreeMap<String, String> = std::env::vars().collect();
-    let credential = credential_from_env(&env)
-        .expect("CATERVAS_LIVE_TESTS=1 needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN");
     let project = Project::new();
     let local = project.repo.path.join(".catervas/local");
     // A chat session, which works in the project's root: the harder case, where Claude Code's own
@@ -731,7 +723,7 @@ fn a_live_session_loads_a_skill_on_use() {
     spec.initial_prompt = "Use the fixture-skill skill, read the note it points to, say the one \
                            word the note holds, and end."
         .to_string();
-    let run = run(&project, spec.clone(), credential, &env);
+    let run = run(&project, spec.clone(), &env);
     assert!(
         init_skills(&run.stream)
             .iter()

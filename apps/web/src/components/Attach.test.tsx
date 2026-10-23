@@ -164,7 +164,7 @@ describe("attaching a document", () => {
 		});
 		const link = await screen.findByRole("link", { name: "spec.pdf" });
 		expect(link.getAttribute("href")).toBe(
-			"/files/architecture/attached/spec.md",
+			"/t/shop/files/architecture/attached/spec.md",
 		);
 
 		const call = await pick(container, s, pdf("plan.pdf"));
@@ -217,7 +217,7 @@ describe("attaching a document", () => {
 		await answerQuery(s, "waiting.list", { waiting: [] });
 		const link = await screen.findByRole("link", { name: "spec.pdf" });
 		expect(link.getAttribute("href")).toBe(
-			"/files/architecture/attached/spec.md",
+			"/t/shop/files/architecture/attached/spec.md",
 		);
 
 		const call = await pick(container, s, pdf("plan.pdf"), "architecture");

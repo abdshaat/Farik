@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { useQuery } from "../../app/store.ts";
+import { ON_CURRENT } from "../../app/teams.ts";
 import {
 	base64Of,
 	pendingSetupFiles,
@@ -139,7 +140,9 @@ function Carried({
 			</dl>
 			<p>
 				{t("finishCarriedBefore")}
-				<Link to="/settings">{t("settings")}</Link>
+				<Link to="/settings" state={ON_CURRENT}>
+					{t("settings")}
+				</Link>
 				{t("finishCarriedAfter")}
 			</p>
 		</section>

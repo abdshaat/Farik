@@ -691,6 +691,7 @@ dependencies = [
  "serde",
  "serde-saphyr",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

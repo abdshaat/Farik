@@ -5,21 +5,21 @@
 # Usage: scripts/catervas-reset.sh [--dry-run] [--yes] [--keep-key] [--keep-images]
 #   --dry-run      list what would be deleted, delete nothing
 #   --yes          do not ask before deleting
-#   --keep-key     keep the AI account's key (credential.json, keychain entry)
+#   --keep-key     does nothing now: Catervas keeps no key, your sign-in is Claude Code's (ADR 0084)
 #   --keep-images  keep Catervas's Docker images (the sandbox), which take minutes to rebuild
 #
-# It deletes: Catervas's settings folder, every project's .catervas/ folder
+# It deletes: Catervas's settings folder (the AI account stays Claude Code's: sign out there), every project's .catervas/ folder
 # (team, log, contracts, worktrees, sandboxes), the local branches Catervas
 # made for its tasks, its containers and images, and the start script's log.
 # It never touches GitHub, nor files committed in your repositories.
 set -uo pipefail
 
-dry=0 yes=0 keep_key=0 keep_images=0
+dry=0 yes=0 keep_images=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run) dry=1 ;;
     --yes) yes=1 ;;
-    --keep-key) keep_key=1 ;;
+    --keep-key) echo "Catervas keeps no key: your sign-in is Claude Code's" ;;
     --keep-images) keep_images=1 ;;
     -h | --help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg" >&2; exit 2 ;;
@@ -59,14 +59,12 @@ echo "Settings and accounts:"
 if [[ -d "$config" ]]; then
   for entry in "$config"/* "$config"/.[!.]*; do
     [[ -e "$entry" ]] || continue
-    [[ $keep_key == 1 && "$(basename "$entry")" == credential.json ]] && continue
     echo "  $entry"
   done
 else
   echo "  (none)"
 fi
 [[ -d "$state" ]] && echo "  $state"
-[[ $keep_key == 1 ]] && echo "  (keeping the AI account's key)"
 echo
 echo "Projects (their .catervas/ folder and Catervas's local branches):"
 ((${#projects[@]})) || echo "  (none)"
@@ -131,15 +129,11 @@ done
 if [[ -d "$config" ]]; then
   for entry in "$config"/* "$config"/.[!.]*; do
     [[ -e "$entry" ]] || continue
-    [[ $keep_key == 1 && "$(basename "$entry")" == credential.json ]] && continue
     remove "$entry"
   done
-  [[ $keep_key == 0 ]] && rmdir "$config" 2>/dev/null
+  rmdir "$config" 2>/dev/null
 fi
 remove "$state"
-if [[ $keep_key == 0 ]] && command -v secret-tool >/dev/null 2>&1; then
-  secret-tool clear service catervas 2>/dev/null
-fi
 
 if ((have_docker)); then
   docker ps -aq --filter label=catervas.project | xargs -r docker rm -f >/dev/null

@@ -1,0 +1,10 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: relay-worker
+spec:
+  template:
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/relay-co/relay-worker:1.4.0

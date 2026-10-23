@@ -1,0 +1,6 @@
+services:
+  app:
+    image: sand-app:dev
+    environment:
+      DOCS_URL: https://notdocs.example.org
+      HOME_URL: https://app.example.org

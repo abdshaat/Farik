@@ -1,0 +1,6 @@
+{
+  "name": "kelp-ui",
+  "dependencies": {
+    "@kelp/sdk": "file:../vendor-sdk"
+  }
+}

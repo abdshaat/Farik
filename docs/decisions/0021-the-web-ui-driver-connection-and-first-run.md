@@ -22,6 +22,8 @@ Phase 6 builds the web UI for a non-technical user (ADR 0016), and its planning 
 
 ## Decision
 
+Amended by ADR 0084 (2026-10-21): the first run signs in through Claude Code, which keeps the AI account; Catervas keeps no key.
+
 The founder decided on 2026-09-28:
 
 1. **Phase 5 step 02 becomes phase 6 step 01**, unchanged in scope. Phase 5 is recorded as merged with its step 01. It is not reopened as a branch of its own, because the web UI is its only consumer and one pull request keeps the two together.

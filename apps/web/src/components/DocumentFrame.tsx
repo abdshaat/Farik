@@ -1,3 +1,4 @@
+import { useParams } from "react-router";
 import { t } from "../strings/t.ts";
 import styles from "./DocumentFrame.module.css";
 
@@ -19,7 +20,8 @@ export function DocumentFrame({
 	title: string;
 	className?: string | undefined;
 }) {
-	const src = `/documents/raw?path=${encodeURIComponent(path)}${
+	const { team } = useParams();
+	const src = `${team ? `/t/${team}` : ""}/documents/raw?path=${encodeURIComponent(path)}${
 		task ? `&task=${encodeURIComponent(task)}` : ""
 	}${version ? `&v=${encodeURIComponent(version)}` : ""}${
 		document.documentElement.dataset.theme === "dark" ? "&theme=dark" : ""

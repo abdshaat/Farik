@@ -1,0 +1,8 @@
+{
+  "name": "@ledgerlab/money",
+  "version": "1.2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ledgerlab/ledger-money.git"
+  }
+}

@@ -1,8 +1,9 @@
 import { RpcError } from "@catervas/protocol-client";
 import { Button, Choice, TextArea, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link, useNavigate } from "../app/links.tsx";
 import { said } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { t } from "../strings/t.ts";

@@ -1,5 +1,5 @@
 import { RpcError } from "@catervas/protocol-client";
-import { Link } from "react-router";
+import { Link } from "../app/links.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
 

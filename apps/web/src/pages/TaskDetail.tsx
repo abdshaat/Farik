@@ -1,7 +1,8 @@
 import { Button, DiffView, InfoTip, StatusWord } from "@catervas/ui";
 import { type KeyboardEvent, type ReactNode, useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useCommand } from "../app/command.ts";
+import { Link } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import { movedWords, roleWord, statusWord } from "../app/words.ts";
 import type { en } from "../strings/en.ts";

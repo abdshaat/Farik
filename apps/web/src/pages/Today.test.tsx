@@ -22,6 +22,7 @@ import {
 	UNREAD_ROW,
 } from "../test/ads.ts";
 import { type FakeSocket, socketsMade } from "../test/fake-socket.ts";
+import { answerCalls } from "../test/finding.ts";
 import { CARD, docs as folderDocs } from "../test/folderDocs.ts";
 import { sentCommand } from "../test/gate.ts";
 import { KIT_ADS, KIT_LINEAR, KIT_NOTION } from "../test/kits.ts";
@@ -53,6 +54,7 @@ import {
 } from "../test/pipelines.ts";
 import { GOING_OUT, MARKUP, POST_ROW, todayWith } from "../test/posts.ts";
 import { APPROVED, INTERVIEWING } from "../test/productPlan.ts";
+import { DIGEST } from "../test/reminders.ts";
 import {
 	answerQuery,
 	answerStatus,
@@ -108,6 +110,7 @@ async function today(fields: {
 	kits?: unknown[];
 	hiddenSuggestions?: unknown[];
 	requestedConnections?: unknown[];
+	foundServices?: unknown[];
 }) {
 	const { container, socket } = await renderApp("/");
 	const s = socket as FakeSocket;
@@ -121,6 +124,7 @@ async function today(fields: {
 		...(fields.requestedConnections && {
 			requested_connections: fields.requestedConnections,
 		}),
+		...(fields.foundServices && { found_services: fields.foundServices }),
 	});
 	await answerQuery(s, "team.activity", fields.activity ?? ACTIVITY);
 	await answerQuery(s, "waiting.list", { waiting: fields.waiting ?? [] });
@@ -137,6 +141,24 @@ async function today(fields: {
 
 describe("today", () => {
 	afterEach(() => vi.unstubAllGlobals());
+
+	it("shows_the_team_s_part_of_what_needs_you_today", async () => {
+		const { s } = await today({});
+		const item = DIGEST.groups[0]?.items[0];
+		answerCalls(s, {
+			"reminders.mine": { at: DIGEST.at, count: 1, items: [item] },
+		});
+		const part = await screen.findByRole("region", { name: en.needsYouTitle });
+		expect(
+			within(part).getByText("Add CSV export · recipe-cards"),
+		).toBeTruthy();
+		expect(
+			within(part).getByRole("button", { name: en.needsYouCopyResume }),
+		).toBeTruthy();
+		expect(
+			within(part).getByRole("button", { name: en.needsYouDismiss }),
+		).toBeTruthy();
+	});
 
 	it("shows_what_the_team_flagged_and_did_on_its_own", async () => {
 		const at = new Date().toISOString();
@@ -184,7 +206,7 @@ describe("today", () => {
 			within(first.closest("li") as HTMLElement)
 				.getAllByRole("link")
 				.map((a) => a.getAttribute("href")),
-		).toContain("/tasks/CTV-3");
+		).toContain("/t/shop/tasks/CTV-3");
 		const goal = region.getByText("Your goal: a decision on the name");
 		expect(
 			within(goal.closest("li") as HTMLElement).queryByRole("link"),
@@ -450,7 +472,7 @@ describe("today", () => {
 			within(folder as HTMLElement)
 				.queryAllByRole("link")
 				.map((link) => link.getAttribute("href")),
-		).toEqual(["/team/mira"]);
+		).toEqual(["/t/shop/team/mira"]);
 		const add = within(folder as HTMLElement).getByRole("button", {
 			name: "Add",
 		});
@@ -474,7 +496,7 @@ describe("today", () => {
 			within(task as HTMLElement)
 				.getByRole("link", { name: "Add the photos to your project" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-5/accept");
+		).toBe("/t/shop/tasks/CTV-5/accept");
 	});
 
 	it("checks_a_merge_from_its_row", async () => {
@@ -497,7 +519,7 @@ describe("today", () => {
 			screen
 				.getByRole("link", { name: "Add the menu page to your project" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-4/accept");
+		).toBe("/t/shop/tasks/CTV-4/accept");
 		await expectNoAxeViolations(container);
 
 		// The pull request is still open: nothing happened, and the row says so.
@@ -671,7 +693,7 @@ describe("today", () => {
 			name: "Little Oak Cakes: your team waits for your product plan",
 		});
 		// The mockup draws it as a link: to the Product Manager's chat.
-		expect(line.getAttribute("href")).toBe("/channel/mira");
+		expect(line.getAttribute("href")).toBe("/t/shop/channel/mira");
 		expect(line.closest("p")?.textContent).toBe(line.textContent);
 		cleanup();
 
@@ -707,9 +729,8 @@ describe("today", () => {
 		});
 		// A key that works adds no row.
 		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
+			signed_in: true,
+			kind: "subscription",
 		});
 		expect(
 			await screen.findByRole("heading", { name: "Waiting on you (6)" }),
@@ -748,7 +769,7 @@ describe("today", () => {
 			expect(within(one).getByText(title)).toBeTruthy();
 			expect(within(one).getByText(`${kind} line`)).toBeTruthy();
 			const link = within(one).getByRole("link", { name: word });
-			expect(link.getAttribute("href")).toBe(route);
+			expect(link.getAttribute("href")).toBe(`/t/shop${route}`);
 		});
 		// A question and a stuck task name their task and clamp the agent's words.
 		expect(
@@ -768,13 +789,13 @@ describe("today", () => {
 			within(setUpRow)
 				.getByRole("link", { name: "Open Settings" })
 				.getAttribute("href"),
-		).toBe("/settings/your-app");
+		).toBe("/t/shop/settings/your-app");
 		const mergeRow = within(merge).getByRole("listitem");
 		expect(
 			within(mergeRow)
 				.getByRole("link", { name: "Add the photos to your project" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-5/accept");
+		).toBe("/t/shop/tasks/CTV-5/accept");
 		expect(
 			within(mergeRow).getByRole("button", { name: en.waitingMerged }),
 		).toBeTruthy();
@@ -926,7 +947,7 @@ describe("today", () => {
 			within(dialog)
 				.getByRole("link", { name: "CTV-14 Sold-out badge on the menu" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-14");
+		).toBe("/t/shop/tasks/CTV-14");
 		await expectNoAxeViolations(container);
 	});
 
@@ -974,7 +995,7 @@ describe("today", () => {
 			within(missing as HTMLElement)
 				.getByRole("link", { name: en.waitingOpenSettings })
 				.getAttribute("href"),
-		).toBe("/settings/your-app");
+		).toBe("/t/shop/settings/your-app");
 		expect(
 			within(sandbox as HTMLElement).getByText("Iris needs Docker’s sandbox"),
 		).toBeTruthy();
@@ -985,7 +1006,7 @@ describe("today", () => {
 			within(sandbox as HTMLElement)
 				.getByRole("link", { name: en.waitingOpenTeam })
 				.getAttribute("href"),
-		).toBe("/team");
+		).toBe("/t/shop/team");
 		await expectNoAxeViolations(container);
 	});
 
@@ -1024,16 +1045,15 @@ describe("today", () => {
 			within(row as HTMLElement)
 				.getByRole("link", { name: en.waitingOpenTeam })
 				.getAttribute("href"),
-		).toBe("/team/iris");
+		).toBe("/t/shop/team/iris");
 		await expectNoAxeViolations(container);
 	});
 
 	it("says_the_key_did_not_work_and_links_to_settings", async () => {
 		const { container, s } = await today({});
 		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
+			signed_in: true,
+			kind: "subscription",
 			key_refused: true,
 		});
 		expect(
@@ -1042,14 +1062,17 @@ describe("today", () => {
 		const list = screen.getByRole("list", { name: en.waitingGroupSetUp });
 		const [row] = within(list).getAllByRole("listitem") as HTMLElement[];
 		expect(
+			within(row as HTMLElement).getByText("Your AI account’s key was refused"),
+		).toBeTruthy();
+		expect(
 			within(row as HTMLElement).getByText(
-				"Your AI account’s key did not work",
+				"The team is paused until you sign in again.",
 			),
 		).toBeTruthy();
 		const link = within(row as HTMLElement).getByRole("link", {
-			name: en.waitingKeyConnect,
+			name: "Sign in again in Settings",
 		});
-		expect(link.getAttribute("href")).toBe("/settings/account");
+		expect(link.getAttribute("href")).toBe("/t/shop/settings/account");
 		await expectNoAxeViolations(container);
 	});
 
@@ -1282,7 +1305,7 @@ describe("today", () => {
 			name: en.waitingGroupAnswer,
 		});
 		const review = within(list).getByRole("link", { name: en.waitingReview });
-		expect(review.getAttribute("href")).toBe("/marketing/plans/MP-3");
+		expect(review.getAttribute("href")).toBe("/t/shop/marketing/plans/MP-3");
 		fireEvent.click(review);
 
 		// The page asks for that plan, and shows it.
@@ -1366,7 +1389,7 @@ describe("today's posts", () => {
 			within(instagram)
 				.getByRole("link", { name: "MP-3" })
 				.getAttribute("href"),
-		).toBe("/marketing/plans/MP-3");
+		).toBe("/t/shop/marketing/plans/MP-3");
 		expect(
 			within(later).getByText("X, Wednesday 28 October at 08:30"),
 		).toBeTruthy();
@@ -1481,7 +1504,9 @@ describe("today's posts", () => {
 		expect(
 			within(row as HTMLElement)
 				.queryAllByRole("link")
-				.filter((link) => !link.getAttribute("href")?.startsWith("/team/")),
+				.filter(
+					(link) => !link.getAttribute("href")?.startsWith("/t/shop/team/"),
+				),
 		).toHaveLength(1);
 		expect(
 			within(row as HTMLElement).queryByRole("link", {
@@ -1819,7 +1844,7 @@ describe("a purchase order the Procurement Specialist suggests", () => {
 			within(row)
 				.getByRole("link", { name: "CTV-31 Find a supplier for 500 pie boxes" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-31");
+		).toBe("/t/shop/tasks/CTV-31");
 		expect(within(row).getByRole("img", { name: "Ivo" })).toBeTruthy();
 
 		// Every line, with its amounts and their currency.
@@ -2644,7 +2669,9 @@ describe("suggested connections", () => {
 		const connect = within(row).getByRole("link", {
 			name: en.suggestionsConnect,
 		});
-		expect(connect.getAttribute("href")).toBe("/team/mira?connect=notion");
+		expect(connect.getAttribute("href")).toBe(
+			"/t/shop/team/mira?connect=notion",
+		);
 		const describedBy = connect.getAttribute("aria-describedby") ?? "";
 		expect(document.getElementById(describedBy)?.textContent).toBe("Notion");
 		expect(within(row).queryByRole("img", { name: "Mira" })).toBeNull();
@@ -2670,9 +2697,35 @@ describe("suggested connections", () => {
 			within(first)
 				.getByRole("link", { name: en.suggestionsConnect })
 				.getAttribute("href"),
-		).toBe("/team/mira?connect=linear");
+		).toBe("/t/shop/team/mira?connect=linear");
 		expect(second.textContent).toContain("Notion");
 		expect(second.textContent).toContain(KIT_NOTION.about);
+	});
+
+	it("lists_a_service_found_after_the_asked_ones", async () => {
+		await today({
+			team: only(mira),
+			kits: [pmKit(KIT_NOTION, KIT_LINEAR)],
+			foundServices: [
+				{
+					agent: "mira",
+					server: "linear",
+					service_id: "linear",
+					name: "Linear",
+				},
+			],
+		});
+		const [first, second] = items() as [HTMLElement, HTMLElement];
+		expect(first.textContent).toContain("Linear");
+		expect(first.textContent).toContain(
+			"You use Linear with Claude. Connect it for Mira?",
+		);
+		expect(
+			within(first)
+				.getByRole("link", { name: en.suggestionsConnect })
+				.getAttribute("href"),
+		).toBe("/t/shop/team/mira?connect=linear");
+		expect(second.textContent).toContain("Notion");
 	});
 
 	it("keeps_a_requested_connection_hidden_when_the_user_said_not_now", async () => {

@@ -30,8 +30,14 @@ pub mod contract;
 mod contract_new;
 /// One exchange with the daemon a `daemon.json` names.
 pub mod daemon_client;
+/// `catervas discover`: what Catervas found in the Claude Code history.
+#[cfg(unix)]
+mod discover;
 /// Everything this project disagrees with itself about.
 pub mod doctor;
+/// Finding projects: the scan `catervas discover` and the hub share.
+#[cfg(unix)]
+mod finding;
 /// The hooks Claude Code runs around a tool call, carried to the daemon and back.
 pub mod hook;
 /// The human's commands, from any terminal.
@@ -105,7 +111,6 @@ use catervas_runtime::connectors::{
     ConnectorSecretStores, ConnectorSecrets, KeychainConnectorSecrets, MemoryConnectorSecrets,
 };
 #[cfg(unix)]
-use catervas_runtime::credential::{CredentialStore, FileStore, KeychainStore, MemoryStore};
 #[cfg(unix)]
 use catervas_runtime::daemon::DaemonState;
 use catervas_runtime::sleep::Sleeper;
@@ -143,6 +148,10 @@ pub enum Interrupts {
 /// printed, and they borrow for `'a` so that the buffer a test reads back is the test's own
 /// `Vec<u8>`; the clock is injected for the same reason an event's `recorded_at` is (`docs/SPEC.md`
 /// section 8.4).
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent switches of the harness, each read in one place"
+)]
 pub struct CliIo<'a> {
     /// What a command reads: the hook commands' JSON from Claude Code, and the answers
     /// `catervas contract new` asks for. Owned, so that one reader thread can hold it.
@@ -173,13 +182,21 @@ pub struct CliIo<'a> {
     pub sleeper: Option<Arc<dyn Sleeper>>,
     /// What `catervas serve` opens its link with: nothing here, and the system's opener in `main`.
     pub open_url: Opener,
-    /// Where the model credential is kept: one store in memory here, so that no test touches a
-    /// real keychain, and the keychain then the file in `main`.
+    /// Whether the key an earlier version kept in the OS keychain is removed too, on the first
+    /// start (ADR 0084): `true` in `main`, `false` here and with `--no-keychain`, so that no test
+    /// touches a real keychain.
     #[cfg(unix)]
-    pub credential_stores: CredentialStores,
+    pub forget_keychain: bool,
+    /// Whether this start removed the key an earlier version kept: the AI account's page says so
+    /// until the daemon stops.
+    #[cfg(unix)]
+    pub kept_key_removed: bool,
     /// Where each role's kit comes from (ADR 0036): the shipped kits here and in `main`, which a
     /// test replaces with a fixture kit whose server is its own.
     pub kits: catervas_runtime::KitSource,
+    /// How long `catervas serve` waits before it tries again a team whose project another process
+    /// drives (ADR 0059): a minute here and in `main`, which a test shortens.
+    pub elsewhere_retry: std::time::Duration,
     /// The apps Catervas has registered with a service (ADR 0035), which `catervas connect` signs in with:
     /// `REGISTERED_APPS` here and in `main`, which a test replaces with a table of its fixture's
     /// addresses.
@@ -191,6 +208,14 @@ pub struct CliIo<'a> {
     /// Catervas's own executable, which runs Catervas's own connectors (ADR 0038): none here, so a
     /// test names the binary it built, and `std::env::current_exe()` in `main`.
     pub own_program: Option<PathBuf>,
+    /// Where GitHub is and how `git clone` is run (phase 10 step 06d): GitHub itself and `git` here
+    /// and in `main`, which a test points at a fixture of its own.
+    #[cfg(unix)]
+    pub github: catervas_runtime::github::GithubPlaces,
+    /// What runs the program that shows the daily reminder when no tab is open (phase 10 step 07):
+    /// nothing here, so that no test runs `notify-send`, `osascript` or `powershell.exe`, and the
+    /// program itself in `main`.
+    pub notify: catervas_runtime::notify::NotifyRun,
     /// Whether `catervas serve` lets a browser at `http://localhost:<port>` in without a code: the
     /// end-to-end server's `--preview` (step 12, D1). The release build has no such field.
     #[cfg(feature = "e2e")]
@@ -199,31 +224,6 @@ pub struct CliIo<'a> {
     /// end-to-end server's `--sandbox-image`.
     #[cfg(feature = "e2e")]
     pub sandbox_image: Option<String>,
-}
-
-/// The places the model credential is kept, in the order they are tried.
-#[cfg(unix)]
-pub type CredentialStores = Arc<dyn Fn() -> Vec<Arc<dyn CredentialStore>> + Send + Sync>;
-
-/// The computer's credential stores: its keychain when `keychain` is true, then
-/// `credential.json` in the state folder of `env`, when there is one.
-#[cfg(unix)]
-#[must_use]
-pub fn system_credential_stores(
-    env: &BTreeMap<String, String>,
-    keychain: bool,
-) -> CredentialStores {
-    let file = state::state_dir(env).map(|directory| directory.join("credential.json"));
-    Arc::new(move || {
-        let mut stores: Vec<Arc<dyn CredentialStore>> = Vec::new();
-        if keychain {
-            stores.push(Arc::new(KeychainStore));
-        }
-        if let Some(file) = &file {
-            stores.push(Arc::new(FileStore::new(file.clone())));
-        }
-        stores
-    })
 }
 
 /// The computer's connector key stores (ADR 0030): its keychain, then `connectors.json` in the
@@ -267,19 +267,69 @@ impl<'a> CliIo<'a> {
             sleeper: None,
             open_url: Arc::new(|_| Ok(())),
             #[cfg(unix)]
-            credential_stores: {
-                let memory: Arc<dyn CredentialStore> = Arc::new(MemoryStore::default());
-                Arc::new(move || vec![Arc::clone(&memory)])
-            },
+            forget_keychain: false,
+            #[cfg(unix)]
+            kept_key_removed: false,
             kits: Arc::new(catervas_roles::load_kit),
+            elsewhere_retry: std::time::Duration::from_secs(60),
             registered_apps: catervas_runtime::registered_apps::REGISTERED_APPS,
             own_program: None,
             #[cfg(unix)]
+            github: catervas_runtime::github::GithubPlaces::default(),
+            #[cfg(unix)]
             connector_secrets: Arc::new(MemoryConnectorSecrets::default()),
+            notify: Arc::new(|_| Err("notifications are off here".to_string())),
             #[cfg(feature = "e2e")]
             admit_local_preview: false,
             #[cfg(feature = "e2e")]
             sandbox_image: None,
+        }
+    }
+}
+
+impl CliIo<'_> {
+    /// A harness for one more team of the same serve (ADR 0059): the same machine, clock, engine,
+    /// environment and keys, writing to `stdout` and `stderr` and hearing `interrupts`.
+    pub(crate) fn fork<'x>(
+        &self,
+        stdout: Box<dyn Write + 'x>,
+        stderr: Box<dyn Write + 'x>,
+        interrupts: tokio::sync::mpsc::UnboundedReceiver<()>,
+    ) -> CliIo<'x> {
+        CliIo {
+            stdin: Box::new(std::io::empty()),
+            stdin_is_terminal: false,
+            stdout,
+            stderr,
+            cwd: self.cwd.clone(),
+            clock: Arc::clone(&self.clock),
+            env: self.env.clone(),
+            #[cfg(unix)]
+            engine: match &self.engine {
+                Engine::Claude => Engine::Claude,
+                Engine::Given(factory) => Engine::Given(Arc::clone(factory)),
+            },
+            interrupts: Interrupts::Channel(interrupts),
+            session_ids: Arc::clone(&self.session_ids),
+            sleeper: self.sleeper.clone(),
+            open_url: Arc::clone(&self.open_url),
+            #[cfg(unix)]
+            forget_keychain: self.forget_keychain,
+            #[cfg(unix)]
+            kept_key_removed: self.kept_key_removed,
+            kits: Arc::clone(&self.kits),
+            elsewhere_retry: self.elsewhere_retry,
+            registered_apps: self.registered_apps,
+            #[cfg(unix)]
+            connector_secrets: Arc::clone(&self.connector_secrets),
+            own_program: self.own_program.clone(),
+            #[cfg(unix)]
+            github: self.github.clone(),
+            notify: Arc::clone(&self.notify),
+            #[cfg(feature = "e2e")]
+            admit_local_preview: self.admit_local_preview,
+            #[cfg(feature = "e2e")]
+            sandbox_image: self.sandbox_image.clone(),
         }
     }
 }
@@ -368,6 +418,26 @@ enum Commands {
     Metrics,
     /// Say where the files and the log disagree, and what else this project got wrong.
     Doctor,
+    /// Read your Claude Code history on this computer and say what Catervas found (ADR 0059).
+    #[cfg(unix)]
+    Discover {
+        /// Delete what Catervas found and read nothing.
+        #[arg(long, conflicts_with_all = ["claude_export", "add_project"])]
+        forget: bool,
+        /// Read the claude.ai data export (the .zip claude.ai emailed you) on this computer; a later
+        /// export updates an earlier one.
+        #[arg(long, value_name = "FILE", conflicts_with = "add_project")]
+        claude_export: Option<PathBuf>,
+        /// Add a project by hand, in a folder or a repository, or rename the one with the same key.
+        #[arg(long, value_name = "NAME")]
+        add_project: Option<String>,
+        /// The project's folder, with --add-project.
+        #[arg(long, value_name = "PATH", requires = "add_project")]
+        folder: Option<PathBuf>,
+        /// The project's repository address, with --add-project.
+        #[arg(long = "repo", value_name = "ADDRESS", requires = "add_project")]
+        repository: Option<String>,
+    },
     /// Show the team's rules (5.12).
     Rules {
         #[command(subcommand)]
@@ -1231,6 +1301,23 @@ pub fn run_cli(args: &[String], io: &mut CliIo<'_>) -> i32 {
             let code = report(found, parsed.json, io);
             return if told && code == OK { REFUSED } else { code };
         }
+        #[cfg(unix)]
+        Commands::Discover {
+            forget,
+            claude_export,
+            add_project,
+            folder,
+            repository,
+        } => discover::discover(
+            io,
+            &discover::DiscoverArgs {
+                forget: *forget,
+                claude_export: claude_export.as_deref(),
+                add_project: add_project.as_deref(),
+                folder: folder.as_deref(),
+                repository: repository.as_deref(),
+            },
+        ),
         Commands::Rules {
             command: RulesCommands::Show,
         } => open_project(&io.cwd, now).and_then(|project| team::rules(&project)),
@@ -1770,6 +1857,7 @@ fn human_command(
 fn drive(command: &Commands, as_json: bool, io: &mut CliIo<'_>) -> i32 {
     use catervas_runtime::orchestrator::TickRules;
 
+    state::forget_kept_key(io);
     if let Commands::Serve { port, no_open } = command {
         return serve::serve(*port, *no_open, io);
     }

@@ -8,8 +8,9 @@ import {
 	TextField,
 } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link, useNavigate } from "../app/links.tsx";
 import { type Refusal, said, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
 import { type Effort, ModelFields } from "../components/ModelFields.tsx";
