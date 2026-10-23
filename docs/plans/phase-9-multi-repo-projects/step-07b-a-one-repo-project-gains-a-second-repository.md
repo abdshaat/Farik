@@ -1,7 +1,7 @@
 # Phase 9, step 07b: A one-repo project gains a second repository
 
-Status: ready (readiness review 2026-10-12, three rounds, findings folded)
-Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
+Status: ready (readiness review 2026-10-12, three rounds, findings folded; amended 2026-10-23 for phase 10, below)
+Branch: `feat/one-team-across-repositories`, its own pull request to `main`. Phase 9 merged in #45 without this step, and phase 10 merged in #91.
 Spec: `docs/SPEC.md` 4.4, 8.4, 8.5; F1
 Depends on these steps of this phase, planned (01 to 06 ready, 07 drafted), not yet executed:
 - step 01: the project folder, `repos.yaml`, `member_root`, `check_member`, the member refusals, `repos.list`, `repo.added`, `home_of`, `Git::has_local_branch`
@@ -18,6 +18,36 @@ Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12. Round 1: not 
 Amended 2026-10-13 for the HTML documents merged from main (ADR 0058); status: ready.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 93593b6.
+
+
+## Amended 2026-10-23, for the several teams of phase 10
+
+The founder, 2026-10-23: "Yes 1 team could operate across repositories". The answer was to the question whether to build this step, now that phase 10's "Your teams" refuses to link a project to a one-repo team (`conversion_not_available`).
+
+The plan below stands, except where this section says otherwise. Line numbers below are at `93593b6`; the code on `main` (`101aaf2e`) wins, so find the named function.
+
+- **Several teams in one serve (phase 10 step 05).**
+  - Serve no longer switches one project. It drives every team behind a hub (`crates/runtime/src/daemon/hub.rs`), and each team is a drive on serve's one task (`crates/cli/src/serve.rs`, `FuturesUnordered`).
+  - The conversion stops only the converting team's drive, as `project.leave` does for one team. It runs `convert`, then:
+    - takes the old root out of `state.json`'s `projects` and the hub (`set_removals`);
+    - remembers the project folder and starts its drive through the path that adds a team (`set_additions`).
+
+    Every other team keeps running.
+  - `Driven::Converted` is that drive's outcome, not a serve-wide mode.
+  - On a failure before the commit point, the old root's drive starts again with `said` set. Its `WebState.take_on_error` shows the sentence as the plan says.
+- **The page.** Step 06e built `apps/web/src/pages/settings/Repositories.tsx`, with "This doesn't belong here" per row. This step adds "Add a repository" there in its one-repo view.
+  - The team's pages are under `/t/<team>/` (step 05b). After the move the team's address may change slug, since it is the project folder's team name and its team is the same. The page reopens on the hub and lands on `/t/<new slug>/settings/repositories`, found through `teams.list` by the project folder's root.
+- **Linking into a one-repo team (phase 10 step 06e).**
+  - `proposal.create`'s `add_to_team` card for a one-repo team no longer answers `conversion_not_available`. It answers `conversion_needed { team: slug }`.
+  - The "Your teams" card then shows "Adding <project> makes <team> a team of several repositories." with a **Continue** button. Continue opens this step's `AddSecondRepository` dialog for that team, with the second repository filled in from the card.
+  - The owner confirms there, as for any conversion. Nothing is converted without the dialog.
+  - The test `adds_a_linked_project_to_the_team_it_works_with` (`crates/cli/tests/serving.rs`) changes to assert `conversion_needed`.
+- **Sprints.** "Its sprints" in the Goal reads as its deliveries since ADR 0062. Everything in `.catervas/` moves.
+- **Spec.** The spec revision is the next free one above the newest in `docs/SPEC.md`.
+- **Task 7 is added after Task 5:** "Linking a project into a one-repo team asks for the conversion". Files: `crates/runtime/src/daemon/finding/proposal.rs`, `apps/web/src/pages/find/YourTeams.tsx`, `crates/cli/tests/serving.rs`, `apps/web/src/pages/find/YourTeams.test.tsx`. Its tests:
+  - `asks_to_convert_a_one_repo_team_before_linking` (serving, ignored): asserts that `proposal.create` gives a one-repo team's card `conversion_needed`, and that the team is untouched.
+  - `offers_the_conversion_for_a_one_repo_team` (web): asserts that the card shows the sentence, and that **Continue** opens the dialog filled with the project.
+  - Commit: `feat(web): linking into a one-repo team asks to make it a team of several repositories`.
 
 ## Goal
 
