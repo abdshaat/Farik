@@ -3257,7 +3257,7 @@
       }
     },
     "reposListResult": {
-      "description": "repos is null for a project of one repository, else the members in the order .catervas/repos.yaml lists them: name, path (canonical, absolute), integration_branch as written or null for the repository's default branch, and missing, true when path is not a directory or git's top folder of it is not path itself (a fact read when asked, with no event).",
+      "description": "repos is null for a project of one repository, else the members in the order .catervas/repos.yaml lists them: name, path (canonical, absolute), integration_branch as written or null for the repository's default branch, missing, true when path is not a directory or git's top folder of it is not path itself (a fact read when asked, with no event), and moved_out, the branch a one-repo project's move left in the first member for the owner to merge, else null.",
       "type": "object",
       "additionalProperties": false,
       "required": ["repos"],
@@ -3267,12 +3267,13 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "path", "integration_branch", "missing"],
+            "required": ["name", "path", "integration_branch", "missing", "moved_out"],
             "properties": {
               "name": { "type": "string" },
               "path": { "type": "string" },
               "integration_branch": { "type": ["string", "null"] },
-              "missing": { "type": "boolean" }
+              "missing": { "type": "boolean" },
+              "moved_out": { "type": ["string", "null"], "description": "The branch catervas/moved-out (or -<n>) that project.converted made in this member, while its integration branch still holds .catervas/team.yaml: the owner is to merge it to remove the files Catervas kept there. Else null." }
             }
           }
         }

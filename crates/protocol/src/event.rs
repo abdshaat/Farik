@@ -2731,6 +2731,12 @@ mod tests {
         assert!(!paths.is_empty());
         assert!(paths.iter().all(|path| path == "/body/project_folder"));
 
+        // A repository that kept nothing in git has no branch to merge.
+        let mut none = wire.clone();
+        none["body"]["branch"] = json!(null);
+        let event = event_from_value(&none).expect("a null branch is no branch");
+        assert_eq!(event_to_value(&event), none);
+
         let mut main = wire.clone();
         main["body"]["branch"] = json!("main");
         let paths: Vec<String> = refusal(&main).into_iter().map(|e| e.path).collect();

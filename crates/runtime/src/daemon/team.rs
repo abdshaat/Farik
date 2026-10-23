@@ -2032,7 +2032,7 @@ fn online(state: &DaemonState, deps: &ToolDeps) -> bool {
         return false;
     };
     members.iter().all(|member| {
-        catervas_store::repos::member_root(home, &member.path)
+        catervas_store::repos::member_root_in(home, &member.path, Some(deps.files.root()))
             .ok()
             .and_then(|root| {
                 catervas_store::git::Git::open(root)

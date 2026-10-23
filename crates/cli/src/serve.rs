@@ -10,6 +10,7 @@ use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use catervas_runtime::daemon::convert::Conversion;
 use catervas_runtime::daemon::hub::{Hub, IdleStatus, IdleTeam, TeamSlug};
 use catervas_runtime::daemon::{
     DaemonHandle, DaemonState, PortChoice, SetupHost, candidates, serve_held,
@@ -17,12 +18,14 @@ use catervas_runtime::daemon::{
 use catervas_runtime::orchestrator::{TickRules, TickScope};
 use catervas_runtime::slots::Slots;
 use catervas_store::files::ProjectFiles;
+use catervas_store::repos::{converting_from, moved_project_folder};
 use futures_util::StreamExt as _;
 use futures_util::future::LocalBoxFuture;
 use futures_util::stream::FuturesUnordered;
 use serde_json::json;
 use tokio::sync::{mpsc, watch};
 
+use crate::convert::convert;
 use crate::finding::CliFinder;
 use crate::project::{open_project, repository_root};
 use crate::run::{Ended, INTERRUPTED, OnIdle, Printer, finish, started, ticks};
@@ -43,6 +46,9 @@ enum Driven {
     Ended(i32),
     /// The project at this root was left from the browser: it is no longer one of the teams.
     Left(PathBuf),
+    /// The project at this root asked to gain a second repository: its drive has finished, and its
+    /// team moves into a project folder before that folder is driven.
+    Converted(PathBuf, Conversion),
     /// The project at this root stopped because this computer's sandbox is not ready: it is out of
     /// the hub but stays one of the teams, and is taken on again once the sandbox is ready.
     Unready(PathBuf),
@@ -102,6 +108,9 @@ struct Found {
     current: Option<PathBuf>,
     /// Whether Claude Code is not signed in, so that the teams wait on the account.
     no_account: bool,
+    /// Why a project that was found is not driven, for serve to say: a project folder still being
+    /// made.
+    refused: Vec<String>,
 }
 
 /// What the wizard was started for, kept across a take-on that fails.
@@ -154,6 +163,9 @@ struct Serving<'s, 'io> {
     idle_slugs: BTreeMap<TeamSlug, PathBuf>,
     /// The name a team made beside the others was given in an address, until its drive starts.
     named: BTreeMap<PathBuf, TeamSlug>,
+    /// Why a move into a project folder failed, which the drive of the repository it falls back
+    /// to shows the page until its next drive.
+    said: BTreeMap<PathBuf, String>,
     events: mpsc::UnboundedSender<Event>,
     state_dir: Option<PathBuf>,
     no_open: bool,
@@ -280,6 +292,7 @@ async fn run<'io>(
         removing: BTreeSet::new(),
         idle_slugs: BTreeMap::new(),
         named: BTreeMap::new(),
+        said: BTreeMap::new(),
         events,
         no_open,
         linked: false,
@@ -303,6 +316,9 @@ async fn run<'io>(
         );
         serving.say(true, &message);
         serving.missing.insert(root.clone());
+    }
+    for sentence in &found.refused {
+        serving.say(true, &format!("catervas: {sentence}"));
     }
     serving.publish_idle();
     let mut wizard = drivable.is_empty() || found.no_account;
@@ -549,7 +565,9 @@ impl<'s, 'io> Serving<'s, 'io> {
         let slug = self.slug_of(&root);
         self.stops.insert(root.clone(), stop);
         self.slugs.insert(root.clone(), slug.clone());
+        let said = self.said.remove(&root);
         let launch = Launch {
+            said,
             root,
             slug,
             lock,
@@ -662,6 +680,39 @@ impl<'s, 'io> Serving<'s, 'io> {
             }
         }
         None
+    }
+
+    /// Moves the team of the one-repo project at `old` into its project folder, now that its drive
+    /// has finished, and drives the folder in its place. A move that fails is taken back, and the
+    /// repository is driven again with the sentence for the page; every other team goes on.
+    fn converted(&mut self, old: &Path, conversion: &Conversion) {
+        let now = self.io.clock.now();
+        match convert(old, conversion, &*self.io, now) {
+            Ok(folder) => {
+                let message = format!(
+                    "catervas: the team of {} moved into {}",
+                    old.display(),
+                    folder.display()
+                );
+                self.say(false, &message);
+                if let Some(directory) = &self.state_dir
+                    && let Err(error) = forget(directory, old)
+                {
+                    self.say(true, &format!("warning: {error}"));
+                }
+                self.forget_team(old);
+                self.teams
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .insert(folder.clone());
+                self.launch(folder, true, false, true);
+            }
+            Err(why) => {
+                self.say(true, &format!("catervas: {}: {why}", old.display()));
+                self.said.insert(old.to_path_buf(), why);
+                self.launch(old.to_path_buf(), true, false, false);
+            }
+        }
     }
 
     /// Takes `root` out of the teams this serve has.
@@ -785,6 +836,10 @@ impl<'s, 'io> Serving<'s, 'io> {
                 };
                 Some(Back::Left)
             }
+            Ok(Driven::Converted(old, conversion)) => {
+                self.converted(&old, &conversion);
+                None
+            }
             Ok(Driven::Unready(unready)) => {
                 // Out of the hub, as a leave is, but still one of the teams; the others keep
                 // running, and with none left the wizard is served, waiting on the sandbox.
@@ -850,6 +905,8 @@ enum Back {
 
 /// Everything a drive needs of the loop.
 struct Launch {
+    /// Why the move that ended the drive before this one failed, for the page to show.
+    said: Option<String>,
     root: PathBuf,
     slug: TeamSlug,
     lock: RunLock,
@@ -886,6 +943,7 @@ async fn run_team(
     events: &mpsc::UnboundedSender<Event>,
 ) -> Result<Driven, String> {
     let Launch {
+        said,
         root,
         slug,
         lock,
@@ -895,6 +953,7 @@ async fn run_team(
     } = launch;
     let project = open_project(&root, io.clock.now())?;
     let routed = |state: &Arc<DaemonState>| {
+        state.set_take_on_error(said.clone());
         hub.add(slug.clone(), Arc::clone(state));
         if current {
             hub.set_current(slug.as_str());
@@ -946,13 +1005,18 @@ async fn run_team(
     )
     .await;
     let left = driver.daemon.left();
+    let converting = driver.daemon.converting();
     let unready = matches!(ended, Ended::Unready(_));
     hub.remove(&slug);
     let code = finish(&project, driver, &mut printer, ended, presses).await;
     if unready && left.is_none() && code == 1 {
         return Ok(Driven::Unready(project.root));
     }
-    Ok(driven(left, code))
+    Ok(driven(
+        left,
+        converting.map(|conversion| (project.root.clone(), conversion)),
+        code,
+    ))
 }
 
 /// Where `serve` starts: every project `state.json` lists, and the one run in. A project found
@@ -960,30 +1024,62 @@ async fn run_team(
 async fn found(io: &CliIo<'_>) -> Found {
     let has_team = |root: &PathBuf| root.join(".catervas/team.yaml").exists();
     let canonical = |root: PathBuf| std::fs::canonicalize(&root).unwrap_or(root);
+    // A repository the team moved out of is the project folder it moved to (phase 9 step 07b).
+    let moved = |root: PathBuf| moved_project_folder(&root).unwrap_or(root);
     let state = state_dir(&io.env)
         .map(|directory| read_state(&directory))
         .unwrap_or_default();
     let here = repository_root(&io.cwd)
         .ok()
         .map(canonical)
+        .map(moved)
         .filter(has_team);
-    let mut roots = state.projects.clone();
-    if let Some(here) = &here
-        && !roots.contains(here)
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for root in state
+        .projects
+        .iter()
+        .cloned()
+        .map(moved)
+        .chain(here.clone())
     {
-        roots.push(here.clone());
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
     }
+    // A project folder the move into it did not finish is not driven: adding the repository
+    // again finishes it.
+    let mut refused = Vec::new();
+    roots.retain(|root| match converting_from(root) {
+        Some(from) => {
+            refused.push(format!(
+                "{} is a project being made from {}; add the repository again to finish",
+                root.display(),
+                from.display()
+            ));
+            false
+        }
+        None => true,
+    });
     let current = here
-        .or_else(|| state.last_project.clone().filter(has_team))
+        .filter(|root| roots.contains(root))
+        .or_else(|| {
+            state
+                .last_project
+                .clone()
+                .map(moved)
+                .filter(|root| has_team(root) && roots.contains(root))
+        })
         .or_else(|| roots.iter().find(|root| has_team(root)).cloned());
     let no_account = !roots.is_empty()
         && matches!(io.engine, Engine::Claude)
         && !crate::start::account(io).status().await.signed_in;
+    let listed = state.projects.iter().cloned().map(moved).collect();
     Found {
         roots,
-        listed: state.projects.into_iter().collect(),
+        listed,
         current,
         no_account,
+        refused,
     }
 }
 
@@ -1008,9 +1104,10 @@ fn port_of(held: &std::net::TcpListener) -> Result<u16, String> {
 
 /// How a drive ended: out of the teams only for a leave that finished cleanly; any other code
 /// (Ctrl-C pressed during the leave, a failed finish) ends the drive with it.
-fn driven(left: Option<PathBuf>, code: i32) -> Driven {
-    match left {
-        Some(root) if code == 0 => Driven::Left(root),
+fn driven(left: Option<PathBuf>, converting: Option<(PathBuf, Conversion)>, code: i32) -> Driven {
+    match (left, converting) {
+        (Some(root), _) if code == 0 => Driven::Left(root),
+        (None, Some((root, conversion))) if code == 0 => Driven::Converted(root, conversion),
         _ => Driven::Ended(code),
     }
 }
@@ -1022,17 +1119,106 @@ mod tests {
     #[test]
     fn a_clean_leave_takes_the_team_out() {
         let left = Some(PathBuf::from("/old"));
-        assert!(matches!(driven(left, 0), Driven::Left(root) if root == Path::new("/old")));
+        assert!(matches!(driven(left, None, 0), Driven::Left(root) if root == Path::new("/old")));
     }
 
     #[test]
     fn a_leave_that_finishes_with_a_code_ends_the_drive_with_it() {
         let left = Some(PathBuf::from("/old"));
-        assert!(matches!(driven(left, 130), Driven::Ended(130)));
+        assert!(matches!(driven(left, None, 130), Driven::Ended(130)));
     }
 
     #[test]
     fn no_leave_ends_the_drive_with_its_code() {
-        assert!(matches!(driven(None, 0), Driven::Ended(0)));
+        assert!(matches!(driven(None, None, 0), Driven::Ended(0)));
+    }
+
+    #[test]
+    fn a_clean_stop_for_a_move_hands_the_team_to_the_move() {
+        let conversion = Conversion {
+            first_name: "bakery".to_string(),
+            parent: "Catervas".to_string(),
+            name: "bakery".to_string(),
+            second: catervas_runtime::daemon::MemberRequest {
+                name: "web".to_string(),
+                path: "Projects/web".to_string(),
+                integration_branch: None,
+            },
+        };
+        let asked = Some((PathBuf::from("/old"), conversion.clone()));
+        assert!(matches!(
+            driven(None, asked.clone(), 0),
+            Driven::Converted(root, held) if root == Path::new("/old") && held == conversion
+        ));
+        assert!(matches!(driven(None, asked, 130), Driven::Ended(130)));
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn opens_a_moved_repository_s_project_folder() {
+        use catervas_store::files::ProjectFiles;
+        use catervas_store::git::fixtures::TempRepo;
+
+        let old = TempRepo::new("found-moved-old");
+        let web = TempRepo::new("found-moved-web");
+        let folder = TempRepo::new("found-moved-folder");
+        for root in [&old, &folder] {
+            ProjectFiles::open(root.path.clone())
+                .init(
+                    &catervas_core::team::validate_team(
+                        &catervas_core::team::fixtures::a_team_wire(),
+                    )
+                    .expect("a team"),
+                )
+                .expect("made");
+        }
+        ProjectFiles::open(folder.path.clone())
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "bakery", "path": old.path.display().to_string() },
+                    { "name": "web", "path": web.path.display().to_string() },
+                ] }))
+                .expect("a list"),
+            )
+            .expect("written");
+        std::fs::write(
+            old.path.join(".catervas/local/moved-to"),
+            folder.path.display().to_string(),
+        )
+        .expect("a note");
+        let io = |cwd: &Path| {
+            CliIo::new(
+                cwd.to_path_buf(),
+                Box::new(std::io::sink()),
+                Box::new(std::io::sink()),
+                Arc::new(catervas_protocol::clock::FixedClock::new(chrono::Utc::now())),
+            )
+        };
+        let canonical = |path: &Path| std::fs::canonicalize(path).expect("a root");
+
+        // Run in the repository, serve drives the project folder it moved to.
+        let first = found(&io(&old.path)).await;
+        assert_eq!(first.roots, [canonical(&folder.path)]);
+        assert_eq!(first.current, Some(canonical(&folder.path)));
+        assert!(first.refused.is_empty());
+
+        // A project folder still being made is not driven, and serve says why.
+        std::fs::create_dir_all(folder.path.join(".catervas/local")).expect("made");
+        std::fs::write(
+            folder.path.join(".catervas/local/converting"),
+            old.path.display().to_string(),
+        )
+        .expect("a marker");
+        let second = found(&io(&old.path)).await;
+        assert_eq!(second.roots, [canonical(&old.path)]);
+        let third = found(&io(&folder.path)).await;
+        assert!(third.roots.is_empty());
+        assert_eq!(third.refused.len(), 1, "{:?}", third.refused);
+        assert!(
+            third.refused[0].contains("being made"),
+            "{:?}",
+            third.refused
+        );
     }
 }

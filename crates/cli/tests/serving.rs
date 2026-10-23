@@ -2300,6 +2300,162 @@ fn changes_project_from_the_browser() {
     drop(repository);
 }
 
+/// A one-repo team in `name`, served under home with a task filed, and the repository it is to
+/// gain, with the place the project folder is asked for.
+fn serving_a_conversion(name: &str) -> (TempRepo, Serving, TempRepo, String) {
+    let (repository, serving, _state) = serving_a_team_under_home(name);
+    let second = TempRepo::new(&format!("{name}-second"));
+    let parent = format!("catervas-{name}-{}", std::process::id());
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&parent));
+    until("the team is driven", || daemon_file(&repository).exists());
+    // Catervas's files are tracked in the repository, so the move leaves a branch that removes them.
+    repository.commit("Catervas's files");
+    (repository, serving, second, parent)
+}
+
+/// What `project.convert` is asked with, naming `second` `web` and the repository `bakery`.
+fn conversion_of(parent: &str, second: &TempRepo) -> Value {
+    json!({
+        "first_name": "bakery",
+        "parent": parent,
+        "name": "bakery",
+        "second": { "name": "web", "path": name_of(&second.path) }
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn adds_a_second_repository_from_the_browser() {
+    let (repository, serving, second, parent) = serving_a_conversion("serve-converts");
+    let task = filed(&repository, "A task for the bakery");
+    let folder = std::env::temp_dir()
+        .canonicalize()
+        .expect("home")
+        .join(&parent)
+        .join("bakery");
+
+    let asked = call(
+        serving.port,
+        &serving.cookie,
+        "project.convert",
+        conversion_of(&parent, &second),
+    );
+    assert_eq!(asked["result"], json!({}), "{asked}");
+
+    let mut status = Value::Null;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while status["project_root"] != json!(folder.display().to_string()) {
+        assert!(
+            Instant::now() < deadline,
+            "serve did not answer for the project folder\n{status}\n{}\n{}",
+            serving.out.text(),
+            serving.err.text()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+    }
+    assert_eq!(status["port"], serving.port, "{status}");
+    assert!(status["take_on_error"].is_null(), "{status}");
+    // Both repositories are members now, and the team's task came along with its repository.
+    let members = call(
+        serving.port,
+        &serving.cookie,
+        "query",
+        json!({ "name": "repos.list", "params": {} }),
+    );
+    let names: Vec<&str> = members["result"]["repos"]
+        .as_array()
+        .expect("a list of members")
+        .iter()
+        .filter_map(|member| member["name"].as_str())
+        .collect();
+    assert_eq!(names, ["bakery", "web"], "{members}");
+    let tasks = call(
+        serving.port,
+        &serving.cookie,
+        "query",
+        json!({ "name": "tasks.list", "params": {} }),
+    );
+    assert!(tasks.to_string().contains(&task), "{tasks}");
+    let contract = std::fs::read_to_string(folder.join(format!(".catervas/contracts/{task}.yaml")))
+        .expect("the contract moved");
+    assert!(contract.contains("repo: bakery"), "{contract}");
+    // The repository the team left is not driven any more, says where its team went, and holds
+    // the branch that removes what Catervas kept in it.
+    assert!(!run_lock_is_held(&repository));
+    assert!(
+        std::process::Command::new("git")
+            .args(["branch", "--list", "catervas/moved-out"])
+            .current_dir(&repository.path)
+            .output()
+            .is_ok_and(|output| !output.stdout.is_empty()),
+        "the removal branch"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(".catervas/local/moved-to")).expect("note"),
+        folder.display().to_string()
+    );
+
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&parent));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn falls_back_to_the_repository_when_the_move_fails() {
+    let (repository, serving, second, parent) = serving_a_conversion("serve-convert-fails");
+    let root = repository.path.canonicalize().expect("the root");
+    // A branch named `catervas` keeps git from making `catervas/moved-out`.
+    repository.git(&["branch", "catervas"]);
+
+    let asked = call(
+        serving.port,
+        &serving.cookie,
+        "project.convert",
+        conversion_of(&parent, &second),
+    );
+    assert_eq!(asked["result"], json!({}), "{asked}");
+
+    let mut status = Value::Null;
+    until("the repository is driven again, with the sentence", || {
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+        status["project_root"] == json!(root.display().to_string())
+            && status["take_on_error"].is_string()
+    });
+    assert!(
+        status["take_on_error"]
+            .as_str()
+            .is_some_and(|said| said.contains("catervas/moved-out")),
+        "{status}"
+    );
+    assert!(!std::env::temp_dir().join(&parent).join("bakery").exists());
+    assert!(!repository.path.join(".catervas/local/moved-to").exists());
+
+    // The sentence is shown until the next drive, which passes none.
+    left_for_the_wizard(&serving);
+    let opened = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": root.display().to_string(), "no_sandbox": false }),
+    );
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    until("the repository is driven without it", || {
+        let status =
+            serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+        status["project_root"] == json!(root.display().to_string())
+            && status["take_on_error"].is_null()
+    });
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&parent));
+}
+
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
 fn says_how_to_start_when_nothing_runs() {

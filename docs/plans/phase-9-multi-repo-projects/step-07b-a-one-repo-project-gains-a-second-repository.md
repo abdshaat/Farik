@@ -265,7 +265,13 @@ Files: `serve.rs`; `setup.rs`; `project.rs`; `daemon/repos.rs`; `catervafication
 - `covers_the_first_member_after_a_move` (`catervafication.rs`): with a `Repository`-scope `catervafication.started` and then `project.converted { first_repo: bakery }`, `covered_repos` is `{bakery}` and `offered_repos` is `[web]`. `catervafication_start { repo: "web" }` with no `system` document in either format on `main` files "Map how the repositories connect", depending on `web`'s Architect task. RED.
 - `reminds_of_the_branch_to_merge` (`daemon/repos.rs`, on `TestProject`'s project folder with a `project.converted` naming `bakery` and the branch made in `bakery`): at first, `repos.list`'s `bakery` row has `moved_out: "catervas/moved-out"`. Once that branch is merged into its integration branch, it is `null`. `web`'s is `null`. RED.
 
-- [ ] `feat(cli): drive the project folder a repository moved into`
+Built differently, 2026-10-23:
+- `covers_the_first_member_after_a_move` and the two changes to step 06 it holds (`covered_repos` after a move; a member's own Catervafication writing the system map first) are not built: step 06's `Scope`, `covered_repos`, `offered_repos` and `catervafication_start { repo }` were never built in phase 9, whose Catervafication hunts each member instead (`catervafication.rs`, `hunt_members`). There is nothing to teach about a move. A second member's own Catervafication waits for step 06.
+- `project.converted`'s `branch` is `null` when the repository kept nothing in git (no tracked path under `.catervas/` or `docs/catervas/`), so that no empty branch is made; `repos.list`'s `moved_out` is then `null` too.
+- `tasks.list` rows carry no `repo`; `adds_a_second_repository_from_the_browser` reads it in the moved contract file.
+- `member_root` gained `member_root_in(home, path, project_folder)`, which `repo.add`, `repo.locate` and `online` call with the project folder; the plain `member_root` stays for the callers that name none.
+
+- [x] `feat(cli): drive the project folder a repository moved into`
 
 ### Task 5: The dialog and Today's reminder
 

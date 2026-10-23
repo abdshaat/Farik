@@ -34,8 +34,31 @@ use serde_json::{Value, json};
 use crate::CliIo;
 use crate::contract::event_ids;
 use crate::project::{DATABASE, Project, ProjectIds};
-use crate::start::{driven_elsewhere, try_lock};
+use crate::start::{RunLock, driven_elsewhere, try_lock};
 use crate::state::{home_of, state_dir};
+
+/// How long the move waits for the old project's run lock. The driver that just finished has let
+/// go of it, but a process another thread of this one forked while it was held keeps the lock
+/// until that process runs `exec`, a few milliseconds under load.
+#[cfg(not(test))]
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+#[cfg(test)]
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// The run lock of `root`, tried again every 50 ms for up to `wait`; `None` when something else
+/// still holds it.
+fn lock_within(root: &Path, wait: std::time::Duration) -> Result<Option<RunLock>, String> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        if let Some(lock) = try_lock(root)? {
+            return Ok(Some(lock));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
 
 /// What the project folder's repository starts with.
 const START: &str = "Start the project";
@@ -104,7 +127,7 @@ pub(crate) fn convert(
 ) -> Result<PathBuf, String> {
     let old_root = std::fs::canonicalize(old_root)
         .map_err(|error| format!("{} cannot be read: {error}", old_root.display()))?;
-    let _lock = try_lock(&old_root)?.ok_or_else(|| driven_elsewhere(&old_root))?;
+    let _lock = lock_within(&old_root, LOCK_WAIT)?.ok_or_else(|| driven_elsewhere(&old_root))?;
     let old_git = Git::open(old_root.clone());
     let mut made = Made::default();
     let moved = move_team(&old_root, &old_git, conversion, io, now, &mut made);
@@ -265,23 +288,34 @@ fn move_team(
     )
     .map_err(|error| error.to_string())?;
 
-    // 8. In the old repository, the branch that removes what Catervas kept there.
-    let branch = free_branch(old_git)?;
-    let scratch = folder.join(MOVING).join("removal");
-    old_git
-        .prune_worktrees()
-        .map_err(|error| error.to_string())?;
-    let message = removal_message(&folder);
-    made.branch = Some(branch.clone());
+    // 8. In the old repository, the branch that removes what Catervas kept there: none when it
+    // kept nothing in git, and the log then records no branch.
     let removed: Vec<String> = moving
         .iter()
         .filter(|entry| entry.mode != "160000")
         .map(|entry| entry.path.clone())
         .collect();
-    old_git
-        .commit_removing(&scratch, &branch, &integration, &removed, &message)
-        .map_err(|error| format!("the branch {branch} could not be made: {error}"))?;
-    let _ = std::fs::remove_dir_all(folder.join(MOVING));
+    let branch = if removed.is_empty() {
+        None
+    } else {
+        let branch = free_branch(old_git)?;
+        let scratch = folder.join(MOVING).join("removal");
+        old_git
+            .prune_worktrees()
+            .map_err(|error| error.to_string())?;
+        made.branch = Some(branch.clone());
+        old_git
+            .commit_removing(
+                &scratch,
+                &branch,
+                &integration,
+                &removed,
+                &removal_message(&folder),
+            )
+            .map_err(|error| format!("the branch {branch} could not be made: {error}"))?;
+        let _ = std::fs::remove_dir_all(folder.join(MOVING));
+        Some(branch)
+    };
 
     // 9. The log says so.
     for (name, path, branch_of) in [

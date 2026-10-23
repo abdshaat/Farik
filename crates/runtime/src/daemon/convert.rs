@@ -24,12 +24,7 @@ pub(super) const QUERIES: [&str; 1] = ["project.convert_blockers"];
 /// The methods this module answers.
 pub(super) const METHODS: [&str; 1] = ["project.convert"];
 
-/// The marker a project folder holds while the team is being moved into it: the old root, as text.
-/// The move removes it at its commit point, so a folder that still holds it is half made.
-pub const CONVERTING: &str = ".catervas/local/converting";
-
-/// What a repository the team moved out of holds: the project folder it moved to, as text.
-pub const MOVED_TO: &str = ".catervas/local/moved-to";
+pub use catervas_store::repos::{CONVERTING, MOVED_TO, converting_from, moved_to};
 
 /// What a one-repo project is asked to become: the first repository's name, the project folder's
 /// place and name, and the second repository.
@@ -88,22 +83,6 @@ pub fn parent_in_home(home: &Path, parent: &str) -> Result<PathBuf, String> {
         }
     }
     Ok(folder)
-}
-
-/// The old root a half-made project folder says it is being made from, when `folder` says so.
-#[must_use]
-pub fn converting_from(folder: &Path) -> Option<PathBuf> {
-    let text = std::fs::read_to_string(folder.join(CONVERTING)).ok()?;
-    let text = text.trim();
-    (!text.is_empty()).then(|| PathBuf::from(text))
-}
-
-/// The project folder the team of the repository at `root` moved to, when it says so.
-#[must_use]
-pub fn moved_to(root: &Path) -> Option<PathBuf> {
-    let text = std::fs::read_to_string(root.join(MOVED_TO)).ok()?;
-    let text = text.trim();
-    (!text.is_empty()).then(|| PathBuf::from(text))
 }
 
 /// What holds the move, in the owner's words: "Your team is still working in <folder>: CTV-1,
