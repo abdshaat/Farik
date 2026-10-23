@@ -1741,13 +1741,15 @@ fn lists_the_members_of_a_served_project_folder() {
                 "name": "app",
                 "path": app.path.canonicalize().expect("a path").display().to_string(),
                 "integration_branch": null,
-                "missing": false
+                "missing": false,
+                "moved_out": null
             },
             {
                 "name": "infra",
                 "path": infra.path.canonicalize().expect("a path").display().to_string(),
                 "integration_branch": "main",
-                "missing": false
+                "missing": false,
+                "moved_out": null
             },
         ] }),
         "{members}"
