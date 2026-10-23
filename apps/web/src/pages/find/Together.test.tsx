@@ -180,7 +180,10 @@ describe("do these work together", () => {
 
 		// Maybe related is collapsed until opened, and answered Separate unless it is.
 		expect(screen.queryByRole("radio", { name: "One team" })).toBeNull();
-		fireEvent.click(screen.getByRole("button", { name: "Maybe related (1)" }));
+		// Its pairs come from their own query, which may answer after the groups.
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Maybe related (1)" }),
+		);
 		const maybe = within(screen.getByRole("radiogroup"));
 		expect(screen.getByText("price-watch and tidepool-api")).toBeTruthy();
 		expect(
