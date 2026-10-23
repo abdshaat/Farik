@@ -173,6 +173,7 @@
         "repo.added",
         "repo.removed",
         "repo.moved",
+        "project.converted",
         "document_rewrite.started",
         "delivery.closed",
         "task.reassigned",
@@ -309,6 +310,7 @@
         { "$ref": "#/$defs/repoAddedBody" },
         { "$ref": "#/$defs/repoRemovedBody" },
         { "$ref": "#/$defs/repoMovedBody" },
+        { "$ref": "#/$defs/projectConvertedBody" },
         { "$ref": "#/$defs/documentRewriteStartedBody" },
         { "$ref": "#/$defs/deliveryClosedBody" },
         { "$ref": "#/$defs/taskReassignedBody" },
@@ -2020,6 +2022,18 @@
       "properties": {
         "name": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 32 },
         "path": { "type": "string", "pattern": "^(/|[A-Za-z]:[\\\\/])", "minLength": 1, "maxLength": 4096 }
+      }
+    },
+    "projectConvertedBody": {
+      "title": "Project Converted Body",
+      "description": "A one-repo project became a project folder (docs/SPEC.md 4.4; step 07b): project_folder is the canonical path of the folder the team moved into; first_repo is the name the repository it left holds there as a member; branch is the branch made in that repository, catervas/moved-out or catervas/moved-out-<n>, that removes the files Catervas kept in it, for the owner to merge, or null when it kept none in git. The envelope names no agent, no session and no task. The name rule repeats repos.schema.json's.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_folder", "first_repo", "branch"],
+      "properties": {
+        "project_folder": { "type": "string", "pattern": "^(/|[A-Za-z]:[\\\\/])", "minLength": 1, "maxLength": 4096 },
+        "first_repo": { "type": "string", "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$", "maxLength": 32 },
+        "branch": { "type": ["string", "null"], "pattern": "^catervas/moved-out(-[1-9][0-9]*)?$", "maxLength": 255 }
       }
     },
     "documentRewriteStartedBody": {

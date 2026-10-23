@@ -126,6 +126,18 @@ impl Project {
 /// the team file or the log got wrong.
 pub fn open_project(cwd: &Path, now: DateTime<Utc>) -> Result<Project, String> {
     let root = repository_root(cwd)?;
+    // A repository the team moved out of opens the project folder it moved to; a project folder
+    // the move into it did not finish does not open (phase 9 step 07b).
+    if let Some(folder) = catervas_store::repos::moved_project_folder(&root) {
+        return open_project(&folder, now);
+    }
+    if let Some(from) = catervas_store::repos::converting_from(&root) {
+        return Err(format!(
+            "{} is a project being made from {}; add the repository again to finish",
+            root.display(),
+            from.display()
+        ));
+    }
     let files = ProjectFiles::open(root.clone());
     let team = files.read_team().map_err(|error| match error {
         catervas_store::files::FilesError::NotFound { .. } => format!(
@@ -215,7 +227,7 @@ pub(crate) fn tool_deps(project: &Project, io: &CliIo<'_>) -> Result<Arc<ToolDep
 
 #[cfg(test)]
 mod tests {
-    use super::slug;
+    use super::{open_project, slug};
 
     #[test]
     fn spells_a_name_a_person_chose_the_way_an_id_is_spelled() {
@@ -230,5 +242,79 @@ mod tests {
              and new_event refuses one"
         );
         assert_eq!(slug("---"), "catervas");
+    }
+
+    /// A project folder holding `members`, made as the move makes one.
+    #[cfg(unix)]
+    fn a_project_folder(
+        name: &str,
+        members: &[&catervas_store::git::fixtures::TempRepo],
+    ) -> catervas_store::git::fixtures::TempRepo {
+        use catervas_core::repos::validate_repos;
+        use catervas_core::team::validate_team;
+        use catervas_store::files::ProjectFiles;
+
+        let folder = catervas_store::git::fixtures::TempRepo::new(name);
+        let files = ProjectFiles::open(folder.path.clone());
+        files
+            .init(&validate_team(&catervas_core::team::fixtures::a_team_wire()).expect("a team"))
+            .expect("made");
+        let entries: Vec<serde_json::Value> = members
+            .iter()
+            .enumerate()
+            .map(|(at, member)| {
+                serde_json::json!({ "name": format!("member-{at}"), "path": member.path.display().to_string() })
+            })
+            .collect();
+        files
+            .write_repos(&validate_repos(&serde_json::json!({ "repos": entries })).expect("a list"))
+            .expect("written");
+        folder
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn opens_a_moved_repository_s_project_folder() {
+        use catervas_store::git::fixtures::TempRepo;
+
+        let old = TempRepo::new("open-moved-old");
+        crate::init::init(&old.path, chrono::Utc::now()).expect("init");
+        let web = TempRepo::new("open-moved-web");
+        let folder = a_project_folder("open-moved-folder", &[&old, &web]);
+        let now = chrono::Utc::now();
+        let own = std::fs::canonicalize(&old.path).expect("a root");
+        let moved = |folder: &std::path::Path| {
+            std::fs::create_dir_all(old.path.join(".catervas/local")).expect("made");
+            std::fs::write(
+                old.path.join(".catervas/local/moved-to"),
+                folder.display().to_string(),
+            )
+            .expect("written");
+        };
+
+        // Said to have moved to a project folder, the repository opens that folder.
+        moved(&folder.path);
+        let opened = open_project(&old.path, now).expect("opens");
+        assert_eq!(
+            opened.root,
+            std::fs::canonicalize(&folder.path).expect("a root")
+        );
+
+        // A folder still being made is refused, and the note that names it is ignored.
+        std::fs::create_dir_all(folder.path.join(".catervas/local")).expect("made");
+        std::fs::write(
+            folder.path.join(".catervas/local/converting"),
+            old.path.display().to_string(),
+        )
+        .expect("a marker");
+        assert_eq!(open_project(&old.path, now).expect("itself").root, own);
+        let refused = open_project(&folder.path, now).err().expect("refused");
+        assert!(refused.contains("being made"), "{refused}");
+        std::fs::remove_file(folder.path.join(".catervas/local/converting")).expect("done");
+
+        // A note that names a folder that is no project folder is ignored.
+        moved(&web.path);
+        assert_eq!(open_project(&old.path, now).expect("itself").root, own);
     }
 }

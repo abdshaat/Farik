@@ -220,6 +220,52 @@ describe("connection", () => {
 		expect(second.calls("subscribe")[0]?.params).toEqual({ from_seq: 4 });
 	});
 
+	it("reopens_for_longer_when_asked", async () => {
+		/** Catervas is down for `seconds`: each socket the page opens is closed at once. */
+		async function down(
+			sockets: { close: () => void; closed: boolean }[],
+			seconds: number,
+		) {
+			for (let at = 0; at < seconds * 2; at++) {
+				await act(() => vi.advanceTimersByTimeAsync(500));
+				for (const socket of sockets)
+					if (!socket.closed) act(() => socket.close());
+			}
+		}
+		const tried = async (forMs: number | undefined) => {
+			vi.useFakeTimers();
+			vi.stubGlobal("fetch", vi.fn(fakeFetch({ "GET /session": 204 })));
+			const { factory, sockets } = socketsMade();
+			let reopen: (forMs?: number) => void = () => {};
+			function Reopen() {
+				reopen = useConnection().reopen;
+				return <Status />;
+			}
+			const shown = render(
+				<ConnectionProvider socketFactory={factory}>
+					<Reopen />
+				</ConnectionProvider>,
+			);
+			await flush();
+			const first = sockets[0];
+			if (!first) throw new Error("no socket was opened");
+			act(() => first.emit("open", {}));
+			expect(status()).toBe("open");
+			act(() => reopen(forMs));
+			act(() => first.close());
+			await down(sockets, 40);
+			const after = status();
+			shown.unmount();
+			vi.useRealTimers();
+			return after;
+		};
+
+		// The default tries for 30 seconds and then says the connection is lost.
+		expect(await tried(undefined)).toBe("lost");
+		// A move that copies a large folder asks for ten minutes.
+		expect(await tried(600_000)).toBe("reopening");
+	});
+
 	it("notifies_in_the_browser_when_the_digest_is_due", async () => {
 		const shown: { title: string; options: NotificationOptions }[] = [];
 		vi.stubGlobal(

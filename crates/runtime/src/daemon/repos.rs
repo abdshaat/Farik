@@ -10,7 +10,7 @@ use catervas_protocol::event::EventBody;
 use catervas_protocol::generated::event::CriteriaUpdatedBody;
 use catervas_store::Git;
 use catervas_store::files::FilesError;
-use catervas_store::repos::{MemberPathRefusal, member_root, repo_present};
+use catervas_store::repos::{MemberPathRefusal, member_root_in, repo_present};
 use catervas_store::scan::{CATERVAS_ACTOR, names_of, rescan_members, reseeded};
 use serde_json::{Value, json};
 
@@ -32,7 +32,7 @@ fn internal(error: &dyn Display) -> Failure {
 }
 
 /// A refusal the page words by `code`, at the JSON pointer `pointer`.
-fn refusal(code: &str, pointer: &str, message: &str) -> Failure {
+pub(super) fn refusal(code: &str, pointer: &str, message: &str) -> Failure {
     let mut failure = Failure::new(REFUSED, message);
     failure.data =
         Some(json!({ "errors": [{ "path": pointer, "message": message, "code": code }] }));
@@ -70,19 +70,70 @@ fn list(deps: &ToolDeps) -> Result<Value, Failure> {
     let Some(repos) = deps.files.read_repos().map_err(|e| internal(&e))? else {
         return Ok(json!({ "repos": null }));
     };
+    let converted = moved_out_of(deps)?;
     let listed: Vec<Value> = repos
         .repos
         .iter()
         .map(|repo| {
+            let present = repo_present(Path::new(repo.path.as_str()));
+            let moved_out = converted
+                .as_ref()
+                .filter(|(first, _)| first == repo.name.as_str())
+                .filter(|_| {
+                    present
+                        && still_holds_catervas_files(
+                            Path::new(repo.path.as_str()),
+                            repo.integration_branch.as_ref().map(|branch| branch.as_str()),
+                        )
+                })
+                .map(|(_, branch)| branch.clone());
             json!({
                 "name": repo.name.as_str(),
                 "path": repo.path.as_str(),
                 "integration_branch": repo.integration_branch.as_ref().map(|branch| branch.as_str()),
-                "missing": !repo_present(Path::new(repo.path.as_str())),
+                "missing": !present,
+                "moved_out": moved_out,
             })
         })
         .collect();
     Ok(json!({ "repos": listed }))
+}
+
+/// The first repository the newest `project.converted` names and the branch it left in it, when
+/// the project was a one-repo project once and left one.
+fn moved_out_of(deps: &ToolDeps) -> Result<Option<(String, String)>, Failure> {
+    let converted = deps
+        .log
+        .read(&catervas_store::EventQuery {
+            kinds: vec![catervas_protocol::event::EventKind::ProjectConverted],
+            newest_first: true,
+            limit: Some(1),
+            ..catervas_store::EventQuery::default()
+        })
+        .map_err(|e| internal(&e))?;
+    Ok(converted.first().and_then(|event| match &event.body {
+        EventBody::ProjectConverted(body) => body
+            .branch
+            .as_ref()
+            .map(|branch| (body.first_repo.to_string(), branch.to_string())),
+        _ => None,
+    }))
+}
+
+/// Whether the member at `path` still holds Catervas's old `.catervas/team.yaml` on its integration
+/// branch: the owner has not merged the branch that removes it. A branch that cannot be read counts
+/// as not holding it.
+fn still_holds_catervas_files(path: &Path, integration_branch: Option<&str>) -> bool {
+    let git = Git::open(path.to_path_buf());
+    let branch = match integration_branch {
+        Some(branch) => branch.to_string(),
+        None => match git.default_branch() {
+            Ok(branch) => branch,
+            Err(_) => return false,
+        },
+    };
+    git.has_file(&branch, ".catervas/team.yaml")
+        .unwrap_or(false)
 }
 
 /// The methods, whose params the schema already passed. One writer at a time: each holds the
@@ -131,8 +182,8 @@ fn check(
     path: &str,
 ) -> Result<String, Failure> {
     let said = |code: &str, pointer: &str, message: String| refusal(code, pointer, &message);
-    let root =
-        member_root(home, path).map_err(|why| said(why.code(), why.pointer(), why.message()))?;
+    let root = member_root_in(home, path, Some(deps.files.root()))
+        .map_err(|why| said(why.code(), why.pointer(), why.message()))?;
     let folder = std::fs::canonicalize(deps.files.root()).map_err(|e| internal(&e))?;
     let (Some(folder), Some(text)) = (folder.to_str(), root.to_str()) else {
         return Err(internal(&"a path that is not text"));
@@ -471,13 +522,15 @@ mod tests {
                     "name": "app",
                     "path": folder.app.path.display().to_string(),
                     "integration_branch": null,
-                    "missing": app_missing
+                    "missing": app_missing,
+                    "moved_out": null
                 },
                 {
                     "name": "infra",
                     "path": folder.infra.path.display().to_string(),
                     "integration_branch": "main",
-                    "missing": false
+                    "missing": false,
+                    "moved_out": null
                 },
             ] })
         };
@@ -496,6 +549,49 @@ mod tests {
             query(&state, "repos.list", &json!({}), "reposListResult"),
             json!({ "repos": null })
         );
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reminds_of_the_branch_to_merge() {
+        let folder = folder("moved-out");
+        // `app` was the one repository of a project: Catervas's files are on its default branch,
+        // and the branch that removes them waits for the owner.
+        folder.app.write(".catervas/team.yaml", "a team\n");
+        folder.app.commit("Catervas's files");
+        folder
+            .app
+            .git(&["checkout", "-q", "-b", "catervas/moved-out"]);
+        folder.app.git(&["rm", "-q", "-r", ".catervas"]);
+        folder.app.git(&[
+            "commit",
+            "-q",
+            "-m",
+            "Remove Catervas's files: the team moved to the project folder",
+        ]);
+        folder.app.git(&["checkout", "-q", "main"]);
+        folder.project.record(
+            "",
+            "project.converted",
+            &json!({
+                "project_folder": folder.project.repo.path.display().to_string(),
+                "first_repo": "app",
+                "branch": "catervas/moved-out"
+            }),
+        );
+        let moved_out = |folder: &Folder| {
+            let rows = listed(folder)["repos"].clone();
+            (rows[0]["moved_out"].clone(), rows[1]["moved_out"].clone())
+        };
+
+        assert_eq!(
+            moved_out(&folder),
+            (json!("catervas/moved-out"), Value::Null)
+        );
+
+        // Merged, it is done: the integration branch no longer holds the files.
+        folder.app.git(&["merge", "-q", "catervas/moved-out"]);
+        assert_eq!(moved_out(&folder), (Value::Null, Value::Null));
     }
 
     #[test]

@@ -245,4 +245,111 @@ describe("your teams", () => {
 			),
 		).toBeTruthy();
 	});
+
+	it("offers_the_conversion_for_a_one_repo_team", async () => {
+		const { hub, sockets, open } = await renderApp("/find/teams");
+		const h = hub as FakeSocket;
+		const adding = card({
+			id: "c9",
+			kind: "add_to_team",
+			name: "web",
+			team: "shop",
+			team_name: "Shop",
+			projects: [
+				{
+					key: "/home/me/Projects/web",
+					name: "web",
+					folder: "/home/me/Projects/web",
+					services: [],
+				},
+			],
+		});
+		answerCalls(h, {
+			"proposal.get": { cards: [adding], templates: TEMPLATES },
+			"proposal.names_estimate": { usd: 0.0213, input_tokens: 3800 },
+			"finding.list": { ...NOTHING },
+			"proposal.create": {
+				made: [],
+				added: [],
+				failed: [
+					{
+						id: "c9",
+						name: "web",
+						reason:
+							"conversion_needed: adding web makes shop a team of several repositories",
+						team: "shop",
+					},
+				],
+				split: [],
+			},
+		});
+
+		fireEvent.click(
+			await screen.findByRole("button", { name: "Add the projects" }),
+		);
+
+		// The team is one repository: the card says what adding makes it, and asks to go on.
+		expect(
+			await screen.findByText(
+				"Adding web makes Shop a team of several repositories.",
+			),
+		).toBeTruthy();
+		fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+		// Continue opens the team's dialog to add a repository, with the project filled in.
+		await waitFor(() => expect(where()).toBe("/t/shop/settings/repositories"));
+		await answerQuery(h, "teams.list", teamList("shop"));
+		open();
+		const team = await waitFor(() => {
+			const found = sockets.find(
+				(one) => new URL(one.url).pathname === "/t/shop/rpc",
+			);
+			if (!found) throw new Error("no socket to the team");
+			return found;
+		});
+		open();
+		const status = {
+			project_root: "/home/me/Projects/shop",
+			paused: false,
+			signed_in: true,
+			port: 7420,
+			take_on_error: null,
+		};
+		await answerQuery(team, "serve.status", status);
+		await answerQuery(team, "team.get", {
+			team: { name: "Shop", agents: [] },
+			agents: [],
+			max_agents: 7,
+		});
+		await answerQuery(team, "repos.list", { repos: null });
+		await answerQuery(team, "serve.status", status);
+		const dialog = await screen.findByRole("dialog", {
+			name: "Add a second repository to shop",
+		});
+		await answerQuery(team, "project.convert_blockers", {
+			tasks: [],
+			catervafication: false,
+			folder_changes: [],
+		});
+		await waitFor(() =>
+			expect(
+				(
+					within(dialog).getByRole("button", {
+						name: "Continue",
+					}) as HTMLButtonElement
+				).disabled,
+			).toBe(false),
+		);
+		fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+		expect(
+			within(dialog).getByText("Second repository: ~/Projects/web"),
+		).toBeTruthy();
+		expect(
+			(
+				within(dialog).getByLabelText(
+					"Name the second repository",
+				) as HTMLInputElement
+			).value,
+		).toBe("web");
+	});
 });

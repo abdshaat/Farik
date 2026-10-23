@@ -45,3 +45,5 @@ target/
 
 # the deployment plan holds account details and stays local (ADR 0017)
 deploy/
+# Playwright's results from the browser journeys
+apps/web/test-results/

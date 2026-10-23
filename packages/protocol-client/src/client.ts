@@ -32,6 +32,7 @@ export type MethodName =
 	| "project.create"
 	| "project.create_folder"
 	| "project.leave"
+	| "project.convert"
 	| "teams.current"
 	| "teams.remove"
 	| "computer.set"

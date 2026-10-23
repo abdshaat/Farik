@@ -4,9 +4,10 @@ import { useNavigate } from "react-router";
 import { useHub } from "../../app/connection.tsx";
 import { said } from "../../app/refusals.ts";
 import { t } from "../../strings/t.ts";
+import { repoNameOf } from "../settings/AddSecondRepository.tsx";
 import { Wizard } from "../setup/Wizard.tsx";
 import styles from "./find.module.css";
-import { type FoundList, findingSaid } from "./finding.ts";
+import { type FoundList, findingSaid, tilde } from "./finding.ts";
 import { FindStepper } from "./Stepper.tsx";
 
 /** A project of a card. */
@@ -43,7 +44,7 @@ type Proposal = {
 type Created = {
 	made: { id: string; slug: string; name: string; root: string }[];
 	added: { id: string; team: string; names: string[] }[];
-	failed: { id: string; name: string; reason: string }[];
+	failed: { id: string; name: string; reason: string; team?: string }[];
 	split: { id: string; projects: string[] }[];
 };
 
@@ -61,6 +62,20 @@ function reasonSaid(reason: string): string {
 		"yourTeamsFailed",
 	);
 }
+
+/** A team of one repository that adding a card's projects would make a team of several. */
+type Conversion = {
+	id: string;
+	team: string;
+	teamName: string;
+	/** The projects' names, for the sentence. */
+	names: string;
+	/** The first project's folder, relative to home. */
+	path: string;
+};
+
+/** The code a failed card begins its reason with when its team must be converted first. */
+const CONVERSION_NEEDED = "conversion_needed";
 
 /** One team of the proposal: what it is made of, why, and what the owner can change. */
 function TeamCard(props: {
@@ -238,6 +253,7 @@ export function YourTeams() {
 	const [cost, setCost] = useState<number>();
 	const [busy, setBusy] = useState<"names" | "create">();
 	const [problems, setProblems] = useState<string[]>([]);
+	const [conversions, setConversions] = useState<Conversion[]>([]);
 
 	const load = useCallback(async () => {
 		if (!client) return;
@@ -301,16 +317,39 @@ export function YourTeams() {
 			const made = (await client?.call("proposal.create", {
 				confirmed: true,
 			})) as Created;
+			// A team of one repository takes a second only once the owner agrees to the move.
+			const convert = made.failed.filter(
+				(each) => each.reason.startsWith(CONVERSION_NEEDED) && each.team,
+			);
+			setConversions(
+				convert.map((each) => {
+					const one = (proposal?.cards ?? []).find(
+						(card) => card.id === each.id,
+					);
+					const folder = one?.projects[0]?.folder;
+					const home = folder === undefined ? undefined : tilde(folder);
+					return {
+						id: each.id,
+						team: each.team ?? "",
+						teamName: one?.teamName ?? each.team ?? "",
+						names:
+							one?.projects.map((project) => project.name).join(", ") ?? "",
+						path: (home?.startsWith("~/") ? home.slice(2) : folder) ?? "",
+					};
+				}),
+			);
 			const wrong = [
-				...made.failed.map((each) =>
-					t("yourTeamsFailedAt", {
-						name: each.name,
-						why: reasonSaid(each.reason),
-					}),
-				),
+				...made.failed
+					.filter((each) => !convert.includes(each))
+					.map((each) =>
+						t("yourTeamsFailedAt", {
+							name: each.name,
+							why: reasonSaid(each.reason),
+						}),
+					),
 				...made.split.map(() => t("yourTeamsSplit")),
 			];
-			if (wrong.length === 0) {
+			if (wrong.length === 0 && convert.length === 0) {
 				navigate("/teams", {
 					state: { created: made.made.length + made.added.length },
 				});
@@ -385,6 +424,27 @@ export function YourTeams() {
 				<p key={problem} role="alert">
 					{problem}
 				</p>
+			))}
+			{conversions.map((one) => (
+				<div key={one.id} className={styles.actions}>
+					<p>
+						{t("yourTeamsConvert", { project: one.names, team: one.teamName })}
+					</p>
+					<Button
+						onClick={() =>
+							navigate(`/t/${one.team}/settings/repositories`, {
+								state: {
+									addRepository: {
+										path: one.path,
+										name: repoNameOf(one.path.split("/").at(-1) ?? ""),
+									},
+								},
+							})
+						}
+					>
+						{t("reposContinue")}
+					</Button>
+				</div>
 			))}
 			<div className={styles.foot}>
 				<Button onClick={() => navigate("/find/together")}>

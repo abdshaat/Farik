@@ -2997,6 +2997,8 @@ export const en = {
 	yourTeamsWatched: "Watched, no team: {names}.",
 	yourTeamsFailedAt: "{name}: {why}",
 	yourTeamsFailed: "That did not go through. Try again.",
+	yourTeamsConvert:
+		"Adding {project} makes {team} a team of several repositories.",
 	yourTeamsSplit:
 		"Some projects no longer show they work together, so they are apart now. Look again.",
 	namesTitle: "Better names?",
@@ -3049,7 +3051,6 @@ export const en = {
 	sectionRepositoriesSummary: "The repositories this project works across",
 	reposName: "Name",
 	reposFolder: "Folder",
-	reposOne: "This project is one repository.",
 	reposNone: "This project's repositories are not listed yet.",
 	reposMissing: "Not found on this computer",
 	reposWhat: "What becomes of it?",
@@ -3064,6 +3065,58 @@ export const en = {
 	reposTakeItOut: "Take it out",
 	reposClose: "Close",
 	reposFailed: "That did not go through. Try again.",
+	reposOneAt:
+		"Your team works in one repository, {path}. Add another when your project spans several, such as an app and the code that runs it.",
+	reposAdd: "Add a repository",
+	reposContinue: "Continue",
+	reposAddTitle: "Add a second repository to {repo}",
+	reposAddLead:
+		"{repo} becomes a project of several repositories. Here is what changes:",
+	reposAddMoves:
+		"Your team’s notes and plans move out of {repo} into a folder on this computer only:",
+	reposAddChange: "Change",
+	reposAddBranch:
+		"Catervas leaves one change in {repo}, on the branch catervas/moved-out, that removes its old files (.catervas and docs/catervas). Merge it when you are ready; Today reminds you until you do.",
+	reposAddNothing:
+		"Nothing else in {repo} changes. Your code stays where it is. The team keeps its tasks, its history and its notes.",
+	reposAddBusy:
+		"Your team is still working in {repo}: {work}. Let them finish, or cancel them, before you add a repository.",
+	reposAddCatervafication: "the Catervafication",
+	reposAddChangesOne: "1 change to your team’s notes",
+	reposAddChangesMany: "{count} changes to your team’s notes",
+	reposAddNameFirst: "Name {repo} in this project",
+	reposAddNext: "Next, you pick the second repository.",
+	reposAddPlace: "Where the project folder goes",
+	reposAddFolderName: "Name of the project folder",
+	reposAddPickTitle: "Choose the second repository",
+	reposAddPicked: "Second repository: {path}",
+	reposAddSecondName: "Name the second repository",
+	reposAddSecondBranch: "Branch finished work goes into (optional)",
+	reposAddPlaceTitle: "Choose where the project folder goes",
+	reposAddFailed: "Catervas could not add the repository: {said}",
+	movingTitle: "Moving your team’s notes",
+	movingBody:
+		"Your team’s notes and plans are moving to {folder}. Your team pauses for a moment and carries on where it was.",
+	movingBodyAway:
+		"Your team’s notes and plans are moving to a project folder. Your team pauses for a moment and carries on where it was.",
+	movingNotice: "Copying the notes, then the team’s settings.",
+	todayMovedOutTitle: "Files to remove",
+	todayMovedOut:
+		"{repo} still holds Catervas’s old files. Merge the branch {branch} in {repo} to remove them.",
+	refuseNotOneRepo: "This project has several repositories already.",
+	refuseFolderThere:
+		"A folder with that name is already there. Choose another name or place.",
+	refuseRepoName:
+		"A repository’s name is lowercase letters and digits in words joined by dashes, starting with a letter, up to 32 characters.",
+	refuseRepoNameTaken: "Another of the project’s repositories has that name.",
+	refuseRepoPathTaken: "That repository is already in the project.",
+	refuseRepoNested:
+		"That folder and a repository already in the project are one inside the other.",
+	refuseInsideProjectFolder: "That folder is inside the project’s own folder.",
+	refuseHoldsProjectFolder:
+		"That folder holds the project’s own folder. Choose another place for the project folder.",
+	refuseNoSuchBranch: "That repository has no branch by that name.",
+	refuseTooManyRepos: "A project holds at most 16 repositories.",
 	refuseNamesFailed: "Claude could not suggest names: {why}",
 	refuseTemplateUnknown: "That is not one of your teams to start from.",
 	refuseBadName: "A team's name is 1 to 100 characters.",
@@ -3071,8 +3124,6 @@ export const en = {
 	refuseUnknownCard: "That team is not on the list any more. Look again.",
 	refuseTeamHasStarted:
 		"This team has started working. Remove it from All teams instead.",
-	refuseConversionNotAvailable:
-		"This team is one repository, and Catervas cannot yet make a project folder of it to add another.",
 	refuseNoFolder: "A project is not on this computer. Copy it here first.",
 	refuseMixedProjects:
 		"Work done through connectors and repositories cannot be one team.",

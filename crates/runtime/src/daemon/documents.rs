@@ -2563,6 +2563,7 @@ mod tests {
             clock: Arc::new(FixedClock::new(now)),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
+            converting: std::sync::Mutex::default(),
             env: std::collections::BTreeMap::new(),
             templates: None,
             #[cfg(feature = "e2e")]
