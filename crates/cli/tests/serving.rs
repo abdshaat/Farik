@@ -2535,11 +2535,13 @@ fn leaves_one_team_and_keeps_the_other() {
         )
         .is_some_and(|status| status["project_root"] == json!(root.display().to_string()))
     });
-    let written: Value = serde_json::from_str(
-        &std::fs::read_to_string(state.join("catervas/state.json")).expect("state.json"),
-    )
-    .expect("JSON");
-    assert_eq!(written["projects"], json!([root.display().to_string()]));
+    // The team's daemon frees its lock before serve hears it ended and forgets it.
+    until("state.json keeps only the other team", || {
+        std::fs::read_to_string(state.join("catervas/state.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+            .is_some_and(|written| written["projects"] == json!([root.display().to_string()]))
+    });
 
     let stopped = run(&second.path, &["stop"]);
     assert_eq!(stopped.code, 0, "{}", stopped.err);
