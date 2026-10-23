@@ -1,9 +1,13 @@
 //! The tempting corpus (`docs/SPEC.md` 4.4; ADR 0059): invented projects whose files are in
-//! `fixtures/<project>/`, 8 related pairs, one per proof kind plus a second `deploys`, and 10
+//! `fixtures/<project>/`, 9 related pairs, one per proof kind plus a second `deploys`, and 12
 //! unrelated pairs that look related and are not. The owner must never be asked to bundle two
 //! unrelated projects, so `find_proofs` must give no proof for any unrelated pair.
 
-use super::{ClaudeAiProjectText, ProjectFiles, ProofKind};
+use std::collections::{BTreeMap, BTreeSet};
+
+use chrono::{TimeZone, Utc};
+
+use super::{ClaudeAiProjectText, ProjectFiles, ProofKind, SessionNote};
 
 /// One project of the corpus: its name, its remote's owner, and its files as `(path, text)`.
 struct Entry {
@@ -208,6 +212,48 @@ const ENTRIES: &[Entry] = &[
         owner: "oak-co",
         files: &[file!("oak-sdk", "package.json")],
     },
+    // Shared work: two sessions wrote in both of the first pair. One session wrote in both of the
+    // second, and in the third pair sessions wrote in one and only read the other.
+    Entry {
+        name: "birch-api",
+        owner: "birch-co",
+        files: &[],
+    },
+    Entry {
+        name: "cedar-app",
+        owner: "cedar-co",
+        files: &[],
+    },
+    Entry {
+        name: "pearl-cms",
+        owner: "pearl-co",
+        files: &[],
+    },
+    Entry {
+        name: "ruby-mail",
+        owner: "ruby-co",
+        files: &[],
+    },
+    Entry {
+        name: "tulip-ui",
+        owner: "tulip-co",
+        files: &[],
+    },
+    Entry {
+        name: "vine-docs",
+        owner: "vine-co",
+        files: &[],
+    },
+];
+
+/// The sessions that changed files under projects of the corpus: the session, then the names of
+/// the projects it wrote in. `Corpus::session_notes` makes up each one's title and day.
+const SESSIONS: &[(&str, &[&str])] = &[
+    ("session-1", &["birch-api", "cedar-app"]),
+    ("session-2", &["birch-api", "cedar-app"]),
+    ("session-3", &["pearl-cms", "ruby-mail"]),
+    ("session-4", &["tulip-ui"]),
+    ("session-5", &["tulip-ui"]),
 ];
 
 /// The corpus: its projects, its claude.ai Project, and what must and must not be proved.
@@ -234,6 +280,42 @@ impl Corpus {
             .iter()
             .find(|project| project.name == name)
             .unwrap_or_else(|| panic!("the corpus has no project {name}"))
+    }
+
+    /// The sessions that wrote a file under the project named `name`.
+    #[must_use]
+    pub fn written_in(&self, name: &str) -> BTreeSet<String> {
+        SESSIONS
+            .iter()
+            .filter(|(_, wrote)| wrote.contains(&name))
+            .map(|(session, _)| (*session).to_string())
+            .collect()
+    }
+
+    /// What is known of each session of the corpus: a title and a day, session 1 the newest.
+    ///
+    /// # Panics
+    ///
+    /// Never in practice: the days are valid dates.
+    #[must_use]
+    pub fn session_notes(&self) -> BTreeMap<String, SessionNote> {
+        SESSIONS
+            .iter()
+            .zip(1u32..)
+            .map(|((session, _), day)| {
+                let last_at = Utc
+                    .with_ymd_and_hms(2026, 10, 25 - day, 10, 0, 0)
+                    .single()
+                    .expect("a time");
+                (
+                    (*session).to_string(),
+                    SessionNote {
+                        title: Some(format!("Work of {session}")),
+                        last_at,
+                    },
+                )
+            })
+            .collect()
     }
 
     /// The key of the project (or claude.ai Project) named `name`.
@@ -295,12 +377,15 @@ pub fn tempting_corpus() -> Corpus {
             (ProofKind::Workflow, "release-bot", "docs-hub"),
             (ProofKind::Domain, "pixel-api", "pixel-garden"),
             (ProofKind::ClaudeAiNames, "Launch notes", "orbit-cli"),
+            (ProofKind::SharedWork, "birch-api", "cedar-app"),
         ],
         unrelated: vec![
             ("alpha-site", "zeta-cli", "the same owner"),
             ("mint-notes", "quartz-tools", "the same days"),
             ("price-watch", "watch-tower", "similar names"),
             ("river-blog", "comet-lab", "a session that read both"),
+            ("pearl-cms", "ruby-mail", "one session wrote both"),
+            ("tulip-ui", "vine-docs", "sessions read both, wrote one"),
             ("dune-app", "fern-app", "both depend on react"),
             (
                 "opal-shop",

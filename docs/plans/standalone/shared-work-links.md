@@ -70,7 +70,7 @@ Tests (`crates/core/src/linking.rs`):
   - the unrelated pairs "one session wrote both" and "sessions read both, wrote one" give no proof;
   - the related pair "two sessions wrote both" gives `SharedWork`.
 
-- [ ] `feat(core): shared work proves two repositories are one team`
+- [x] `feat(core): shared work proves two repositories are one team`
 
 ### Task 2: Shared work asked first, and checked again
 
