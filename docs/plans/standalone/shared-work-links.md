@@ -93,7 +93,7 @@ Tests (`apps/web/src/pages/find/Together.test.tsx`):
   - **Yes, one team** has focus and comes first.
   - A `path_dependency` pair still shows "Do these work together?".
 
-- [ ] `feat(web): shared work is proposed as one team`
+- [x] `feat(web): shared work is proposed as one team`
 
 ### Task 4: Spec and design
 

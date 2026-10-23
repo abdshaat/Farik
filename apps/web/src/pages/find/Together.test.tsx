@@ -209,6 +209,91 @@ describe("do these work together", () => {
 		await waitFor(() => expect(where()).toBe("/find/teams"));
 	});
 
+	it("leads_with_yes_for_shared_work", async () => {
+		const { hub } = await renderApp("/find/together");
+		const h = hub as FakeSocket;
+		const shared = {
+			a: WEB,
+			b: API,
+			proof: {
+				kind: "shared_work",
+				a: WEB.key,
+				b: API.key,
+				sentence:
+					"You worked on tidepool-web and tidepool-api together in 2 sessions.",
+				ends: [
+					{
+						project: WEB.key,
+						name: "tidepool-web",
+						file: "session-2",
+						line: 0,
+						text: "Fix the login redirect · 2026-10-20",
+					},
+					{
+						project: WEB.key,
+						name: "tidepool-web",
+						file: "session-1",
+						line: 0,
+						text: "A session · 2026-10-19",
+					},
+				],
+			},
+			also: ["tidepool-web uses tidepool-api's code."],
+			hints: [],
+		};
+		let answered = 0;
+		answerCalls(h, {
+			"linking.pairs": () => ({ pairs: [shared, PAIRS[1]].slice(answered) }),
+			"linking.answer": () => {
+				answered += 1;
+				return {};
+			},
+			"linking.groups": { groups: [] },
+			"linking.maybe": { maybe: [] },
+		});
+
+		// The heading, the sentence and the order of the buttons.
+		expect(
+			await screen.findByRole("heading", { name: "These look like one team" }),
+		).toBeTruthy();
+		expect(
+			screen.getByText(
+				"You worked on tidepool-web and tidepool-api together in 2 sessions.",
+			),
+		).toBeTruthy();
+		const buttons = screen
+			.getAllByRole("button")
+			.map((button) => button.textContent);
+		expect(buttons.indexOf("Yes, one team")).toBeLessThan(
+			buttons.indexOf("No, keep separate"),
+		);
+		const yes = screen.getByRole("button", { name: "Yes, one team" });
+		await waitFor(() => expect(document.activeElement).toBe(yes));
+		expect(
+			screen.getByText(
+				"Not sure? Keep them separate. You can change it later.",
+			),
+		).toBeTruthy();
+		expect(screen.getByText("Also: it uses tidepool-api's code.")).toBeTruthy();
+
+		// The sessions are behind the info button, with no file or line.
+		fireEvent.click(screen.getByRole("button", { name: "More about this" }));
+		expect(
+			screen.getByText("Fix the login redirect · 2026-10-20"),
+		).toBeTruthy();
+		expect(screen.getByText("A session · 2026-10-19")).toBeTruthy();
+		expect(screen.queryByText(/line 0/)).toBeNull();
+		expect(screen.queryByText(/session-2/)).toBeNull();
+		expect(screen.getByText("Checked again just now.")).toBeTruthy();
+
+		// A pair proved by files keeps the old question.
+		fireEvent.click(yes);
+		expect(await screen.findByText("Question 2 of 2")).toBeTruthy();
+		expect(
+			screen.getByRole("heading", { name: "Do these work together?" }),
+		).toBeTruthy();
+	});
+
 	it("says_so_when_the_files_no_longer_prove_it", async () => {
 		const { hub } = await renderApp("/find/together");
 		const h = hub as FakeSocket;

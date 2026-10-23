@@ -2955,6 +2955,7 @@ export const en = {
 	findStepTogether: "Work together?",
 	findStepTeams: "Your teams",
 	togetherTitle: "Do these work together?",
+	togetherTitleShared: "These look like one team",
 	togetherQuestion: "Question {n} of {total}",
 	togetherMore: "More about this",
 	togetherEnd: "{name}/{file}, line {line}:",
