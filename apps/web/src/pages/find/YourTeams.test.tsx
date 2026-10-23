@@ -164,7 +164,10 @@ describe("your teams", () => {
 		const books = within(articleOf("Bookkeeping"));
 		expect(books.getByText("~/Catervas/bookkeeping")).toBeTruthy();
 		expect(books.getByText("Zoho Books")).toBeTruthy();
-		expect(screen.getByText("Watched, no team: recipe-cards.")).toBeTruthy();
+		// The watched line comes from its own query, which may answer after the cards.
+		expect(
+			await screen.findByText("Watched, no team: recipe-cards."),
+		).toBeTruthy();
 		expect(
 			screen.getByText(
 				"They start paused. Nothing is spent until you start one.",
