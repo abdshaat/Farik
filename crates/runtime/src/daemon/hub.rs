@@ -66,6 +66,9 @@ pub enum IdleStatus {
     Missing,
     /// Its drive ended with this error.
     Failed(String),
+    /// Its notes are moving into a project folder, between the drive of the repository and that of
+    /// the folder (phase 9 step 07b); its page waits for the folder under the same address.
+    Moving,
 }
 
 /// A team this serve does not drive, as `teams.list` shows it.
@@ -97,6 +100,9 @@ pub struct Hub {
     current: RwLock<Option<TeamSlug>>,
     /// The teams that are not driven, which serve keeps up to date.
     idle: Mutex<Vec<IdleTeam>>,
+    /// The teams whose notes are moving into a project folder, which stay on the list from the end
+    /// of their drive to the start of the folder's.
+    moving: Mutex<Vec<IdleTeam>>,
     /// The places, the account's sleep and the computer's day the teams share.
     slots: OnceLock<Arc<Slots>>,
     /// Where `teams.remove` says which team to stop and forget.
@@ -126,6 +132,24 @@ impl Hub {
             .idle
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = idle;
+    }
+
+    /// Lists `team` as one whose notes are moving into a project folder, until `clear_moving`.
+    pub fn mark_moving(&self, team: IdleTeam) {
+        let mut moving = self
+            .moving
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        moving.retain(|one| one.slug != team.slug);
+        moving.push(team);
+    }
+
+    /// Takes the team `slug` off the list of those whose notes are moving.
+    pub fn clear_moving(&self, slug: &TeamSlug) {
+        self.moving
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|one| one.slug != *slug);
     }
 
     /// Gives the hub the limits the teams share, for `computer.get` and `computer.set`.
@@ -182,9 +206,15 @@ impl Hub {
                 Some((slug.as_str().to_string(), root))
             })
             .collect();
+        let moving = self
+            .moving
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         roots.extend(
-            self.idle()
+            moving
                 .into_iter()
+                .chain(self.idle())
                 .map(|idle| (idle.slug.as_str().to_string(), idle.root)),
         );
         roots
@@ -204,6 +234,8 @@ impl Hub {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         teams.retain(|(name, _)| *name != slug);
+        // The drive that takes the address over ends the wait of a team whose notes moved.
+        self.clear_moving(&slug);
         state.set_reminders(slug.as_str(), Arc::clone(&self.reminders));
         state.set_analytics(
             slug.as_str(),
@@ -453,8 +485,14 @@ fn teams_list(hub: &Hub) -> Result<Value, Failure> {
             "undoable": made.contains(slug.as_str()) && !super::finding::has_started(deps),
         }));
     }
-    for idle in hub.idle() {
+    let moving = hub
+        .moving
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    for idle in moving.into_iter().chain(hub.idle()) {
         let (status, failed) = match &idle.status {
+            IdleStatus::Moving => ("moving", None),
             IdleStatus::Elsewhere => ("elsewhere", None),
             IdleStatus::Missing => ("missing", None),
             IdleStatus::Failed(why) => ("failed", Some(why.clone())),
@@ -585,6 +623,7 @@ mod tests {
             clock: Arc::clone(&deps.clock),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
+            converting: std::sync::Mutex::default(),
             env: std::collections::BTreeMap::new(),
             templates: None,
             #[cfg(feature = "e2e")]
@@ -748,6 +787,14 @@ mod tests {
                 status: IdleStatus::Failed("the log is gone".to_string()),
             },
         ]);
+        // A team whose notes are moving into a project folder stays on the list while its drive
+        // is between the two, so that its page does not leave.
+        hub.mark_moving(IdleTeam {
+            slug: TeamSlug::new("moving"),
+            name: "Moving".to_string(),
+            root: "/moving".into(),
+            status: IdleStatus::Moving,
+        });
         slots.account_asleep_until(at() + chrono::Duration::hours(2));
 
         let listed = queried(&own.daemon, "teams.list").await;
@@ -759,7 +806,9 @@ mod tests {
                 .find(|team| team["slug"] == slug)
                 .unwrap_or_else(|| panic!("no {slug} in {listed}"))
         };
-        assert_eq!(teams.len(), 4, "{listed}");
+        assert_eq!(teams.len(), 5, "{listed}");
+        assert_eq!(row("moving")["status"], "moving");
+        assert_eq!(row("moving")["root"], "/moving");
         assert_eq!(row("bakery")["status"], "running");
         assert_eq!(row("shop")["status"], "paused");
         assert_eq!(row("bakery")["today_usd"], 2.0);

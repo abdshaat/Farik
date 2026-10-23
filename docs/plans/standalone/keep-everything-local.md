@@ -2,7 +2,7 @@
 
 Status: ready
 Branch: `feat/keep-everything-local` (its own pull request to `main`)
-Spec: `docs/SPEC.md` 5.6, 5.14, 8.5 (revision 0.154); ADR 0085
+Spec: `docs/SPEC.md` 5.6, 5.14, 8.5 (revision 0.155); ADR 0085
 Depends on: `main` at `d6599bd7`
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-22, against the three readiness rules (ADR 0065)
 
@@ -103,7 +103,7 @@ Strings:
 
 ### Task 5: spec
 
-The planner wrote 5.6, 5.14, 8.5 and the header (0.154) in this branch's first commit; the executor corrects them if the built behaviour differs.
+The planner wrote 5.6, 5.14, 8.5 and the header (0.155) in this branch's first commit; the executor corrects them if the built behaviour differs.
 
 ## Verification
 

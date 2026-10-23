@@ -1394,6 +1394,51 @@ impl Git {
         self.finish_scratch(scratch, branch, made)
     }
 
+    /// Makes the branch `branch` at `from` with one commit that removes `paths` (repository
+    /// relative, each read as a path and never as a pattern), in a worktree of its own at
+    /// `scratch`, which is removed again; the checkout the owner works in is never touched.
+    /// `None`, and no branch, when `paths` is empty.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `scratch` is taken, `branch` exists or git will not make it, `from`
+    /// names nothing, a path is not tracked, or git refuses a step; the branch is deleted again
+    /// then.
+    pub fn commit_removing(
+        &self,
+        scratch: &Path,
+        branch: &str,
+        from: &str,
+        paths: &[String],
+        message: &str,
+    ) -> Result<Option<String>, GitError> {
+        self.require_repository()?;
+        if paths.is_empty() {
+            return Ok(None);
+        }
+        self.create_worktree(scratch, branch, from)?;
+        let made = (|| {
+            for chunk in paths.chunks(200) {
+                let mut remove = vec!["--literal-pathspecs", "rm", "-q", "--"];
+                remove.extend(chunk.iter().map(String::as_str));
+                run_git(scratch, &remove)?;
+            }
+            run_git(scratch, &as_someone(scratch, &["commit", "-m", message]))?;
+            run_git(scratch, &["rev-parse", "HEAD"])
+        })();
+        self.finish_scratch(scratch, branch, made)
+    }
+
+    /// The subject line of the commit `rev` names.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing.
+    pub fn commit_subject(&self, rev: &str) -> Result<String, GitError> {
+        self.require_repository()?;
+        self.at_root(&["log", "-1", "--format=%s", rev, "--"])
+    }
+
     /// Makes the branch `branch` at `from` with one commit that makes `folder` hold exactly the
     /// regular files of the directory `source`, links left out, forced past any ignore rule, in a
     /// worktree of its own at `scratch`, which is removed again. `None`, and no branch, when that
@@ -2087,6 +2132,21 @@ mod tests {
         let mut numbers = git.task_branch_numbers().expect("the refs are listed");
         numbers.sort_unstable();
         assert_eq!(numbers, [4, 9, 11]);
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn reads_a_blob_byte_for_byte() {
+        let repository = TempRepo::new("blob-bytes");
+        std::fs::write(repository.path.join("odd.bin"), [0xff_u8, 0x00]).expect("a file");
+        repository.commit("an odd file");
+        let git = repository.adapter();
+        let entries = git.tree_entries("HEAD", "odd.bin").expect("the tree reads");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            git.blob_bytes(&entries[0].blob).expect("the blob reads"),
+            [0xff, 0x00]
+        );
     }
 
     #[test]

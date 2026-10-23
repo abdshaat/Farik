@@ -47,6 +47,7 @@ pub(crate) mod ads_calls;
 pub mod analytics;
 mod app;
 mod board;
+pub mod convert;
 mod documents;
 pub mod finding;
 #[cfg(test)]
@@ -493,6 +494,22 @@ impl DaemonState {
     pub fn left(&self) -> Option<PathBuf> {
         self.web()
             .and_then(|web| crate::locked(&web.leaving).clone())
+    }
+
+    /// Says on `serve.status` why the move into a project folder that ended the drive before this
+    /// one failed, or nothing: the page shows it until the next drive.
+    pub fn set_take_on_error(&self, said: Option<String>) {
+        if let Some(web) = self.web() {
+            *crate::locked(&web.take_on_error) = said;
+        }
+    }
+
+    /// The move into a project folder `project.convert` asked for, if it was asked to; serve reads
+    /// it once the run has stopped.
+    #[must_use]
+    pub fn converting(&self) -> Option<convert::Conversion> {
+        self.web()
+            .and_then(|web| crate::locked(&web.converting).clone())
     }
 
     /// Keeps the agents' connector keys in `secrets` from now on. Answers `true`, or `false` when

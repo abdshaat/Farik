@@ -160,6 +160,38 @@ describe("today", () => {
 		).toBeTruthy();
 	});
 
+	it("reminds_of_the_branch_to_merge", async () => {
+		const { s } = await today({});
+		const member = (name: string, movedOut: string | null) => ({
+			name,
+			path: `/home/me/Projects/${name}`,
+			integration_branch: null,
+			missing: false,
+			moved_out: movedOut,
+		});
+		await answerQuery(s, "repos.list", {
+			repos: [
+				member("corner-bakery", "catervas/moved-out"),
+				member("web", null),
+			],
+		});
+		// The repository the team moved out of still holds its old files until the branch is merged.
+		expect(
+			await screen.findByText(
+				"corner-bakery still holds Catervas’s old files. Merge the branch catervas/moved-out in corner-bakery to remove them.",
+			),
+		).toBeTruthy();
+		expect(screen.queryByText(/web still holds/)).toBeNull();
+	});
+
+	it("reminds_of_no_branch_when_none_waits", async () => {
+		const { s } = await today({});
+		await answerQuery(s, "repos.list", { repos: null });
+		await answerQuery(s, "moved.since", { moved: [] });
+		expect(await screen.findByText(en.movedTitle)).toBeTruthy();
+		expect(screen.queryByText(/still holds Catervas/)).toBeNull();
+	});
+
 	it("shows_what_the_team_flagged_and_did_on_its_own", async () => {
 		const at = new Date().toISOString();
 		const { container } = await today({

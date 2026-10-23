@@ -380,6 +380,7 @@ mod tests {
             clock: Arc::new(FixedClock::new(at())),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
+            converting: std::sync::Mutex::default(),
             env: BTreeMap::new(),
             templates: folder.map(Templates::new),
             #[cfg(feature = "e2e")]

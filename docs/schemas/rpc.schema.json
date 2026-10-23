@@ -75,6 +75,7 @@
         "files.tree",
         "files.read",
         "repos.list",
+        "project.convert_blockers",
         "teams.list",
         "computer.get"
       ]
@@ -325,6 +326,9 @@
             },
             {
               "$ref": "#/$defs/reposListQuery"
+            },
+            {
+              "$ref": "#/$defs/projectConvertBlockersQuery"
             },
             {
               "$ref": "#/$defs/teamsListQuery"
@@ -709,6 +713,9 @@
         },
         {
           "$ref": "#/$defs/repoLocateRequest"
+        },
+        {
+          "$ref": "#/$defs/projectConvertRequest"
         },
         {
           "$ref": "#/$defs/filesAskChangeRequest"
@@ -3184,6 +3191,60 @@
         }
       }
     },
+    "projectConvertBlockersQuery": {
+      "title": "Project Convert Blockers Query",
+      "description": "What holds a one-repo project from gaining a second repository (docs/SPEC.md 4.4; phase 9 step 07b), as projectConvertBlockersResult shapes it. Asked so that the dialog says it before the owner fills anything in.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "project.convert_blockers" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "projectConvertBlockersResult": {
+      "description": "tasks are the ids of the tasks in progress (assigned, in progress, blocked, verifying, rejected, accepted and awaiting integration, escalated with their branch still in the repository, and any task Catervas filed for the owner that is not accepted or cancelled), catervafication whether the Catervafication of the one repository is still open, and folder_changes the numbers of the changes to the team's notes neither integrated nor escalated. A move waits while any is set.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks", "catervafication", "folder_changes"],
+      "properties": {
+        "tasks": { "type": "array", "items": { "type": "string", "pattern": "^CTV-[0-9]{1,6}$" } },
+        "catervafication": { "type": "boolean" },
+        "folder_changes": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "projectConvertRequest": {
+      "title": "Project Convert Request",
+      "description": "Adds a second repository to a project of one (docs/SPEC.md 4.4; phase 9 step 07b): first_name names the current repository as a member, parent and name place the project folder as project.create_folder's do, and second is the repository that joins, its path relative to home. Refused with -32005 and data.errors, each with path (a JSON pointer), message and code, in this order: not_one_repo (/), work_in_progress (/), project_name (/name), outside_home (/parent), folder_there (/name), repo_name (/first_name), holds_project_folder (/parent), then for second path_taken, not_there, outside_home, home_itself, not_a_repository, not_the_top, has_team, nested (/second/path), name_taken, repo_name (/second/name) and no_such_branch (/second/integration_branch). Nothing is made by the call: it stores the conversion and stops the team's run, and catervas serve makes the project folder, moves the team and documents into it, and drives it on the same port. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "project.convert" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["first_name", "parent", "name", "second"],
+          "properties": {
+            "first_name": { "type": "string" },
+            "parent": { "type": "string" },
+            "name": { "type": "string" },
+            "second": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "path"],
+              "properties": {
+                "name": { "type": "string" },
+                "path": { "type": "string", "description": "The repository's top folder, relative to home." },
+                "integration_branch": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "reposListQuery": {
       "title": "Repos List Query",
       "description": "The member repositories of a project folder (docs/SPEC.md 4.1; ADR 0057), as reposListResult shapes them. A project of one repository has no .catervas/repos.yaml and answers repos null.",
@@ -3196,7 +3257,7 @@
       }
     },
     "reposListResult": {
-      "description": "repos is null for a project of one repository, else the members in the order .catervas/repos.yaml lists them: name, path (canonical, absolute), integration_branch as written or null for the repository's default branch, and missing, true when path is not a directory or git's top folder of it is not path itself (a fact read when asked, with no event).",
+      "description": "repos is null for a project of one repository, else the members in the order .catervas/repos.yaml lists them: name, path (canonical, absolute), integration_branch as written or null for the repository's default branch, missing, true when path is not a directory or git's top folder of it is not path itself (a fact read when asked, with no event), and moved_out, the branch a one-repo project's move left in the first member for the owner to merge, else null.",
       "type": "object",
       "additionalProperties": false,
       "required": ["repos"],
@@ -3206,12 +3267,13 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "path", "integration_branch", "missing"],
+            "required": ["name", "path", "integration_branch", "missing", "moved_out"],
             "properties": {
               "name": { "type": "string" },
               "path": { "type": "string" },
               "integration_branch": { "type": ["string", "null"] },
-              "missing": { "type": "boolean" }
+              "missing": { "type": "boolean" },
+              "moved_out": { "type": ["string", "null"], "description": "The branch catervas/moved-out (or -<n>) that project.converted made in this member, while its integration branch still holds .catervas/team.yaml: the owner is to merge it to remove the files Catervas kept there. Else null." }
             }
           }
         }
@@ -3229,7 +3291,7 @@
       }
     },
     "teamsListResult": {
-      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month), undoable (a team Catervas made from the proposal whose log has no session.started: teams.undo takes it back). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
+      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error, moving while its notes move into a project folder, between its drive and the folder's, which has the same address), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month), undoable (a team Catervas made from the proposal whose log has no session.started: teams.undo takes it back). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
       "type": "object",
       "additionalProperties": false,
       "required": ["teams", "current", "account_asleep_until"],
@@ -3244,7 +3306,7 @@
               "slug": { "type": "string" },
               "name": { "type": "string" },
               "root": { "type": "string" },
-              "status": { "enum": ["running", "paused", "elsewhere", "missing", "failed"] },
+              "status": { "enum": ["running", "paused", "elsewhere", "missing", "failed", "moving"] },
               "failed": { "type": "string" },
               "working_agents": { "type": "integer", "minimum": 0 },
               "waiting": { "type": "integer", "minimum": 0 },
@@ -4537,7 +4599,7 @@
     },
     "proposalCreateRequest": {
       "title": "Proposal Create Request",
-      "description": "Makes the teams of the cards, each alone and paused (docs/SPEC.md 4.1, 4.4; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. ids names the cards to make, else every card; only names project keys, and makes the cards whose projects are all among them. The proofs of each card's links are checked again first: a card whose proof no longer holds is split back into its projects, and the answer says which. A new_team card makes one team (a folder of the owner's, a project folder for several repositories, or a new folder for work done through connectors); an add_to_team card adds its projects as repositories to the team. A card that fails stops only itself. Answers proposalCreateResult.",
+      "description": "Makes the teams of the cards, each alone and paused (docs/SPEC.md 4.1, 4.4; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. ids names the cards to make, else every card; only names project keys, and makes the cards whose projects are all among them. The proofs of each card's links are checked again first: a card whose proof no longer holds is split back into its projects, and the answer says which. A new_team card makes one team (a folder of the owner's, a project folder for several repositories, or a new folder for work done through connectors); an add_to_team card adds its projects as repositories to the team, unless the team is one repository: then the card fails with conversion_needed and the team's slug, and nothing changes until the owner agrees to the move in that team's Settings. A card that fails stops only itself. Answers proposalCreateResult.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -5295,7 +5357,7 @@
       }
     },
     "proposalCreateResult": {
-      "description": "made: a team made (card id, slug, name, root); added: projects added to a team (card id, team, the names added); failed: a card that failed (card id, name, reason beginning with its code); split: a card whose proof no longer held, with the keys of its projects, which were made apart.",
+      "description": "made: a team made (card id, slug, name, root); added: projects added to a team (card id, team, the names added); failed: a card that failed (card id, name, reason beginning with its code, and for conversion_needed the team that must be converted first); split: a card whose proof no longer held, with the keys of its projects, which were made apart.",
       "type": "object",
       "additionalProperties": false,
       "required": ["made", "added", "failed", "split"],
@@ -5324,7 +5386,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["id", "name", "reason"],
-            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "reason": { "type": "string" } }
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "reason": { "type": "string" }, "team": { "type": "string", "description": "Only for conversion_needed: the slug of the team of one repository that adding the card's projects makes a team of several." } }
           }
         },
         "split": {

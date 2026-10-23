@@ -106,6 +106,11 @@ pub use crate::generated::event::{
 };
 /// The channel's vocabularies, named for what they are rather than for the body they sit in.
 pub use crate::generated::event::{MessagePostedBodyKind as MessageKind, Thread};
+/// The bodies of the three `repo.` kinds: a repository joined a project folder, left it, or was
+/// found at a new path.
+pub use crate::generated::event::{
+    ProjectConvertedBody, RepoAddedBody, RepoMovedBody, RepoRemovedBody,
+};
 /// The bodies of the eight `purchase_order.` kinds, with the vocabularies they repeat: an
 /// approval, a rejection and a closing share one.
 pub use crate::generated::event::{
@@ -115,9 +120,6 @@ pub use crate::generated::event::{
 };
 /// The bodies of the three `renewal.` kinds.
 pub use crate::generated::event::{RenewalCheckedBody, RenewalDismissedBody, RenewalFlaggedBody};
-/// The bodies of the three `repo.` kinds: a repository joined a project folder, left it, or was
-/// found at a new path.
-pub use crate::generated::event::{RepoAddedBody, RepoMovedBody, RepoRemovedBody};
 /// The bodies of the four `site.` kinds: an approval, a decline and a removal share one.
 pub use crate::generated::event::{SiteDecisionBody, SiteRequestedBody};
 /// The bodies of the six `social_post.` kinds, with the vocabularies they repeat.
@@ -301,6 +303,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::RepoAdded => "repoAddedBody",
         EventKind::RepoRemoved => "repoRemovedBody",
         EventKind::RepoMoved => "repoMovedBody",
+        EventKind::ProjectConverted => "projectConvertedBody",
         EventKind::DocumentRewriteStarted => "documentRewriteStartedBody",
         EventKind::DeliveryClosed => "deliveryClosedBody",
         EventKind::TaskReassigned => "taskReassignedBody",
@@ -560,6 +563,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::RepoAdded(_)
         | EventBody::RepoRemoved(_)
         | EventBody::RepoMoved(_)
+        | EventBody::ProjectConverted(_)
         | EventBody::DocumentRewriteStarted(_)
         | EventBody::DeliveryClosed(_)
         | EventBody::TaskReassigned(_)
@@ -584,7 +588,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 141] = [
+pub const EVERY_KIND: [EventKind; 142] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -701,6 +705,7 @@ pub const EVERY_KIND: [EventKind; 141] = [
     EventKind::RepoAdded,
     EventKind::RepoRemoved,
     EventKind::RepoMoved,
+    EventKind::ProjectConverted,
     EventKind::DocumentRewriteStarted,
     EventKind::DeliveryClosed,
     EventKind::TaskReassigned,
@@ -1118,6 +1123,9 @@ pub enum EventBody {
     /// A member repository was found at a new path.
     #[serde(rename = "repo.moved")]
     RepoMoved(RepoMovedBody),
+    /// A one-repo project became a project folder.
+    #[serde(rename = "project.converted")]
+    ProjectConverted(ProjectConvertedBody),
     /// The owner asked the team to rewrite its Markdown documents as HTML: the tasks filed.
     #[serde(rename = "document_rewrite.started")]
     DocumentRewriteStarted(DocumentRewriteStartedBody),
@@ -1315,6 +1323,7 @@ impl EventBody {
             Self::RepoAdded(_) => EventKind::RepoAdded,
             Self::RepoRemoved(_) => EventKind::RepoRemoved,
             Self::RepoMoved(_) => EventKind::RepoMoved,
+            Self::ProjectConverted(_) => EventKind::ProjectConverted,
             Self::DocumentRewriteStarted(_) => EventKind::DocumentRewriteStarted,
             Self::DeliveryClosed(_) => EventKind::DeliveryClosed,
             Self::TaskReassigned(_) => EventKind::TaskReassigned,
@@ -2410,7 +2419,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
     }
 
     #[test]
@@ -2439,7 +2448,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2700,6 +2709,50 @@ mod tests {
     }
 
     #[test]
+    fn reads_a_project_converted_event() {
+        assert!(EVERY_KIND.contains(&EventKind::ProjectConverted));
+        let wire = a_full_event_wire(EventKind::ProjectConverted);
+        assert_eq!(
+            wire["body"],
+            json!({
+                "project_folder": "/home/me/Catervas/corner-bakery",
+                "first_repo": "corner-bakery",
+                "branch": "catervas/moved-out"
+            })
+        );
+        let event = event_from_value(&wire).expect("a valid project.converted event");
+        assert_eq!(event.body.kind(), EventKind::ProjectConverted);
+        assert_eq!(event_to_value(&event), wire);
+        assert!(!is_about_one_contract(EventKind::ProjectConverted));
+
+        let mut later_branch = wire.clone();
+        later_branch["body"]["branch"] = json!("catervas/moved-out-2");
+        assert!(event_from_value(&later_branch).is_ok());
+
+        let mut bad_repo = wire.clone();
+        bad_repo["body"]["first_repo"] = json!("Corner");
+        let paths: Vec<String> = refusal(&bad_repo).into_iter().map(|e| e.path).collect();
+        assert_eq!(paths, ["/body/first_repo"]);
+
+        let mut no_folder = wire.clone();
+        no_folder["body"]["project_folder"] = json!("");
+        let paths: Vec<String> = refusal(&no_folder).into_iter().map(|e| e.path).collect();
+        assert!(!paths.is_empty());
+        assert!(paths.iter().all(|path| path == "/body/project_folder"));
+
+        // A repository that kept nothing in git has no branch to merge.
+        let mut none = wire.clone();
+        none["body"]["branch"] = json!(null);
+        let event = event_from_value(&none).expect("a null branch is no branch");
+        assert_eq!(event_to_value(&event), none);
+
+        let mut main = wire.clone();
+        main["body"]["branch"] = json!("main");
+        let paths: Vec<String> = refusal(&main).into_iter().map(|e| e.path).collect();
+        assert_eq!(paths, ["/body/branch"]);
+    }
+
+    #[test]
     fn copies_the_repository_rules_into_the_events() {
         // The event schema takes no external reference, so each repo.* body repeats the name's
         // pattern and the path's bounds that repos.schema.json owns; this stops a copy drifting.
@@ -2926,7 +2979,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -3067,7 +3120,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3382,7 +3435,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);
