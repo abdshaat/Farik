@@ -1,7 +1,7 @@
 # Phase 9, step 07b: A one-repo project gains a second repository
 
-Status: ready (readiness review 2026-10-12, three rounds, findings folded)
-Branch: `phase/9-multi-repo-projects` (the phase branch; steps do not get their own)
+Status: ready (readiness review 2026-10-12, three rounds, findings folded; amended 2026-10-23 for phase 10, below)
+Branch: `feat/one-team-across-repositories`, its own pull request to `main`. Phase 9 merged in #45 without this step, and phase 10 merged in #91.
 Spec: `docs/SPEC.md` 4.4, 8.4, 8.5; F1
 Depends on these steps of this phase, planned (01 to 06 ready, 07 drafted), not yet executed:
 - step 01: the project folder, `repos.yaml`, `member_root`, `check_member`, the member refusals, `repos.list`, `repo.added`, `home_of`, `Git::has_local_branch`
@@ -18,6 +18,39 @@ Readiness confirmed by: a fresh-session Opus reviewer, 2026-10-12. Round 1: not 
 Amended 2026-10-13 for the HTML documents merged from main (ADR 0058); status: ready.
 
 Signatures, not bodies; test names and what each asserts, not test code; around 300 lines at most (ADR 0008). Line numbers are at 93593b6.
+
+
+## Amended 2026-10-23, for the several teams of phase 10
+
+The founder, 2026-10-23: "Yes 1 team could operate across repositories". The answer was to the question whether to build this step, now that phase 10's "Your teams" refuses to link a project to a one-repo team (`conversion_not_available`).
+
+The plan below stands, except where this section says otherwise. Line numbers below are at `93593b6`; the code on `main` (`101aaf2e`) wins, so find the named function.
+
+- **Several teams in one serve (phase 10 step 05).**
+  - Serve no longer switches one project. It drives every team behind a hub (`crates/runtime/src/daemon/hub.rs`), and each team is a drive on serve's one task (`crates/cli/src/serve.rs`, `FuturesUnordered`).
+  - The conversion stops only the converting team's drive, as `project.leave` does for one team. It runs `convert`, then:
+    - takes the old root out of `state.json`'s `projects` and the hub (`set_removals`);
+    - remembers the project folder and starts its drive through the path that adds a team (`set_additions`).
+
+    Every other team keeps running.
+  - `Driven::Converted` is that drive's outcome, not a serve-wide mode.
+  - On a failure before the commit point, the old root's drive starts again with `said` set. Its `WebState.take_on_error` shows the sentence as the plan says.
+- **The page.** Step 06e built `apps/web/src/pages/settings/Repositories.tsx`, with "This doesn't belong here" per row. This step adds "Add a repository" there in its one-repo view.
+  - The team's pages are under `/t/<team>/` (step 05b). After the move the team's address may change slug, since it is the project folder's team name and its team is the same. The page reopens on the hub and lands on `/t/<new slug>/settings/repositories`, found through `teams.list` by the project folder's root.
+- **Linking into a one-repo team (phase 10 step 06e).**
+  - `proposal.create`'s `add_to_team` card for a one-repo team no longer answers `conversion_not_available`. It answers `conversion_needed { team: slug }`.
+  - The "Your teams" card then shows "Adding <project> makes <team> a team of several repositories." with a **Continue** button. Continue opens this step's `AddSecondRepository` dialog for that team, with the second repository filled in from the card.
+  - The owner confirms there, as for any conversion. Nothing is converted without the dialog.
+  - The test `adds_a_linked_project_to_the_team_it_works_with` (`crates/cli/tests/serving.rs`) changes to assert `conversion_needed`.
+- **Sprints.** "Its sprints" in the Goal reads as its deliveries since ADR 0062. Everything in `.catervas/` moves.
+- **Spec.** The spec revision is the next free one above the newest in `docs/SPEC.md`.
+- **Task 7 is added after Task 5:** "Linking a project into a one-repo team asks for the conversion". Files: `crates/runtime/src/daemon/finding/proposal.rs`, `apps/web/src/pages/find/YourTeams.tsx`, `crates/cli/tests/serving.rs`, `apps/web/src/pages/find/YourTeams.test.tsx`. Its tests:
+  - `asks_to_convert_a_one_repo_team_before_linking` (serving, ignored): asserts that `proposal.create` gives a one-repo team's card `conversion_needed`, and that the team is untouched.
+  - `offers_the_conversion_for_a_one_repo_team` (web): asserts that the card shows the sentence, and that **Continue** opens the dialog filled with the project.
+  - Commit: `feat(web): linking into a one-repo team asks to make it a team of several repositories`.
+  - Built as: `proposal.create`'s failed row for such a card begins `conversion_needed:` and carries `team` (the slug); "Your teams" shows "Adding <project> makes <team> a team of several repositories." with **Continue**, which goes to `/t/<team>/settings/repositories` with the project in the router's state, where `AddSecondRepository` opens with it as the second repository. The dialog's call goes to that team's socket, which "Your teams", a page of the hub, has not.
+
+- [x] `feat(web): linking into a one-repo team asks to make it a team of several repositories`
 
 ## Goal
 
@@ -167,7 +200,7 @@ Files: the event's files; `projections.rs`'s pass arm.
 
 - `reads_a_project_converted_event`: `{ project_folder: "/home/me/Catervas/corner-bakery", first_repo: "corner-bakery", branch: "catervas/moved-out" }` reads and writes back unchanged. `first_repo: "Corner"` is refused at `/body/first_repo`, an empty `project_folder` at `/body/project_folder`, and `branch: "main"` at `/body/branch`. It is about no contract; `EVERY_KIND`'s length asserts move by one. RED.
 
-- [ ] `feat(protocol): record a project's move to a project folder`
+- [x] `feat(protocol): record a project's move to a project folder`
 
 ### Task 2: Asking for the move
 
@@ -190,7 +223,7 @@ Files: `store/src/convert.rs`, `git.rs`, `team.rs`, `web.rs`, `daemon.rs`, `rpc.
   RED.
 - `stops_the_run_for_the_move`: with nothing in the way, `project.convert` answers `{}`, `converting()` holds the asked conversion, and the run is stopped as `project_leave_stops_the_run_and_marks_the_project_left` (`web.rs:2849`) checks. RED.
 
-- [ ] `feat(runtime): ask to move a one-repo project into a project folder`
+- [x] `feat(runtime): ask to move a one-repo project into a project folder`
 
 ### Task 3: The move
 
@@ -222,7 +255,7 @@ Files: `convert.rs`; `lib.rs`; `readiness.rs` (`is_a_document_path` made `pub`).
 - `counts_again_before_moving`: with `CTV-3` moved to `assigned` after the ask and before `convert`, `convert` fails with `work_in_progress`'s sentence naming `CTV-3`, and nothing is made. RED.
 - `refuses_a_half_made_project_folder`: a project folder holding `converting` (the move stopped after step 9) is refused by `open_project` and `found`, a `moved-to` naming it is ignored, and `convert` asked again with the same place clears it, deletes the stale `catervas/moved-out`, and moves, its branch named `catervas/moved-out` again. With the stop after step 8's worktree was added (the folder removed, the worktree still registered), the retry moves too. An empty folder at the place is used. RED.
 
-- [ ] `feat(cli): move a one-repo project's team into a project folder`
+- [x] `feat(cli): move a one-repo project's team into a project folder`
 
 ### Task 4: The switch, and after it
 
@@ -235,7 +268,13 @@ Files: `serve.rs`; `setup.rs`; `project.rs`; `daemon/repos.rs`; `catervafication
 - `covers_the_first_member_after_a_move` (`catervafication.rs`): with a `Repository`-scope `catervafication.started` and then `project.converted { first_repo: bakery }`, `covered_repos` is `{bakery}` and `offered_repos` is `[web]`. `catervafication_start { repo: "web" }` with no `system` document in either format on `main` files "Map how the repositories connect", depending on `web`'s Architect task. RED.
 - `reminds_of_the_branch_to_merge` (`daemon/repos.rs`, on `TestProject`'s project folder with a `project.converted` naming `bakery` and the branch made in `bakery`): at first, `repos.list`'s `bakery` row has `moved_out: "catervas/moved-out"`. Once that branch is merged into its integration branch, it is `null`. `web`'s is `null`. RED.
 
-- [ ] `feat(cli): drive the project folder a repository moved into`
+Built differently, 2026-10-23:
+- `covers_the_first_member_after_a_move` and the two changes to step 06 it holds (`covered_repos` after a move; a member's own Catervafication writing the system map first) are not built: step 06's `Scope`, `covered_repos`, `offered_repos` and `catervafication_start { repo }` were never built in phase 9, whose Catervafication hunts each member instead (`catervafication.rs`, `hunt_members`). There is nothing to teach about a move. A second member's own Catervafication waits for step 06.
+- `project.converted`'s `branch` is `null` when the repository kept nothing in git (no tracked path under `.catervas/` or `docs/catervas/`), so that no empty branch is made; `repos.list`'s `moved_out` is then `null` too.
+- `tasks.list` rows carry no `repo`; `adds_a_second_repository_from_the_browser` reads it in the moved contract file.
+- `member_root` gained `member_root_in(home, path, project_folder)`, which `repo.add`, `repo.locate` and `online` call with the project folder; the plain `member_root` stays for the callers that name none.
+
+- [x] `feat(cli): drive the project folder a repository moved into`
 
 ### Task 5: The dialog and Today's reminder
 
@@ -253,7 +292,13 @@ Files: `Repositories.tsx`; `AddSecondRepository.tsx`; `Today.tsx`; `refusals.ts`
 - `reopens_for_longer_when_asked` (`connection.test.tsx`): `reopen(600_000)` keeps retrying past 30 s; `reopen()` stops at 30 s as today. RED.
 - `reminds_of_the_branch_to_merge` (`Today.test.tsx`): a `repos.list` row with `moved_out: "catervas/moved-out"` shows the reminder naming the repository and the branch. `null` shows none. RED.
 
-- [ ] `feat(web): add a second repository to a one-repo project`
+Built differently, 2026-10-23:
+- The Task 5 tests are in `Repositories.test.tsx`, where the page's tests are, not `settings.test.tsx`.
+- `repoNameOf` and `fillOf` of step 07 do not exist; `AddSecondRepository.tsx` holds `repoNameOf`, and fills the held-move sentence from the daemon's own.
+- The team keeps its address through the move, so there is no landing by `teams.list`'s root. While its notes move the hub lists the team as `moving` under that address (`Hub::mark_moving`; `teamsListResult` gains the status, and `TeamGate` shows "Moving your team's notes"), so that its page waits instead of leaving for All teams.
+- `AddSecondRepository` takes `second` (a repository chosen already) and `onMoved`, which Task 7's "Continue" uses.
+
+- [x] `feat(web): add a second repository to a one-repo project`
 
 ### Task 6: Spec
 
@@ -265,7 +310,7 @@ Files: `Repositories.tsx`; `AddSecondRepository.tsx`; `Today.tsx`; `refusals.ts`
 
 `docs/design/multi-repo-projects.md`'s "A one-repo project gains a second repository" is changed: the removal is a branch for the owner to merge, not a change integrated by the team's policy; the move waits for work in progress; its Events list gives `project.converted` its `branch`.
 
-- [ ] `docs(spec): record a one-repo project gaining a second repository`
+- [x] `docs(spec): record a one-repo project gaining a second repository`
 
 ## Verification
 

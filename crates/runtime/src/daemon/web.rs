@@ -32,7 +32,9 @@ use super::setup::list_folders;
 use super::{
     DaemonError, DaemonState, MemberRequest, SetupError, SetupHost, hex, random_token, same_token,
 };
-use super::{analytics, board, documents, finding, gates, hub, reminders, repos, team, templates};
+use super::{
+    analytics, board, convert, documents, finding, gates, hub, reminders, repos, team, templates,
+};
 use catervas_core::claude_account::AccountStatus;
 
 use crate::account::AccountPort;
@@ -63,6 +65,9 @@ pub struct WebState {
     /// The project being left, which `project.leave` sets and `serve.status` tells the page; in
     /// setup mode, the one the wizard was reached from, so **Stay on** can go back to it.
     pub leaving: Mutex<Option<PathBuf>>,
+    /// The move into a project folder `project.convert` asked for, which serve makes once the run
+    /// has stopped (phase 9 step 07b).
+    pub converting: Mutex<Option<super::convert::Conversion>>,
     /// The environment `catervas serve` was given, which an AI account's key may come from.
     pub env: BTreeMap<String, String>,
     /// Where saved teams are kept: the state folder's `templates/`, or `None` when there is no
@@ -745,6 +750,7 @@ fn known_method(method: &str) -> bool {
         || templates::METHODS.contains(&method)
         || documents::METHODS.contains(&method)
         || repos::METHODS.contains(&method)
+        || convert::METHODS.contains(&method)
         || hub::METHODS.contains(&method)
         || finding::METHODS.contains(&method)
         || reminders::METHODS.contains(&method)
@@ -824,6 +830,7 @@ pub(super) async fn answer(state: &Arc<DaemonState>, text: &str, sent: &mut Opti
             documents::call(state, method, params).await
         }
         method if repos::METHODS.contains(&method) => repos::call(state, method, params).await,
+        method if convert::METHODS.contains(&method) => convert::call(state, method, params).await,
         method if hub::METHODS.contains(&method) => hub::call(state, method, params),
         method if finding::METHODS.contains(&method) => {
             finding::call_blocking(state, method, params).await
@@ -984,6 +991,7 @@ fn query(
         name if board::QUERIES.contains(&name) => board::query(deps, name, params),
         name if documents::QUERIES.contains(&name) => documents::query(deps, name, params),
         name if repos::QUERIES.contains(&name) => repos::query(deps, name, params),
+        name if convert::QUERIES.contains(&name) => convert::query(deps, name),
         name if templates::QUERIES.contains(&name) => templates::query(state, deps, name, params),
         _ => gates::query(state, deps, name, params),
     }
@@ -1406,6 +1414,7 @@ pub(super) mod tests {
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
+            converting: std::sync::Mutex::default(),
             env: std::collections::BTreeMap::new(),
             templates: None,
             #[cfg(feature = "e2e")]
@@ -1888,6 +1897,7 @@ pub(super) mod tests {
             clock: Arc::clone(&state.deps().expect("a project").clock),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
+            converting: std::sync::Mutex::default(),
             env: std::collections::BTreeMap::new(),
             templates: None,
             #[cfg(feature = "e2e")]
@@ -3299,6 +3309,7 @@ pub(super) mod tests {
             clock: Arc::new(FixedClock::new(now())),
             take_on_error: std::sync::Mutex::default(),
             leaving: std::sync::Mutex::default(),
+            converting: std::sync::Mutex::default(),
             env: std::collections::BTreeMap::new(),
             templates: None,
             #[cfg(feature = "e2e")]

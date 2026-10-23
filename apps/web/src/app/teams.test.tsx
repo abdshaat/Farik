@@ -1,5 +1,6 @@
-import { cleanup, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { en } from "../strings/en.ts";
 import type { FakeSocket } from "../test/fake-socket.ts";
 import {
 	answerQuery,
@@ -82,5 +83,23 @@ describe("several teams in the address", () => {
 		expect(where()).toBe("/");
 		await answerQuery(h, "teams.list", teamList("bakery"));
 		await waitFor(() => expect(where()).toBe("/t/bakery/"), { timeout: 3000 });
+	});
+
+	it("waits_on_its_own_address_while_the_team_s_notes_move", async () => {
+		const rendered = await renderApp("/t/shop/settings/repositories");
+		const h = rendered.hub as FakeSocket;
+		const listed = (status: string) => {
+			const list = teamList("shop");
+			return {
+				...list,
+				teams: list.teams.map((team) => ({ ...team, status })),
+			};
+		};
+		// The team is between its drives: the hub still lists it, as moving. Its page says so and
+		// stays on the address, rather than leaving for All teams.
+		await answerQuery(h, "teams.list", listed("moving"));
+		expect(await screen.findByText(en.movingTitle)).toBeTruthy();
+		expect(where()).toBe("/t/shop/settings/repositories");
+		expect(screen.queryByText(en.teamNotRunning)).toBeNull();
 	});
 });

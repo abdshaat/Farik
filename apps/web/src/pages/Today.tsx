@@ -170,6 +170,27 @@ const isAds = (kind: Waiting["kind"]): kind is AdsAsk["kind"] =>
 	kind === "marketing_spend_unread";
 
 /** The home page: the team, the request box, what waits on the human, and what moved. */
+/**
+ * A project that was one repository once keeps the branch that removes Catervas's old files from
+ * that repository, for the owner to merge; Today reminds them until they do (phase 9 step 07b).
+ */
+function MovedOut() {
+	const { data } = useQuery<{
+		repos: { name: string; movedOut?: string | null }[] | null;
+	}>("repos.list", {});
+	const rows = (data?.repos ?? []).filter((repo) => repo.movedOut);
+	if (rows.length === 0) return null;
+	return (
+		<section className={styles.section} aria-label={t("todayMovedOutTitle")}>
+			{rows.map((repo) => (
+				<p key={repo.name}>
+					{t("todayMovedOut", { repo: repo.name, branch: repo.movedOut ?? "" })}
+				</p>
+			))}
+		</section>
+	);
+}
+
 export function Today() {
 	const { data: team } = useQuery<{
 		team: Team;
@@ -339,6 +360,7 @@ export function Today() {
 			{documenting?.offered && (
 				<CatervaficationCard again={askDocumentingAgain} />
 			)}
+			<MovedOut />
 			<NeedsYouPart />
 			{autopilot && (
 				<FlaggedByTheTeam rows={autopilot.flagged} agents={agents} />

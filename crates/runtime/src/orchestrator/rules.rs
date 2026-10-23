@@ -3842,6 +3842,77 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn a_ready_task_still_goes_to_work() {
+        // The contract as the move writes it: a ready Developer's task that gained the repository
+        // `app`, after `project.converted`.
+        let (harness, members) = Harness::project_folder("orch-moved-ready", &["app", "infra"]);
+        harness.file("CTV-1", "ready", |wire| {
+            wire["repo"] = json!("app");
+            wire["allowed_paths"] = json!(["src/**"]);
+        });
+        let app = &members[0];
+        app.git(&["checkout", "-b", "release"]);
+        app.write("r.txt", "one\n");
+        app.commit("add r.txt");
+        app.git(&["checkout", "main"]);
+        harness
+            .project
+            .deps
+            .files
+            .write_repos(
+                &catervas_core::repos::validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": app.path.display().to_string(),
+                      "integration_branch": "release" },
+                    { "name": "infra", "path": members[1].path.display().to_string() },
+                ] }))
+                .expect("repos"),
+            )
+            .expect("repos.yaml is written");
+        harness.project.record(
+            "",
+            "project.converted",
+            &json!({
+                "project_folder": harness.project.repo.path.display().to_string(),
+                "first_repo": "app",
+                "branch": "catervas/moved-out"
+            }),
+        );
+        harness.project.record_by(
+            None,
+            crate::tools::fixtures::at(),
+            "CTV-1",
+            "contract.written",
+            &json!({
+                "summary": { "kind": "task", "title": "Add a login page", "status": "ready", "risk": "low" },
+                "written_by": "catervas"
+            }),
+        );
+        let adapter = harness.recorded(vec![plan_assigns_ctv_1()]);
+        let orchestrator = harness.orchestrator(adapter.clone());
+
+        let report = orchestrator.tick().await.expect("the tick runs");
+
+        // The Product Manager's plan session is asked for it, as for any ready task: the move
+        // sent it back to no refining and asked no judgment.
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        let started = adapter.started();
+        assert_eq!(started.len(), 1, "{started:?}");
+        assert_eq!(started[0].purpose, SessionPurpose::Plan);
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::Assigned);
+        // It goes to work next, in `app`, from `app`'s integration branch.
+        let orchestrator = harness.orchestrator(harness.recorded(Vec::new()));
+        let report = orchestrator.tick().await.expect("the tick runs");
+        assert_eq!(acted_on(&report), Some("CTV-1"), "{report:?}");
+        assert_eq!(
+            git_output_in(&app.path, &["rev-parse", &harness.branch("CTV-1")]),
+            git_output_in(&app.path, &["rev-parse", "release"]),
+            "the branch starts at app's integration branch"
+        );
+        assert_eq!(harness.row("CTV-1").status, TaskStatus::InProgress);
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
     async fn a_docs_task_stays_in_the_project_folder() {
         let (harness, _members) = Harness::project_folder_with(
             "orch-member-docs",

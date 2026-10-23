@@ -1,11 +1,13 @@
 import { Button, Choice, Dialog, Table } from "@catervas/ui";
 import { useState } from "react";
+import { useLocation } from "react-router";
 import { useConnection, useHub } from "../../app/connection.tsx";
 import { useNavigate } from "../../app/links.tsx";
-import { useQuery } from "../../app/store.ts";
+import { type ServeStatus, useQuery } from "../../app/store.ts";
 import { t } from "../../strings/t.ts";
 import { type FoundList, findingSaid, tilde } from "../find/finding.ts";
 import styles from "../pages.module.css";
+import { AddSecondRepository } from "./AddSecondRepository.tsx";
 
 /** A member repository, as `repos.list` gives it. */
 type Member = {
@@ -31,6 +33,16 @@ export function Repositories() {
 		"repos.list",
 		{},
 	);
+	const { data: serve } = useQuery<ServeStatus>("serve.status", {});
+	// A "Your teams" card that adds a project to this team sends the owner here with it chosen.
+	const wanted = (
+		useLocation().state as {
+			addRepository?: { path: string; name?: string };
+		} | null
+	)?.addRepository;
+	const [adding, setAdding] = useState(wanted !== undefined);
+	// Where the team's notes are moving to, once the owner asked for the move.
+	const [moving, setMoving] = useState<string>();
 	const [leaving, setLeaving] = useState<Member>();
 	const [then, setThen] = useState<Then>("watch");
 	const [busy, setBusy] = useState(false);
@@ -84,10 +96,39 @@ export function Repositories() {
 	};
 
 	const members = data?.repos ?? undefined;
+	if (moving !== undefined)
+		return (
+			<div className={styles.page}>
+				<h2>{t("movingTitle")}</h2>
+				<p>{t("movingBody", { folder: moving })}</p>
+				<p role="status">{t("movingNotice")}</p>
+			</div>
+		);
 	return (
 		<div className={styles.page}>
 			<h2>{t("sectionRepositories")}</h2>
-			{data && members === undefined && <p>{t("reposOne")}</p>}
+			{serve?.takeOnError && (
+				<p role="alert">{t("reposAddFailed", { said: serve.takeOnError })}</p>
+			)}
+			{data && members === undefined && (
+				<>
+					<p>{t("reposOneAt", { path: tilde(serve?.projectRoot ?? "") })}</p>
+					<div>
+						<Button onClick={() => setAdding(true)}>{t("reposAdd")}</Button>
+					</div>
+				</>
+			)}
+			{adding && serve?.projectRoot && (
+				<AddSecondRepository
+					root={serve.projectRoot}
+					{...(wanted && { second: wanted })}
+					onClose={() => setAdding(false)}
+					onMoved={(folder) => {
+						setAdding(false);
+						setMoving(folder);
+					}}
+				/>
+			)}
 			{members && (
 				<Table
 					caption={t("sectionRepositories")}

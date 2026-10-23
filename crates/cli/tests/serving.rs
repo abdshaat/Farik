@@ -30,7 +30,7 @@ use tokio::sync::Semaphore;
 
 use project::{
     Ran, a_team, events, filed, hold_the_run_lock, joined, record, recorded, run, run_with,
-    scratch, the_run_lock_frees,
+    scratch, the_run_lock_frees, walked,
 };
 
 #[path = "../../runtime/tests/support/ports.rs"]
@@ -1696,12 +1696,24 @@ fn lists_the_members_of_a_served_project_folder() {
     until("the team is driven", || {
         root.join(".catervas/local/daemon.json").exists()
     });
-    let members = call(
-        serving.port,
-        &serving.cookie,
-        "query",
-        json!({ "name": "repos.list", "params": {} }),
-    );
+    let members = a_runtime().block_on(async {
+        let mut socket = try_socket(serving.port, &serving.cookie).await.ok()?;
+        try_ask(
+            &mut socket,
+            1,
+            "query",
+            json!({ "name": "repos.list", "params": {} }),
+        )
+        .await
+        .ok()
+    });
+    let Some(members) = members else {
+        panic!(
+            "repos.list was not answered\n{}\n{}",
+            serving.out.text(),
+            serving.err.text()
+        );
+    };
     // The daemon that drives the folder knows home, so a path relative to it is found.
     let added = call(
         serving.port,
@@ -1729,13 +1741,15 @@ fn lists_the_members_of_a_served_project_folder() {
                 "name": "app",
                 "path": app.path.canonicalize().expect("a path").display().to_string(),
                 "integration_branch": null,
-                "missing": false
+                "missing": false,
+                "moved_out": null
             },
             {
                 "name": "infra",
                 "path": infra.path.canonicalize().expect("a path").display().to_string(),
                 "integration_branch": "main",
-                "missing": false
+                "missing": false,
+                "moved_out": null
             },
         ] }),
         "{members}"
@@ -2298,6 +2312,199 @@ fn changes_project_from_the_browser() {
     let ran = joined(serving.thread, "the serve");
     assert_eq!(ran.code, 0, "{}", serving.err.text());
     drop(repository);
+}
+
+/// A one-repo team in `name`, served under home with a task filed, and the repository it is to
+/// gain, with the place the project folder is asked for.
+fn serving_a_conversion(name: &str) -> (TempRepo, Serving, TempRepo, String) {
+    let (repository, serving, _state) = serving_a_team_under_home(name);
+    let second = TempRepo::new(&format!("{name}-second"));
+    let parent = format!("catervas-{name}-{}", std::process::id());
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&parent));
+    until("the team is driven", || daemon_file(&repository).exists());
+    until("the team answers", || {
+        serve_status_across_a_restart(serving.port, &serving.cookie)
+            .is_some_and(|status| !status["project_root"].is_null())
+    });
+    // Catervas's files are tracked in the repository, so the move leaves a branch that removes them.
+    repository.commit("Catervas's files");
+    (repository, serving, second, parent)
+}
+
+/// What `project.convert` is asked with, naming `second` `web` and the repository `bakery`.
+fn conversion_of(parent: &str, second: &TempRepo) -> Value {
+    json!({
+        "first_name": "bakery",
+        "parent": parent,
+        "name": "bakery",
+        "second": { "name": "web", "path": name_of(&second.path) }
+    })
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn adds_a_second_repository_from_the_browser() {
+    let (repository, serving, second, parent) = serving_a_conversion("serve-converts");
+    // Waiting on the owner, so that no session starts for it on the recorded engine.
+    let task = filed(&repository, "A task for the bakery");
+    walked(&repository, &task, &["escalated"]);
+    let folder = std::env::temp_dir()
+        .canonicalize()
+        .expect("home")
+        .join(&parent)
+        .join("bakery");
+
+    let asked = call(
+        serving.port,
+        &serving.cookie,
+        "project.convert",
+        conversion_of(&parent, &second),
+    );
+    assert_eq!(asked["result"], json!({}), "{asked}");
+
+    let mut status = Value::Null;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while status["project_root"] != json!(folder.display().to_string()) {
+        assert!(
+            Instant::now() < deadline,
+            "serve did not answer for the project folder\n{status}\n{}\n{}",
+            serving.out.text(),
+            serving.err.text()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+    }
+    assert_eq!(status["port"], serving.port, "{status}");
+    assert!(status["take_on_error"].is_null(), "{status}");
+    // The team keeps its address: the project folder answers where the repository did.
+    let slug = slugs_of(&[&repository]).remove(0);
+    let there = status_at(serving.port, &format!("/t/{slug}/rpc"), &serving.cookie)
+        .expect("the team answers under its address");
+    assert_eq!(there["project_root"], json!(folder.display().to_string()));
+    // Both repositories are members now, and the team's task came along with its repository.
+    let members = call(
+        serving.port,
+        &serving.cookie,
+        "query",
+        json!({ "name": "repos.list", "params": {} }),
+    );
+    let names: Vec<&str> = members["result"]["repos"]
+        .as_array()
+        .expect("a list of members")
+        .iter()
+        .filter_map(|member| member["name"].as_str())
+        .collect();
+    assert_eq!(names, ["bakery", "web"], "{members}");
+    let tasks = a_runtime().block_on(async {
+        let mut socket = try_socket(serving.port, &serving.cookie).await.ok()?;
+        try_ask(
+            &mut socket,
+            1,
+            "query",
+            json!({ "name": "tasks.list", "params": {} }),
+        )
+        .await
+        .ok()
+    });
+    let Some(tasks) = tasks else {
+        panic!(
+            "tasks.list was not answered\n{}\n{}",
+            serving.out.text(),
+            serving.err.text()
+        );
+    };
+    assert!(tasks.to_string().contains(&task), "{tasks}");
+    let contract = std::fs::read_to_string(folder.join(format!(".catervas/contracts/{task}.yaml")))
+        .expect("the contract moved");
+    assert!(contract.contains("repo: bakery"), "{contract}");
+    // The repository the team left is not driven any more, says where its team went, and holds
+    // the branch that removes what Catervas kept in it.
+    assert!(!run_lock_is_held(&repository));
+    assert!(
+        std::process::Command::new("git")
+            .args(["branch", "--list", "catervas/moved-out"])
+            .current_dir(&repository.path)
+            .output()
+            .is_ok_and(|output| !output.stdout.is_empty()),
+        "the removal branch"
+    );
+    assert_eq!(
+        std::fs::read_to_string(repository.path.join(".catervas/local/moved-to")).expect("note"),
+        folder.display().to_string()
+    );
+
+    assert!(
+        !serving.thread.is_finished(),
+        "serve ended on its own\n{}\n{}",
+        serving.out.text(),
+        serving.err.text()
+    );
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&parent));
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn falls_back_to_the_repository_when_the_move_fails() {
+    let (repository, serving, second, parent) = serving_a_conversion("serve-convert-fails");
+    let root = repository.path.canonicalize().expect("the root");
+    // A branch named `catervas` keeps git from making `catervas/moved-out`.
+    repository.git(&["branch", "catervas"]);
+
+    let asked = call(
+        serving.port,
+        &serving.cookie,
+        "project.convert",
+        conversion_of(&parent, &second),
+    );
+    assert_eq!(asked["result"], json!({}), "{asked}");
+
+    let mut status = Value::Null;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !(status["project_root"] == json!(root.display().to_string())
+        && status["take_on_error"].is_string())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the repository was not driven again with the sentence\n{status}\n{}\n{}",
+            serving.out.text(),
+            serving.err.text()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+        status = serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+    }
+    assert!(
+        status["take_on_error"]
+            .as_str()
+            .is_some_and(|said| said.contains("catervas/moved-out")),
+        "{status}"
+    );
+    assert!(!std::env::temp_dir().join(&parent).join("bakery").exists());
+    assert!(!repository.path.join(".catervas/local/moved-to").exists());
+
+    // The sentence is shown until the next drive, which passes none.
+    left_for_the_wizard(&serving);
+    let opened = call(
+        serving.port,
+        &serving.cookie,
+        "project.open",
+        json!({ "path": root.display().to_string(), "no_sandbox": false }),
+    );
+    assert_eq!(
+        opened["result"]["project_root"],
+        json!(root.display().to_string()),
+        "{opened}"
+    );
+    until("the repository is driven without it", || {
+        let status =
+            serve_status_across_a_restart(serving.port, &serving.cookie).unwrap_or_default();
+        status["project_root"] == json!(root.display().to_string())
+            && status["take_on_error"].is_null()
+    });
+    let (ran, out, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{out}\n{err}");
+    let _ = std::fs::remove_dir_all(std::env::temp_dir().join(&parent));
 }
 
 #[test]
@@ -3159,13 +3366,20 @@ fn a_scanned_serve(
 
 /// Every team `teams.list` shows, by slug.
 fn listed_teams(serving: &Serving) -> Vec<Value> {
-    let listed = call_at(
-        serving.port,
-        "/hub/rpc",
-        &serving.cookie,
-        "query",
-        json!({ "name": "teams.list", "params": {} }),
-    );
+    // The hub restarts, closing its sockets, when the wizard takes a project on; a query cut off
+    // by that restart is asked again on a new socket.
+    let listed = a_runtime().block_on(async {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let mut socket = socket_at(serving.port, "/hub/rpc", &serving.cookie).await;
+            let params = json!({ "name": "teams.list", "params": {} });
+            match try_ask(&mut socket, 1, "query", params).await {
+                Ok(listed) => break listed,
+                Err(why) if Instant::now() >= deadline => panic!("teams.list: {why}"),
+                Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+            }
+        }
+    });
     listed["result"]["teams"]
         .as_array()
         .cloned()
@@ -3442,7 +3656,8 @@ fn adds_a_linked_project_to_the_team_it_works_with() {
     let repos =
         std::fs::read_to_string(home.join("suite/suite/.catervas/repos.yaml")).expect("repos.yaml");
     assert!(repos.contains("extra"), "{repos}");
-    // A team of one repository cannot take a second until a project folder is made of it.
+    // A team of one repository takes a second only once the owner agrees to make a project folder
+    // of it: the card is told so, with the team, and nothing is changed.
     let failed = made["result"]["failed"]
         .as_array()
         .cloned()
@@ -3451,7 +3666,63 @@ fn adds_a_linked_project_to_the_team_it_works_with() {
     assert!(
         failed[0]["reason"]
             .as_str()
-            .is_some_and(|said| said.starts_with("conversion_not_available")),
+            .is_some_and(|said| said.starts_with("conversion_needed")),
+        "{made}"
+    );
+    assert!(failed[0]["team"].is_string(), "{made}");
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn asks_to_convert_a_one_repo_team_before_linking() {
+    let (serving, home, state) = a_scanned_serve("proposal-convert", &["single", "other"]);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let one = hub(
+        "project.open",
+        json!({ "path": "single", "no_sandbox": true }),
+    );
+    assert!(one.get("error").is_none(), "{one}");
+    until("the team is listed", || listed_teams(&serving).len() == 1);
+    said_yes(&state, &home.join("single"), &home.join("other"));
+    let before = std::fs::read(home.join("single/.catervas/team.yaml")).expect("the team");
+
+    let proposed = hub("proposal.get", json!({}));
+    let cards = proposed["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(cards.len(), 1, "{proposed}");
+    assert_eq!(cards[0]["kind"], "add_to_team", "{proposed}");
+    let slug = cards[0]["team"].as_str().expect("the team").to_string();
+    let made = hub("proposal.create", json!({ "confirmed": true }));
+
+    // The card is told the team must be converted first, and names it.
+    let failed = made["result"]["failed"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(failed.len(), 1, "{made}");
+    assert!(
+        failed[0]["reason"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("conversion_needed")),
+        "{made}"
+    );
+    assert_eq!(failed[0]["team"], json!(slug), "{made}");
+    // Nothing was converted: no project folder lists members, and the team is as it was.
+    assert!(!home.join("single/.catervas/repos.yaml").exists());
+    assert_eq!(
+        std::fs::read(home.join("single/.catervas/team.yaml")).expect("the team"),
+        before
+    );
+    assert!(
+        made["result"]["added"]
+            .as_array()
+            .is_some_and(Vec::is_empty),
         "{made}"
     );
     let (ran, _, err) = serving.interrupted();

@@ -80,6 +80,40 @@ impl MemberPathRefusal {
     }
 }
 
+/// What a project folder holds while the team is being moved into it from a one-repo project: the
+/// old root, as text. The move removes it at its commit point, so a folder that still holds it is
+/// half made.
+pub const CONVERTING: &str = ".catervas/local/converting";
+
+/// What a repository the team moved out of holds: the project folder it moved to, as text.
+pub const MOVED_TO: &str = ".catervas/local/moved-to";
+
+/// The old root a half-made project folder says it is being made from, when `folder` says so.
+#[must_use]
+pub fn converting_from(folder: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(folder.join(CONVERTING)).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| PathBuf::from(text))
+}
+
+/// The project folder the team of the repository at `root` moved to, when it says so.
+#[must_use]
+pub fn moved_to(root: &Path) -> Option<PathBuf> {
+    let text = std::fs::read_to_string(root.join(MOVED_TO)).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| PathBuf::from(text))
+}
+
+/// The project folder the team of the repository at `root` moved to, when `root` says so and that
+/// folder is a finished project folder: it lists its members and is not still being made.
+#[must_use]
+pub fn moved_project_folder(root: &Path) -> Option<PathBuf> {
+    let folder = std::fs::canonicalize(moved_to(root)?).ok()?;
+    let finished = ProjectFiles::open(folder.clone()).is_project_folder()
+        && converting_from(&folder).is_none();
+    finished.then_some(folder)
+}
+
 /// `path`, relative to `home`, followed through its links, as the top folder of a git repository
 /// that has no Catervas team of its own.
 ///
@@ -89,6 +123,20 @@ impl MemberPathRefusal {
 /// are followed, it is home itself, it is not a git repository, it is inside one and not at its
 /// top (a repository whose top is home or above it counts as none), or it has a team.
 pub fn member_root(home: &Path, path: &str) -> Result<PathBuf, MemberPathRefusal> {
+    member_root_in(home, path, None)
+}
+
+/// `member_root` for a member of the project folder `project_folder`: a repository whose team
+/// moved to that folder (its `moved-to` names it) is not one that has a team of its own.
+///
+/// # Errors
+///
+/// As `member_root`.
+pub fn member_root_in(
+    home: &Path,
+    path: &str,
+    project_folder: Option<&Path>,
+) -> Result<PathBuf, MemberPathRefusal> {
     let folder = std::fs::canonicalize(home.join(path)).map_err(|_| MemberPathRefusal::NotThere)?;
     let home = std::fs::canonicalize(home).map_err(|_| MemberPathRefusal::OutsideHome)?;
     if !folder.starts_with(&home) {
@@ -114,7 +162,11 @@ pub fn member_root(home: &Path, path: &str) -> Result<PathBuf, MemberPathRefusal
         }
         return Err(MemberPathRefusal::NotARepository);
     }
-    if folder.join(".catervas/team.yaml").exists() {
+    let moved_here = project_folder
+        .and_then(|project| std::fs::canonicalize(project).ok())
+        .zip(moved_to(&folder).and_then(|there| std::fs::canonicalize(there).ok()))
+        .is_some_and(|(project, there)| project == there);
+    if folder.join(".catervas/team.yaml").exists() && !moved_here {
         return Err(MemberPathRefusal::HasTeam);
     }
     Ok(folder)
@@ -282,4 +334,64 @@ pub fn task_branch_numbers_everywhere(files: &ProjectFiles) -> Vec<u64> {
         }
     }
     numbers
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{member_root, member_root_in, moved_project_folder};
+    use crate::files::ProjectFiles;
+    use crate::git::fixtures::TempRepo;
+    use catervas_core::repos::validate_repos;
+    use serde_json::json;
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn lets_a_repository_whose_team_moved_join_the_folder_it_moved_to() {
+        let home = std::fs::canonicalize(std::env::temp_dir()).expect("home");
+        let old = TempRepo::new("moved-member-old");
+        old.write(".catervas/team.yaml", "a team\n");
+        let folder = TempRepo::new("moved-member-folder");
+        let other = TempRepo::new("moved-member-other");
+        let named = |path: &std::path::Path| {
+            path.strip_prefix(&home)
+                .expect("under home")
+                .display()
+                .to_string()
+        };
+        let asked = named(&old.path);
+        // It has a team of its own until its team is said to have moved.
+        assert!(member_root(&home, &asked).is_err());
+        assert!(member_root_in(&home, &asked, Some(&folder.path)).is_err());
+
+        old.write(
+            ".catervas/local/moved-to",
+            &folder.path.display().to_string(),
+        );
+        assert_eq!(
+            member_root_in(&home, &asked, Some(&folder.path)),
+            Ok(old.path.clone())
+        );
+        // Not for another project folder, and not for a caller that names none.
+        assert!(member_root_in(&home, &asked, Some(&other.path)).is_err());
+        assert!(member_root(&home, &asked).is_err());
+
+        // The folder it moved to is a finished project folder when it lists its members and is
+        // not still being made.
+        assert_eq!(moved_project_folder(&old.path), None);
+        ProjectFiles::open(folder.path.clone())
+            .write_repos(
+                &validate_repos(&json!({ "repos": [
+                    { "name": "app", "path": old.path.display().to_string() },
+                    { "name": "web", "path": other.path.display().to_string() },
+                ] }))
+                .expect("a list"),
+            )
+            .expect("written");
+        assert_eq!(moved_project_folder(&old.path), Some(folder.path.clone()));
+        folder.write(
+            ".catervas/local/converting",
+            &old.path.display().to_string(),
+        );
+        assert_eq!(moved_project_folder(&old.path), None);
+    }
 }

@@ -14,7 +14,9 @@ use catervas_runtime::connectors::ConnectorSecrets;
 use catervas_runtime::daemon::{MemberRequest, SETUP_PENDING, SetupError, SetupHost};
 use catervas_store::Git;
 use catervas_store::files::{LocalSettings, ProjectFiles, Sandbox};
-use catervas_store::repos::{MemberPathRefusal, member_root};
+use catervas_store::repos::{
+    MemberPathRefusal, converting_from, member_root, moved_project_folder,
+};
 use catervas_store::requests::{
     RequestError, file_request, placeholder_budget_usd, request_from_brief,
 };
@@ -280,6 +282,15 @@ impl SetupHost for CliHost {
         }
         if std::fs::canonicalize(&self.home).is_ok_and(|home| home == root) {
             return Err(refused(HOME_ITSELF));
+        }
+        // A repository the team moved out of is the project folder it moved to, taken on as it
+        // is; a project folder the move into it did not finish is not taken on.
+        let root = moved_project_folder(&root).unwrap_or(root);
+        if let Some(from) = converting_from(&root) {
+            return Err(refused(&format!(
+                "that folder is a project being made from {}; add the repository again to finish",
+                from.display()
+            )));
         }
         if self
             .teams
@@ -1081,6 +1092,47 @@ mod tests {
         assert!(!chosen.join(".catervas/local/setup-pending").exists());
         assert!(events(&chosen, EventKind::TeamPaused).is_empty());
         std::fs::remove_dir_all(home().join(&parent)).expect("cleaned");
+    }
+
+    #[test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    fn opens_a_moved_repository_s_project_folder() {
+        let world = World::new("open-moved");
+        let old = a_project("open-moved-old", |_| {});
+        let web = TempRepo::new("open-moved-web");
+        let folder = a_project("open-moved-folder", |_| {});
+        let both = json!({ "repos": [
+            { "name": "bakery", "path": old.path.display().to_string() },
+            { "name": "web", "path": web.path.display().to_string() },
+        ] });
+        files_of(&folder)
+            .write_repos(&validate_repos(&both).expect("a list"))
+            .expect("written");
+        write(
+            &old.path,
+            ".catervas/local/moved-to",
+            folder.path.display().to_string().as_bytes(),
+        );
+        let host = world.host(None);
+
+        // Opening the repository the team moved out of takes on the project folder, as it is.
+        let chosen = host.open(&named(&old), false, false).expect("taken on");
+        assert_eq!(chosen, root_of(&folder.path));
+        assert!(!chosen.join(".catervas/local/setup-pending").exists());
+
+        // A project folder still being made is refused.
+        write(
+            &folder.path,
+            ".catervas/local/converting",
+            old.path.display().to_string().as_bytes(),
+        );
+        let refused = world.host(None).open(&named(&folder), false, false);
+        match refused {
+            Err(SetupError::Refused(sentence)) => {
+                assert!(sentence.contains("being made"), "{sentence}");
+            }
+            other => panic!("not refused: {other:?}"),
+        }
     }
 
     /// A member the wizard asks for: `repository`'s folder under home, named `name`.

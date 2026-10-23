@@ -106,14 +106,14 @@ Phase 8's PM → Architect → PM → Scrum Master flow, with these changes:
 
 ## A one-repo project gains a second repository
 
-"Add repository" in Settings, on a one-repo project, first explains what changes, then:
+"Add a repository" in Settings, on a one-repo project, first explains what changes, then waits while the team has work in progress (a task being worked on, an open Catervafication, a folder change not yet integrated), then:
 
 1. Makes the project folder.
-2. Copies the repository's `.catervas/` and its `docs/catervas/` into it: the project-level folders to the top, and `architecture/`, `engineering/` and `design/` to `repos/<name>/`, where the repository's name is its folder's name, which the owner may change.
+2. Copies the repository's `.catervas/` into it, and moves its `docs/catervas/` documents into it: the project-level folders to the top, and `architecture/`, `engineering/` and `design/` to `repos/<name>/`, where the repository's name is its folder's name, which the owner may change.
 3. Records both members.
-4. Removes `.catervas/` and `docs/catervas/` from that repository in one commit, integrated by the team's policy, since the documents now live locally.
+4. Leaves one branch in that repository, `catervas/moved-out`, that removes `.catervas/` and `docs/catervas/` in one commit, for the owner to merge: it is not integrated by the team's policy, since the move must not change the owner's repository on its own, and Today reminds the owner until it is merged.
 
-Tasks that are not done keep their ids; a task of a role that changes code, with an allowed path that is not a document path, gains the first member's `repo`. Serve restarts the drive on the project folder, as ADR 0053's switch does, and the new member's Catervafication is offered.
+Tasks that are not done keep their ids; a task of a role that changes code, with an allowed path that is not a document path, gains the first member's `repo`. Serve drives the project folder in place of the repository, on the same port and under the same address. The move is atomic up to one commit point: a step that fails takes back the earlier ones and the repository is driven again, with the reason shown. The new member's own Catervafication waits for step 06 of this phase, which was not built.
 
 ## Screens (mocked up first)
 
@@ -128,7 +128,7 @@ Tasks that are not done keep their ids; a task of a role that changes code, with
 - `repo.added { name, path, integration_branch }`: all three required, `integration_branch` `null` when the owner named none and the repository's default branch is meant (step 01)
 - `repo.removed { name }`
 - `repo.moved { name, path }`
-- `project.converted { project_folder, first_repo }`
+- `project.converted { project_folder, first_repo, branch }`: `branch` is `catervas/moved-out` or `catervas/moved-out-<n>`, or `null` when the repository kept nothing in git (phase 9 step 07b)
 
 `catervafication.started` gains an optional `repo`.
 

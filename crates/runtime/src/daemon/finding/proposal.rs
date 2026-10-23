@@ -685,6 +685,10 @@ fn make_team(
     })
 }
 
+/// The code a card's failure begins with when its team is one repository, which the owner must
+/// agree to make a project folder of first.
+const CONVERSION_NEEDED: &str = "conversion_needed";
+
 /// Adds the projects of an `add_to_team` card to the team as repositories.
 fn add_projects(hub: &Hub, host: &dyn FindingHost, card: &Card) -> Result<Vec<String>, String> {
     let slug = card.team.as_deref().unwrap_or_default();
@@ -701,11 +705,16 @@ fn add_projects(hub: &Hub, host: &dyn FindingHost, card: &Card) -> Result<Vec<St
             .map(|repo| repo.name.as_str().to_string())
             .collect(),
         None => {
-            return Err(
-                "conversion_not_available: this team is one repository, and Catervas cannot yet \
-                 make a project folder of it to add another"
-                    .to_string(),
-            );
+            // A team of one repository becomes a team of several only when the owner agrees, in
+            // the dialog that says what moves (phase 9 step 07b): nothing is changed here.
+            return Err(format!(
+                "{CONVERSION_NEEDED}: adding {} makes {slug} a team of several repositories",
+                card.projects
+                    .iter()
+                    .map(|project| project.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
     };
     let handle = tokio::runtime::Handle::try_current().map_err(|e| e.to_string())?;
@@ -997,7 +1006,15 @@ fn create(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<Value, Fa
                     "team": card.team.clone().unwrap_or_default(),
                     "names": names,
                 })),
-                Err(reason) => failed_all.push(failed(reason)),
+                Err(reason) => {
+                    // The owner's dialog needs the team to convert.
+                    let convert = reason.starts_with(CONVERSION_NEEDED);
+                    let mut row = failed(reason);
+                    if convert {
+                        row["team"] = json!(card.team.clone().unwrap_or_default());
+                    }
+                    failed_all.push(row);
+                }
             },
         }
     }
