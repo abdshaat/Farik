@@ -252,7 +252,7 @@ Files: `convert.rs`; `lib.rs`; `readiness.rs` (`is_a_document_path` made `pub`).
 - `counts_again_before_moving`: with `CTV-3` moved to `assigned` after the ask and before `convert`, `convert` fails with `work_in_progress`'s sentence naming `CTV-3`, and nothing is made. RED.
 - `refuses_a_half_made_project_folder`: a project folder holding `converting` (the move stopped after step 9) is refused by `open_project` and `found`, a `moved-to` naming it is ignored, and `convert` asked again with the same place clears it, deletes the stale `catervas/moved-out`, and moves, its branch named `catervas/moved-out` again. With the stop after step 8's worktree was added (the folder removed, the worktree still registered), the retry moves too. An empty folder at the place is used. RED.
 
-- [ ] `feat(cli): move a one-repo project's team into a project folder`
+- [x] `feat(cli): move a one-repo project's team into a project folder`
 
 ### Task 4: The switch, and after it
 

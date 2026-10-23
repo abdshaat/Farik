@@ -711,7 +711,8 @@ fn allowed_paths_within_ceiling(
 /// Whether an allowed path stays inside the document globs: within one by the ceiling's
 /// containment (`docs/adr/**` within `docs/**`), or, having no wildcard, matched by one as a path
 /// (`README.md` by `**/*.md`). A wildcard path within no directory glob could name code.
-fn is_a_document_path(path: &String, documents: &[String]) -> bool {
+#[must_use]
+pub fn is_a_document_path(path: &String, documents: &[String]) -> bool {
     is_within_any(path, documents)
         || (split_glob(path).1.is_empty()
             && check_allowed_paths(std::slice::from_ref(path), documents).is_ok())

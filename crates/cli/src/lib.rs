@@ -28,6 +28,10 @@ pub mod contract;
 /// Writing a contract with the Product Manager at the terminal.
 #[cfg(unix)]
 mod contract_new;
+/// Moving a one-repo project's team into a project folder (phase 9 step 07b).
+#[cfg(unix)]
+#[allow(dead_code, reason = "serve calls it in the next commit of the step")]
+mod convert;
 /// One exchange with the daemon a `daemon.json` names.
 pub mod daemon_client;
 /// `catervas discover`: what Catervas found in the Claude Code history.
