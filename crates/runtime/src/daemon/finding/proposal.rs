@@ -157,7 +157,12 @@ fn teams_by_folder(hub: &Hub) -> Vec<(String, Vec<PathBuf>)> {
 fn build(hub: &Hub, host: &dyn FindingHost, index: &MachineIndex) -> Result<Built, Failure> {
     let listing = build_listing(hub, host, index).map_err(|e| internal(&e))?;
     let scope = link_scope(hub, host, index)?;
-    let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+    let evaluation = evaluate(
+        &scope.projects,
+        &scope.claude_ai,
+        &scope.sessions,
+        &read_of(host),
+    );
     let groups = confirmed_groups(index, &scope.projects, &evaluation).map_err(|e| internal(&e))?;
     let teams = teams_by_folder(hub);
     let made: BTreeMap<String, String> = index

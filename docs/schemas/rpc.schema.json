@@ -5123,6 +5123,7 @@
       "properties": {
         "kind": {
           "enum": [
+            "shared_work",
             "path_dependency",
             "submodule",
             "declared_package",
@@ -5138,7 +5139,7 @@
         "ends": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 2,
+          "maxItems": 4,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -5147,7 +5148,7 @@
               "project": { "type": "string" },
               "name": { "type": "string" },
               "file": { "type": "string" },
-              "line": { "type": "integer", "minimum": 1 },
+              "line": { "type": "integer", "minimum": 0 },
               "text": { "type": "string", "maxLength": 160 }
             }
           }

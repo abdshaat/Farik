@@ -82,7 +82,7 @@ Tests (`crates/store/src/linking.rs`, against an index with fixture sessions):
   - A No to a–b is not asked again after a third shared session is added.
   - A session placed `catervas` that wrote under both roots adds nothing.
 
-- [ ] `feat(store): ask about shared work first and check it again`
+- [x] `feat(store): ask about shared work first and check it again`
 
 ### Task 3: The screen
 

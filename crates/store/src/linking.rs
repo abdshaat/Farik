@@ -6,7 +6,8 @@ use std::fmt;
 
 use catervas_core::linking::{
     ClaudeAiProjectText, Hint, HintKind, MAX_FILE_BYTES, MAX_FILES, ProjectFiles, ProjectHintInput,
-    Proof, find_hints, find_proofs, is_read_for_proof, still_holds,
+    Proof, ProofKind, SessionNote, find_hints, find_proofs, find_shared_work, is_read_for_proof,
+    still_holds,
 };
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use rusqlite::TransactionBehavior;
@@ -150,11 +151,13 @@ pub struct Evaluation {
     pub all_hints: Vec<Hint>,
 }
 
-/// Reads the files of every project with `read` and finds the proofs and hints among them.
+/// Reads the files of every project with `read` and finds the proofs and hints among them. The
+/// shared work of the sessions in `sessions` is a proof, ahead of the files' proofs.
 #[must_use]
 pub fn evaluate(
     projects: &[LinkProject],
     claude_ai: &[ClaudeAiProjectText],
+    sessions: &BTreeMap<String, SessionNote>,
     read: &dyn Fn(&str) -> Vec<(String, String)>,
 ) -> Evaluation {
     let files: Vec<ProjectFiles> = projects
@@ -177,7 +180,10 @@ pub fn evaluate(
             written_in: project.written_in.clone(),
         })
         .collect();
-    let proofs = find_proofs(&files, claude_ai);
+    let mut proofs = find_shared_work(&inputs, sessions);
+    proofs.extend(find_proofs(&files, claude_ai));
+    // By kind, then keys, as `find_proofs` orders them; the sort is stable.
+    proofs.sort_by(|x, y| (x.kind, &x.a, &x.b).cmp(&(y.kind, &y.a, &y.b)));
     Evaluation {
         hints: find_hints(&inputs, &proofs),
         all_hints: find_hints(&inputs, &[]),
@@ -271,8 +277,12 @@ impl MachineIndex {
 pub struct LinkActivity {
     /// The days (UTC) with a session that started or last did something in the root.
     pub days_by_root: BTreeMap<String, BTreeSet<NaiveDate>>,
-    /// The sessions that wrote a file under the root.
+    /// The sessions of the owner that wrote a file under the root; a session placed with
+    /// Catervas's agents is not among them.
     pub written_by_root: BTreeMap<String, BTreeSet<String>>,
+    /// What is known of each session in `written_by_root`: its title and when it last did
+    /// anything.
+    pub sessions: BTreeMap<String, SessionNote>,
 }
 
 impl MachineIndex {
@@ -303,16 +313,32 @@ impl MachineIndex {
                 }
             }
         }
-        let mut statement = self
-            .connection
-            .prepare("SELECT session_id, root FROM session_roots_written")?;
+        let mut statement = self.connection.prepare(
+            "SELECT w.session_id, w.root, s.title, s.last_at
+             FROM session_roots_written w LEFT JOIN sessions s ON s.session_id = w.session_id
+             WHERE s.place IS NULL OR s.place != 'catervas'",
+        )?;
         let mut rows = statement.query([])?;
         while let Some(row) = rows.next()? {
+            let session: String = row.get(0)?;
+            let last_at = row
+                .get::<_, Option<String>>(3)?
+                .and_then(|text| DateTime::parse_from_rfc3339(&text).ok())
+                .map(|moment| moment.with_timezone(&Utc));
+            if let Some(last_at) = last_at {
+                activity
+                    .sessions
+                    .entry(session.clone())
+                    .or_insert(SessionNote {
+                        title: row.get(2)?,
+                        last_at,
+                    });
+            }
             activity
                 .written_by_root
                 .entry(row.get(1)?)
                 .or_default()
-                .insert(row.get(0)?);
+                .insert(session);
         }
         Ok(activity)
     }
@@ -443,6 +469,8 @@ pub fn asked_pairs(
             .then_with(|| name(&x.proof.a).cmp(&name(&y.proof.a)))
             .then_with(|| name(&x.proof.b).cmp(&name(&y.proof.b)))
     });
+    // Shared work leads: its pairs come before the rest, each part in the order above.
+    asked.sort_by_key(|pair| pair.proof.kind != ProofKind::SharedWork);
     // A pair that touches a project already asked about follows the pair that reached it.
     let mut ordered = Vec::new();
     while !asked.is_empty() {
@@ -493,6 +521,7 @@ pub fn answer_pair(
     index: &mut MachineIndex,
     projects: &[LinkProject],
     claude_ai: &[ClaudeAiProjectText],
+    sessions: &BTreeMap<String, SessionNote>,
     read: &dyn Fn(&str) -> Vec<(String, String)>,
     pair: (&str, &str),
     answer: Answer,
@@ -506,7 +535,7 @@ pub fn answer_pair(
     if pair.0 == pair.1 || !keys.contains(pair.0) || !keys.contains(pair.1) {
         return Err(LinkingError::UnknownProject);
     }
-    let evaluation = evaluate(projects, claude_ai, read);
+    let evaluation = evaluate(projects, claude_ai, sessions, read);
     let wanted = pair_of(pair.0, pair.1);
     let proofs: Vec<Proof> = evaluation
         .proofs
@@ -683,7 +712,7 @@ mod tests {
         }
 
         fn pairs(&self, projects: &[LinkProject]) -> Vec<(String, String)> {
-            let evaluation = evaluate(projects, &[], &read_from_git);
+            let evaluation = evaluate(projects, &[], &BTreeMap::new(), &read_from_git);
             asked_pairs(&self.index, projects, &evaluation)
                 .expect("pairs")
                 .into_iter()
@@ -702,6 +731,7 @@ mod tests {
                 &mut self.index,
                 projects,
                 &[],
+                &BTreeMap::new(),
                 &read_from_git,
                 (&a.key, &b.key),
                 answer,
@@ -710,8 +740,31 @@ mod tests {
             )
         }
 
+        /// Says `answer` about the projects named `a` and `b`, as the shared-work test names them.
+        fn say_with(
+            &mut self,
+            projects: &[LinkProject],
+            a: &str,
+            b: &str,
+            answer: Answer,
+        ) -> Result<(), LinkingError> {
+            let sessions = self.index.link_activity()?.sessions;
+            let key = |name: &str| format!("github.com/shared-test/{name}");
+            answer_pair(
+                &mut self.index,
+                projects,
+                &[],
+                &sessions,
+                &files_of,
+                (&key(a), &key(b)),
+                answer,
+                false,
+                now(),
+            )
+        }
+
         fn groups(&self, projects: &[LinkProject]) -> Vec<(Vec<String>, Vec<String>)> {
-            let evaluation = evaluate(projects, &[], &read_from_git);
+            let evaluation = evaluate(projects, &[], &BTreeMap::new(), &read_from_git);
             confirmed_groups(&self.index, projects, &evaluation)
                 .expect("groups")
                 .into_iter()
@@ -724,6 +777,264 @@ mod tests {
         let mut keys: Vec<String> = projects.iter().map(|project| project.key.clone()).collect();
         keys.sort();
         keys
+    }
+
+    /// A session in the index: its title, when it last did anything, where it was placed, and the
+    /// roots it wrote under.
+    fn session(index: &MachineIndex, id: &str, title: &str, day: u32, place: &str, roots: &[&str]) {
+        index
+            .connection
+            .execute(
+                "INSERT INTO sessions (session_id, title, last_at, place) VALUES (?1, ?2, ?3, ?4)",
+                (id, title, format!("2026-10-{day:02}T09:00:00.000Z"), place),
+            )
+            .expect("a session");
+        for root in roots {
+            index
+                .connection
+                .execute(
+                    "INSERT INTO session_roots_written (session_id, root) VALUES (?1, ?2)",
+                    (id, root),
+                )
+                .expect("a root written");
+        }
+    }
+
+    /// Projects named `names`, each with the folder `/work/<name>`, newest first by `days`, and
+    /// the sessions the index says wrote under them.
+    fn projects_at(index: &MachineIndex, names: &[(&str, i64)]) -> Vec<LinkProject> {
+        let activity = index.link_activity().expect("activity");
+        names
+            .iter()
+            .map(|(name, days)| {
+                let root = format!("/work/{name}");
+                LinkProject {
+                    key: format!("github.com/shared-test/{name}"),
+                    name: (*name).to_string(),
+                    last_at: Some(now() - Duration::days(*days)),
+                    folder: Some(root.clone()),
+                    remote_key: Some(format!("github.com/shared-test/{name}")),
+                    written_in: activity
+                        .written_by_root
+                        .get(&root)
+                        .cloned()
+                        .unwrap_or_default(),
+                    root: Some(root),
+                    active_days: BTreeSet::new(),
+                }
+            })
+            .collect()
+    }
+
+    /// The files `/work/<name>` holds: `c-app` uses `d-lib`'s code, and `e-app` uses `f-lib`'s.
+    fn files_of(root: &str) -> Vec<(String, String)> {
+        let uses = |other: &str| {
+            vec![(
+                "package.json".to_string(),
+                format!("{{\n  \"dependencies\": {{\n    \"dep\": \"file:../{other}\"\n  }}\n}}\n"),
+            )]
+        };
+        match root {
+            "/work/c-app" => uses("d-lib"),
+            "/work/e-app" => uses("f-lib"),
+            _ => Vec::new(),
+        }
+    }
+
+    fn asked(world: &World, projects: &[LinkProject]) -> (Vec<AskedPair>, Evaluation) {
+        let sessions = world.index.link_activity().expect("activity").sessions;
+        let evaluation = evaluate(projects, &[], &sessions, &files_of);
+        let pairs = asked_pairs(&world.index, projects, &evaluation).expect("pairs");
+        (pairs, evaluation)
+    }
+
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one world of sessions told in order: asked first, shown, checked again, kept"
+    )]
+    fn asks_shared_work_first_and_rechecks_it() {
+        let mut world = World::new("asks-shared-work-first-and-rechecks-it");
+        let index = &world.index;
+        // a-app and b-lib: two sessions. c-app and d-lib: a path dependency, and newer.
+        session(
+            index,
+            "s1",
+            "Fix the login redirect",
+            20,
+            "owner",
+            &["/work/a-app", "/work/b-lib"],
+        );
+        session(
+            index,
+            "s2",
+            "",
+            21,
+            "owner",
+            &["/work/a-app", "/work/b-lib"],
+        );
+        // e-app and f-lib: shared work and a path dependency.
+        session(
+            index,
+            "s3",
+            "Move the config",
+            18,
+            "owner",
+            &["/work/e-app", "/work/f-lib"],
+        );
+        session(
+            index,
+            "s4",
+            "Rename the client",
+            19,
+            "owner",
+            &["/work/e-app", "/work/f-lib"],
+        );
+        // g-app and h-lib: a Catervas session wrote in both, and one session of the owner did.
+        session(
+            index,
+            "s5",
+            "Own work",
+            17,
+            "owner",
+            &["/work/g-app", "/work/h-lib"],
+        );
+        session(
+            index,
+            "s6",
+            "A role's work",
+            17,
+            "catervas",
+            &["/work/g-app", "/work/h-lib"],
+        );
+        let projects = projects_at(
+            index,
+            &[
+                ("a-app", 9),
+                ("b-lib", 9),
+                ("c-app", 0),
+                ("d-lib", 0),
+                ("e-app", 12),
+                ("f-lib", 12),
+                ("g-app", 1),
+                ("h-lib", 1),
+            ],
+        );
+        let key = |name: &str| format!("github.com/shared-test/{name}");
+
+        // The pairs with shared work come first, though c-app and d-lib are newer.
+        let (pairs, evaluation) = asked(&world, &projects);
+        let order: Vec<(String, String, ProofKind)> = pairs
+            .iter()
+            .map(|pair| (pair.proof.a.clone(), pair.proof.b.clone(), pair.proof.kind))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                (key("a-app"), key("b-lib"), ProofKind::SharedWork),
+                (key("e-app"), key("f-lib"), ProofKind::SharedWork),
+                (key("c-app"), key("d-lib"), ProofKind::PathDependency),
+            ],
+            "{pairs:?}"
+        );
+        // The first has no Also; the second shows its file proof under Also; the session ends hold
+        // the titles and days.
+        assert_eq!(pairs[0].also, Vec::<String>::new());
+        assert_eq!(
+            pairs[0].proof.sentence,
+            "You worked on a-app and b-lib together in 2 sessions."
+        );
+        let texts: Vec<&str> = pairs[0]
+            .proof
+            .ends
+            .iter()
+            .map(|end| end.text.as_str())
+            .collect();
+        assert_eq!(
+            texts,
+            vec![
+                "A session · 2026-10-21",
+                "Fix the login redirect · 2026-10-20"
+            ]
+        );
+        assert_eq!(pairs[1].also, vec!["e-app uses f-lib's code.".to_string()]);
+        // A Catervas session added nothing: g-app and h-lib have one session of the owner.
+        assert!(
+            evaluation
+                .proofs
+                .iter()
+                .all(|proof| proof.a != key("g-app"))
+        );
+        let wrote_both: Vec<String> = evaluation
+            .hints
+            .iter()
+            .filter(|hint| hint.kinds.contains(&HintKind::WroteBoth))
+            .map(|hint| hint.a.clone())
+            .collect();
+        assert_eq!(wrote_both, vec![key("g-app")], "one session is a hint");
+
+        // A Yes is kept, and holds when a third session is added: the sentence counts three.
+        world
+            .say_with(&projects, "a-app", "b-lib", Answer::Yes)
+            .expect("yes");
+        session(
+            &world.index,
+            "s7",
+            "More",
+            22,
+            "owner",
+            &["/work/a-app", "/work/b-lib"],
+        );
+        let projects = projects_at(&world.index, &[("a-app", 9), ("b-lib", 9)]);
+        let sessions = world.index.link_activity().expect("activity").sessions;
+        let evaluation = evaluate(&projects, &[], &sessions, &files_of);
+        let groups = confirmed_groups(&world.index, &projects, &evaluation).expect("groups");
+        assert_eq!(groups.len(), 1, "{groups:?}");
+        assert_eq!(
+            groups[0].why,
+            vec!["You worked on a-app and b-lib together in 3 sessions.".to_string()]
+        );
+
+        // A No is not asked again, with more shared sessions.
+        let projects = projects_at(&world.index, &[("e-app", 12), ("f-lib", 12)]);
+        world
+            .say_with(&projects, "e-app", "f-lib", Answer::No)
+            .expect("no");
+        session(
+            &world.index,
+            "s8",
+            "Again",
+            23,
+            "owner",
+            &["/work/e-app", "/work/f-lib"],
+        );
+        let projects = projects_at(&world.index, &[("e-app", 12), ("f-lib", 12)]);
+        assert_eq!(asked(&world, &projects).0.len(), 0);
+
+        // Below two shared sessions the proof is gone: the pair is not asked, a Yes is refused,
+        // and the group the earlier Yes made is no more.
+        world
+            .index
+            .connection
+            .execute(
+                "DELETE FROM session_roots_written WHERE session_id IN ('s2', 's7')",
+                [],
+            )
+            .expect("removed");
+        let projects = projects_at(&world.index, &[("a-app", 9), ("b-lib", 9)]);
+        assert_eq!(asked(&world, &projects).0.len(), 0);
+        let refused = world.say_with(&projects, "a-app", "b-lib", Answer::Yes);
+        assert!(
+            matches!(refused, Err(LinkingError::ProofNoLongerHolds)),
+            "{refused:?}"
+        );
+        let sessions = world.index.link_activity().expect("activity").sessions;
+        let evaluation = evaluate(&projects, &[], &sessions, &files_of);
+        assert!(
+            confirmed_groups(&world.index, &projects, &evaluation)
+                .expect("groups")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -792,7 +1103,7 @@ mod tests {
         x.commit("deploys y");
         let again = world.pairs(&projects);
         assert_eq!(again, vec![(px.key.clone(), py.key.clone())]);
-        let evaluation = evaluate(&projects, &[], &read_from_git);
+        let evaluation = evaluate(&projects, &[], &BTreeMap::new(), &read_from_git);
         let asked = asked_pairs(&world.index, &projects, &evaluation).expect("pairs");
         assert_eq!(
             asked[0].proof.kind,

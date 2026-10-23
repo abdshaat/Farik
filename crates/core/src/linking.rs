@@ -1167,7 +1167,7 @@ pub fn find_proofs(projects: &[ProjectFiles], claude_ai: &[ClaudeAiProjectText])
 }
 
 /// Whether `now` still holds `earlier`: a proof of the same kind between the same two projects,
-/// read from the same files.
+/// read from the same files (shared work, from whichever sessions).
 #[must_use]
 pub fn still_holds(now: &[Proof], earlier: &Proof) -> bool {
     let files = |proof: &Proof| -> Vec<(String, String)> {
@@ -1181,7 +1181,8 @@ pub fn still_holds(now: &[Proof], earlier: &Proof) -> bool {
         proof.kind == earlier.kind
             && proof.a == earlier.a
             && proof.b == earlier.b
-            && files(proof) == files(earlier)
+            // Shared work holds while it is found, whichever sessions are listed behind it.
+            && (proof.kind == ProofKind::SharedWork || files(proof) == files(earlier))
     })
 }
 
@@ -1251,8 +1252,12 @@ pub fn find_shared_work(
                             "{} · {}",
                             note.title
                                 .as_deref()
-                                .filter(|title| !title.trim().is_empty())
-                                .unwrap_or("A session"),
+                                .map(str::trim)
+                                .filter(|title| !title.is_empty())
+                                .map_or_else(
+                                    || "A session".to_string(),
+                                    |title| title.chars().take(TEXT_LIMIT - 20).collect()
+                                ),
                             note.last_at.format("%Y-%m-%d")
                         ),
                         None => "A session".to_string(),
