@@ -832,7 +832,7 @@ fn names_a_secret(header: &str) -> bool {
 /// `-` and `_`, is `token`, `password`, `secret`, `auth`, `pat` or `credentials`, or it is
 /// `api-key`, `apikey`, `access-key` or `secret-key`. A lone `key`, `sort-key` or `primary-key`
 /// names a setting; so does `no-auth`.
-fn flag_names_a_key(name: &str) -> bool {
+pub(crate) fn flag_names_a_key(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     let words: Vec<&str> = name.split(['-', '_']).filter(|w| !w.is_empty()).collect();
     match words.as_slice() {
@@ -856,14 +856,14 @@ fn flag_names_a_key(name: &str) -> bool {
 
 /// Whether `value`, given to a flag that names a key, is a key: not empty, and not a number,
 /// which a setting such as `--max-token 4096` takes.
-fn is_a_value(value: &str) -> bool {
+pub(crate) fn is_a_value(value: &str) -> bool {
     !value.is_empty() && !value.chars().all(|c| c.is_ascii_digit())
 }
 
 /// Whether one argument holds a key by itself: a well-known service's key, such as `sk-…`,
 /// `sk_live_…`, `ghp_…` or `AKIA…`; a credential header with its value, as `mcp-remote` takes after
 /// `--header`; or `NAME=value` where `NAME` names a key.
-fn arg_is_a_key(arg: &str) -> bool {
+pub(crate) fn arg_is_a_key(arg: &str) -> bool {
     let prefixed = [
         "sk-",
         "sk_live_",

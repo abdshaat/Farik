@@ -179,10 +179,10 @@ describe("Files", () => {
 				.getAllByRole("link")
 				.map((a) => [a.textContent, a.getAttribute("href")]),
 		).toEqual([
-			["Product description", "/files/product/spec.md"],
-			["Roadmap", "/files/product/roadmap.md"],
-			["Overview", "/files/architecture/overview.md"],
-			["Plan: pie pre-orders", "/files/architecture/plans/CTV-12.md"],
+			["Product description", "/t/shop/files/product/spec.md"],
+			["Roadmap", "/t/shop/files/product/roadmap.md"],
+			["Overview", "/t/shop/files/architecture/overview.md"],
+			["Plan: pie pre-orders", "/t/shop/files/architecture/plans/CTV-12.md"],
 		]);
 		expect(
 			within(nav)
@@ -256,7 +256,7 @@ describe("Files", () => {
 			within(line() as HTMLElement)
 				.getByRole("link", { name: "CTV-9" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-9");
+		).toBe("/t/shop/tasks/CTV-9");
 		cleanup();
 
 		const you = read({
@@ -408,7 +408,7 @@ describe("Files", () => {
 		await screen.findByRole("heading", { name: "Roadmap" });
 		expect(
 			screen.getByRole("link", { name: en.filesBack }).getAttribute("href"),
-		).toBe("/team");
+		).toBe("/t/shop/team");
 		const pick = screen.getByRole("combobox", { name: en.filesFile });
 		expect([...pick.querySelectorAll("optgroup")].map((g) => g.label)).toEqual([
 			"Product, Mira",
@@ -747,13 +747,13 @@ describe("Files: HTML documents and asking for a change", () => {
 		expect(screen.queryByText(SECRET)).toBeNull();
 		expect(container.innerHTML).not.toContain(SECRET);
 		expect(frameOf(container).getAttribute("src")).toBe(
-			`/documents/raw?path=${encodeURIComponent(HTML)}&v=${doc.document.blob}`,
+			`/t/shop/documents/raw?path=${encodeURIComponent(HTML)}&v=${doc.document.blob}`,
 		);
 		expect(frameOf(container).getAttribute("sandbox")).toBe("");
 
 		fireEvent.click(screen.getByRole("button", { name: en.filesForTeam }));
 		expect(frameOf(container).getAttribute("src")).toBe(
-			`/documents/raw?path=${encodeURIComponent(TWIN)}&v=${doc.twin.blob}`,
+			`/t/shop/documents/raw?path=${encodeURIComponent(TWIN)}&v=${doc.twin.blob}`,
 		);
 		fireEvent.click(screen.getByRole("button", { name: en.filesForYou }));
 

@@ -153,8 +153,8 @@ describe("pages", () => {
 		await expectNoAxeViolations(first.container);
 		cleanup();
 
-		const { container, socket } = await renderApp("/events");
-		act(() => socket?.close());
+		const { container, hub } = await renderApp("/events");
+		act(() => hub?.close());
 		expect(
 			await screen.findByRole("heading", { name: en.lostTitle }),
 		).toBeTruthy();
@@ -215,7 +215,7 @@ describe("pages", () => {
 		).toBeTruthy();
 		expect(
 			screen.getByRole("link", { name: en.noPageHome }).getAttribute("href"),
-		).toBe("/");
+		).toBe("/t/shop/");
 		await expectNoAxeViolations(container);
 	});
 
@@ -241,7 +241,7 @@ describe("pages", () => {
 		);
 		expect(
 			screen.getByRole("link", { name: en.backToToday }).getAttribute("href"),
-		).toBe("/");
+		).toBe("/t/shop/");
 		await expectNoAxeViolations(container);
 	});
 

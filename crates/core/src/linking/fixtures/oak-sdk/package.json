@@ -1,0 +1,8 @@
+{
+  "name": "@kelp/sdk",
+  "version": "9.9.9",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/someone-else/kelp-sdk.git"
+  }
+}

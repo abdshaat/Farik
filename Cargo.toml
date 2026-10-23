@@ -65,6 +65,7 @@ tower = { version = "=0.5.3", default-features = false, features = ["util"] }
 typify = "=0.8.0"
 # Already locked through reqwest and rmcp; direct for matching a server's address to a registered app.
 url = "=2.5.8"
+# Already locked through calamine and rust_xlsxwriter; direct for catervas-runtime (a Word file) and catervas-store (claude.ai's export, read without extracting it).
 zip = { version = "=8.6.0", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]

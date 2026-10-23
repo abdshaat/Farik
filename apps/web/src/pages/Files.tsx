@@ -1,5 +1,6 @@
 import { Avatar, type AvatarKey, RoleTag } from "@catervas/ui";
-import { Link, useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
+import { Link, useNavigate } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import { useWide } from "../shell/Shell.tsx";
 import { t } from "../strings/t.ts";

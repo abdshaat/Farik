@@ -1,0 +1,10 @@
+name: sync
+on: workflow_dispatch
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: docs-co/docs-hub
+          path: hub

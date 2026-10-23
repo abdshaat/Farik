@@ -205,10 +205,10 @@ describe("the product plan's changes on Today", () => {
 					.parentElement as HTMLElement,
 			).getByRole("link", { name: en.filesOpen });
 		expect(link("Roadmap").getAttribute("href")).toBe(
-			"/files/product/roadmap.md",
+			"/t/shop/files/product/roadmap.md",
 		);
 		expect(link("Product description").getAttribute("href")).toBe(
-			"/files/product/spec.md",
+			"/t/shop/files/product/spec.md",
 		);
 	});
 });

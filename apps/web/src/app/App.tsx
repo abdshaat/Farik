@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router";
 import { AgentEdit } from "../pages/AgentEdit.tsx";
+import { AllTeams } from "../pages/AllTeams.tsx";
+import { Analytics } from "../pages/Analytics.tsx";
 import { Board } from "../pages/Board.tsx";
 import { Chats } from "../pages/Chats.tsx";
 import { ChatsAlias } from "../pages/ChatsAlias.tsx";
@@ -7,9 +9,18 @@ import { Connect } from "../pages/Connect.tsx";
 import { Costs } from "../pages/Costs.tsx";
 import { Events } from "../pages/Events.tsx";
 import { Files } from "../pages/Files.tsx";
+import { ConnectGithub } from "../pages/find/ConnectGithub.tsx";
+import { ExportDrop } from "../pages/find/ExportDrop.tsx";
+import { Found } from "../pages/find/Found.tsx";
+import { Scanning } from "../pages/find/Scanning.tsx";
+import { Services } from "../pages/find/Services.tsx";
+import { Together } from "../pages/find/Together.tsx";
+import { WhereClaude } from "../pages/find/WhereClaude.tsx";
+import { YourTeams } from "../pages/find/YourTeams.tsx";
 import { Gate } from "../pages/Gate.tsx";
 import { HelpNeeded } from "../pages/HelpNeeded.tsx";
 import { MarketingPlan } from "../pages/MarketingPlan.tsx";
+import { NeedsYou } from "../pages/NeedsYou.tsx";
 import { NotFound } from "../pages/NotFound.tsx";
 import { Opening } from "../pages/Opening.tsx";
 import { PlanEditor } from "../pages/PlanEditor.tsx";
@@ -21,6 +32,7 @@ import { Account } from "../pages/settings/Account.tsx";
 import { AllowedActions } from "../pages/settings/AllowedActions.tsx";
 import { Computer } from "../pages/settings/Computer.tsx";
 import { General } from "../pages/settings/General.tsx";
+import { Repositories } from "../pages/settings/Repositories.tsx";
 import { Rules } from "../pages/settings/Rules.tsx";
 import { SavedTeamsPage } from "../pages/settings/SavedTeamsPage.tsx";
 import {
@@ -42,9 +54,12 @@ import { SetupTeam } from "../pages/setup/SetupTeam.tsx";
 import { TeamSetup } from "../pages/setup/TeamSetup.tsx";
 import { TaskDetail } from "../pages/TaskDetail.tsx";
 import { Team } from "../pages/Team.tsx";
+import { ThisComputer } from "../pages/ThisComputer.tsx";
 import { Today } from "../pages/Today.tsx";
 import { Shell } from "../shell/Shell.tsx";
 import { useConnection } from "./connection.tsx";
+import { Navigate as TeamNavigate } from "./links.tsx";
+import { CurrentScope, TeamRedirect, TeamScope } from "./TeamScope.tsx";
 import { useTheme } from "./theme.ts";
 
 export function App() {
@@ -65,59 +80,87 @@ export function App() {
 			<Route path="/setup/computer" element={<SetupComputer />} />
 			<Route path="/setup/account" element={<SetupAccount />} />
 			<Route path="/setup/project" element={<SetupProject />} />
-			<Route path="/setup/scan" element={<SetupScan />} />
-			{/* The offer to document an existing project, after the team starts; it needs no draft. */}
-			<Route path="/setup/ready" element={<SetupReady />} />
-			{/* The team screens share one draft, which "Start the team" sends. */}
-			<Route element={<TeamSetup />}>
-				<Route path="/setup/team" element={<SetupTeam />} />
-				<Route path="/setup/permissions" element={<SetupPermissions />} />
-				<Route path="/setup/spending" element={<SetupSpending />} />
-				<Route path="/setup/finish" element={<SetupFinish />} />
-				<Route
-					path="/setup/advanced"
-					element={<Navigate to="/setup/finish" replace />}
-				/>
-			</Route>
-			<Route element={<Shell />}>
-				<Route index element={<Today />} />
-				<Route path="/board" element={<Board />} />
-				<Route path="/channel" element={<Chats />} />
-				<Route path="/channel/:id" element={<Chats />} />
-				<Route path="/chats" element={<Navigate to="/channel" replace />} />
-				<Route path="/chats/:id" element={<ChatsAlias />} />
-				<Route path="/files" element={<Files />} />
-				<Route path="/files/*" element={<Files />} />
-				<Route path="/costs" element={<Costs />} />
-				<Route path="/events" element={<Events />} />
-				<Route path="/marketing/plans/:id" element={<MarketingPlan />} />
-				<Route path="/requests/:id" element={<RequestFiled />} />
-				<Route path="/tasks/:id" element={<TaskDetail />} />
-				<Route path="/tasks/:id/questions" element={<Questions />} />
-				<Route path="/tasks/:id/plan" element={<PlanPage />} />
-				<Route path="/tasks/:id/plan/edit" element={<PlanEditor />} />
-				<Route path="/tasks/:id/accept" element={<Gate />} />
-				<Route path="/tasks/:id/help" element={<HelpNeeded />} />
-				<Route path="/team" element={<Team />} />
-				<Route path="/team/:id" element={<AgentEdit />} />
-				<Route path="/team/:id/mailbox" element={<ProcurementMailbox />} />
-				<Route path="/settings" element={<SettingsLayout />}>
-					<Route index element={<SettingsIndex />} />
+			{/* Finding the owner's projects (ADR 0059) is the computer's, so it talks to the hub. */}
+			<Route path="/setup/where" element={<WhereClaude />} />
+			<Route path="/find/scanning" element={<Scanning />} />
+			<Route path="/find/found" element={<Found />} />
+			<Route path="/find/export" element={<ExportDrop />} />
+			<Route path="/find/github" element={<ConnectGithub />} />
+			<Route path="/find/services" element={<Services />} />
+			<Route path="/find/together" element={<Together />} />
+			<Route path="/find/teams" element={<YourTeams />} />
+			{/* The steps after the project talk to the team just taken on, the current one. */}
+			<Route element={<CurrentScope />}>
+				<Route path="/setup/scan" element={<SetupScan />} />
+				{/* The offer to document an existing project, after the team starts; it needs no draft. */}
+				<Route path="/setup/ready" element={<SetupReady />} />
+				{/* The team screens share one draft, which "Start the team" sends. */}
+				<Route element={<TeamSetup />}>
+					<Route path="/setup/team" element={<SetupTeam />} />
+					<Route path="/setup/permissions" element={<SetupPermissions />} />
+					<Route path="/setup/spending" element={<SetupSpending />} />
+					<Route path="/setup/finish" element={<SetupFinish />} />
 					<Route
-						path="general"
-						element={<General theme={theme} onTheme={setTheme} />}
+						path="/setup/advanced"
+						element={<Navigate to="/setup/finish" replace />}
 					/>
-					<Route path="allowed-actions" element={<AllowedActions />} />
-					<Route path="rules" element={<Rules />} />
-					<Route path="spending" element={<Spending />} />
-					<Route path="work" element={<Work />} />
-					<Route path="your-app" element={<YourApp />} />
-					<Route path="saved-teams" element={<SavedTeamsPage />} />
-					<Route path="computer" element={<Computer />} />
-					<Route path="account" element={<Account />} />
 				</Route>
-				<Route path="*" element={<NotFound />} />
 			</Route>
+			{/* All teams and This computer have the rail of the computer, not of a team. */}
+			<Route element={<Shell />}>
+				<Route path="/teams" element={<AllTeams />} />
+				<Route path="/computer" element={<ThisComputer />} />
+				<Route path="/needs-you" element={<NeedsYou />} />
+				<Route path="/analytics" element={<Analytics />} />
+			</Route>
+			{/* Each team's pages are under its own address (ADR 0059). */}
+			<Route path="/t/:team" element={<TeamScope />}>
+				<Route element={<Shell />}>
+					<Route index element={<Today />} />
+					<Route path="board" element={<Board />} />
+					<Route path="channel" element={<Chats />} />
+					<Route path="channel/:id" element={<Chats />} />
+					<Route
+						path="chats"
+						element={<TeamNavigate to="/channel" replace />}
+					/>
+					<Route path="chats/:id" element={<ChatsAlias />} />
+					<Route path="files" element={<Files />} />
+					<Route path="files/*" element={<Files />} />
+					<Route path="costs" element={<Costs />} />
+					<Route path="events" element={<Events />} />
+					<Route path="marketing/plans/:id" element={<MarketingPlan />} />
+					<Route path="requests/:id" element={<RequestFiled />} />
+					<Route path="tasks/:id" element={<TaskDetail />} />
+					<Route path="tasks/:id/questions" element={<Questions />} />
+					<Route path="tasks/:id/plan" element={<PlanPage />} />
+					<Route path="tasks/:id/plan/edit" element={<PlanEditor />} />
+					<Route path="tasks/:id/accept" element={<Gate />} />
+					<Route path="tasks/:id/help" element={<HelpNeeded />} />
+					<Route path="team" element={<Team />} />
+					<Route path="team/:id" element={<AgentEdit />} />
+					<Route path="team/:id/mailbox" element={<ProcurementMailbox />} />
+					<Route path="settings" element={<SettingsLayout />}>
+						<Route index element={<SettingsIndex />} />
+						<Route
+							path="general"
+							element={<General theme={theme} onTheme={setTheme} />}
+						/>
+						<Route path="allowed-actions" element={<AllowedActions />} />
+						<Route path="rules" element={<Rules />} />
+						<Route path="spending" element={<Spending />} />
+						<Route path="work" element={<Work />} />
+						<Route path="repositories" element={<Repositories />} />
+						<Route path="your-app" element={<YourApp />} />
+						<Route path="saved-teams" element={<SavedTeamsPage />} />
+						<Route path="computer" element={<Computer />} />
+						<Route path="account" element={<Account />} />
+					</Route>
+					<Route path="*" element={<NotFound />} />
+				</Route>
+			</Route>
+			{/* Any other address is an old one, or a bookmark: it goes to a team's page. */}
+			<Route path="*" element={<TeamRedirect />} />
 		</Routes>
 	);
 }

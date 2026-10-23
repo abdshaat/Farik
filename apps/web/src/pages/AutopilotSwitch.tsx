@@ -1,7 +1,7 @@
 import { Button, Dialog, InfoTip, Switch } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { saidAll } from "../app/refusals.ts";
 import { Bullets } from "../components/Bullets.tsx";
 import { t } from "../strings/t.ts";

@@ -29,9 +29,9 @@ use serde_json::{Value, json};
 
 use catervas_core::team::fixtures::an_agent_wire;
 use project::{
-    LiveDriver, a_bare_env, a_claude_saying, a_project, a_task_with_a_human_criterion_verifying,
-    a_team, a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record,
-    record_as, recorded, run, run_with, scratch, status_of, the_run_lock_frees, walked,
+    LiveDriver, a_claude_saying, a_project, a_task_with_a_human_criterion_verifying, a_team,
+    a_team_with, at, events, filed, hold_the_run_lock, joined, no_sandbox, record, record_as,
+    recorded, run, run_with, scratch, status_of, the_run_lock_frees, walked,
 };
 
 /// An engine whose sessions are `adapter`'s.
@@ -124,15 +124,25 @@ fn lock_is_free(repository: &TempRepo) {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn refuses_to_run_without_a_credential() {
-    let repository = a_project("run-no-credential");
+fn refuses_to_run_when_claude_code_is_not_signed_in() {
+    let repository = a_project("run-not-signed-in");
+    let (directory, path) = a_claude_saying("signed-out-claude", "2.1.280 (Claude Code)");
+    std::fs::write(directory.join("signed-out"), "").expect("a marker");
     let before = events(&repository, &[]).len();
 
-    let ran = run_with(&repository.path, &["run"], |io| io.env = a_bare_env());
+    let ran = run_with(&repository.path, &["run"], |io| {
+        io.env.insert("PATH".to_string(), path.clone());
+    });
 
     assert_eq!(ran.code, 1, "{}", ran.out);
-    assert!(ran.err.contains("ANTHROPIC_API_KEY"), "{}", ran.err);
-    assert!(ran.err.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{}", ran.err);
+    assert!(
+        ran.err.contains(
+            "Claude Code is not signed in: sign in on the AI account page of the web app, or run \
+             claude auth login, or set ANTHROPIC_API_KEY where you start Catervas"
+        ),
+        "{}",
+        ran.err
+    );
     assert!(!daemon_file(&repository).exists());
     lock_is_free(&repository);
     assert_eq!(events(&repository, &[]).len(), before);
@@ -157,48 +167,43 @@ fn refuses_a_claude_code_older_than_the_minimum() {
 
 #[test]
 #[ignore = "needs the git program: cargo xtask check --integration"]
-fn names_the_credential_it_chose_and_never_prints_it() {
-    let repository = a_project("run-credential");
+fn names_the_account_and_never_a_key() {
+    let repository = a_project("run-account");
     let (_directory, path) = a_claude_saying("new-claude", "2.1.280 (Claude Code)");
 
-    let both = run_with(&repository.path, &["run"], |io| {
+    let from_claude = run_with(&repository.path, &["run"], |io| {
         io.env.insert("PATH".to_string(), path.clone());
-        io.env
-            .insert("ANTHROPIC_API_KEY".to_string(), "sk-key-secret".to_string());
-        io.env.insert(
-            "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
-            "oauth-token-secret".to_string(),
-        );
     });
-    assert_eq!(both.code, 0, "{}", both.err);
+    assert_eq!(from_claude.code, 0, "{}", from_claude.err);
     assert!(
-        both.out
-            .lines()
-            .any(|line| line == "credential: ANTHROPIC_API_KEY (an API key)"),
-        "{}",
-        both.out
-    );
-    for secret in ["sk-key-secret", "oauth-token-secret"] {
-        assert!(!both.out.contains(secret) && !both.err.contains(secret));
-    }
-
-    let token = run_with(&repository.path, &["run"], |io| {
-        io.env.insert("PATH".to_string(), path.clone());
-        io.env.insert(
-            "CLAUDE_CODE_OAUTH_TOKEN".to_string(),
-            "oauth-token-secret".to_string(),
-        );
-    });
-    assert_eq!(token.code, 0, "{}", token.err);
-    assert!(
-        token
+        from_claude
             .out
             .lines()
-            .any(|line| line == "credential: CLAUDE_CODE_OAUTH_TOKEN (a subscription token)"),
+            .any(|line| line == "account: Claude Code, signed in with a subscription"),
         "{}",
-        token.out
+        from_claude.out
     );
-    assert!(!token.out.contains("oauth-token-secret") && !token.err.contains("oauth-token-secret"));
+
+    let from_environment = run_with(&repository.path, &["run"], |io| {
+        io.env.insert("PATH".to_string(), path.clone());
+        io.env.insert(
+            "ANTHROPIC_API_KEY".to_string(),
+            "sk-ant-api-test".to_string(),
+        );
+    });
+    assert_eq!(from_environment.code, 0, "{}", from_environment.err);
+    assert!(
+        from_environment
+            .out
+            .lines()
+            .any(|line| line == "account: ANTHROPIC_API_KEY from your environment"),
+        "{}",
+        from_environment.out
+    );
+    assert!(
+        !from_environment.out.contains("sk-ant-api-test")
+            && !from_environment.err.contains("sk-ant-api-test")
+    );
 }
 
 #[test]

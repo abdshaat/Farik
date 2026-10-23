@@ -1,0 +1,5 @@
+{
+  "name": "@tidepool/client",
+  "version": "0.3.0",
+  "main": "index.js"
+}

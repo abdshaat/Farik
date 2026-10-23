@@ -63,7 +63,7 @@ test("work runs on the board by itself, from its plan to the team's look back", 
 						`section[aria-labelledby="lane-${lane}-title"]`,
 					);
 					if (
-						column?.querySelector('a[href="/tasks/CTV-1"]') &&
+						column?.querySelector('a[href$="/tasks/CTV-1"]') &&
 						seen.at(-1) !== lane
 					)
 						seen.push(lane);

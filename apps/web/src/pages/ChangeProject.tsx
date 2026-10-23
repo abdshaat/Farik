@@ -1,6 +1,6 @@
 import { Button } from "@catervas/ui";
 import { type ReactNode, useState } from "react";
-import { useConnection } from "../app/connection.tsx";
+import { useConnection, useHub } from "../app/connection.tsx";
 import { saidAll } from "../app/refusals.ts";
 import { t } from "../strings/t.ts";
 import styles from "./pages.module.css";
@@ -23,6 +23,7 @@ export function ChangeProject({
 	rowClass?: string | undefined;
 }) {
 	const { client, reopen } = useConnection();
+	const hub = useHub();
 	const [asking, setAsking] = useState(false);
 	const [moving, setMoving] = useState(false);
 	const [said, setSaid] = useState<string>();
@@ -32,7 +33,9 @@ export function ChangeProject({
 		setMoving(true);
 		try {
 			await client.call("project.leave", {});
+			// The team ends, and the hub restarts too when it was the last one.
 			reopen();
+			hub.reopen();
 		} catch (e) {
 			setSaid(saidAll(e));
 			setMoving(false);

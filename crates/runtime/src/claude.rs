@@ -109,36 +109,6 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// How a session pays: the user's API key, or the token of their subscription.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClaudeCredential {
-    /// Passed to the program as `ANTHROPIC_API_KEY`.
-    ApiKey(Secret),
-    /// Passed to the program as `CLAUDE_CODE_OAUTH_TOKEN`.
-    OauthToken(Secret),
-}
-
-/// Which kind of credential the sessions run on, without the secret: what the browser is told.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CredentialKind {
-    /// An `ANTHROPIC_API_KEY`.
-    ApiKey,
-    /// A subscription's `CLAUDE_CODE_OAUTH_TOKEN`.
-    SubscriptionToken,
-}
-
-impl ClaudeCredential {
-    /// Which kind of credential this is.
-    #[must_use]
-    pub fn kind(&self) -> CredentialKind {
-        match self {
-            Self::ApiKey(_) => CredentialKind::ApiKey,
-            Self::OauthToken(_) => CredentialKind::SubscriptionToken,
-        }
-    }
-}
-
 /// The variable of `env` a credential comes from, when one does: what cannot be removed from
 /// Catervas, since the environment is the user's.
 #[must_use]
@@ -146,20 +116,6 @@ pub fn credential_variable(env: &BTreeMap<String, String>) -> Option<&'static st
     [API_KEY, OAUTH_TOKEN]
         .into_iter()
         .find(|name| env.get(*name).is_some_and(|value| !value.trim().is_empty()))
-}
-
-/// The credential an environment holds: `ANTHROPIC_API_KEY` first, else
-/// `CLAUDE_CODE_OAUTH_TOKEN`; a blank value is none.
-#[must_use]
-pub fn credential_from_env(env: &BTreeMap<String, String>) -> Option<ClaudeCredential> {
-    let named = |name: &str| {
-        env.get(name)
-            .filter(|value| !value.trim().is_empty())
-            .map(|value| Secret::new(value.clone()))
-    };
-    named(API_KEY)
-        .map(ClaudeCredential::ApiKey)
-        .or_else(|| named(OAUTH_TOKEN).map(ClaudeCredential::OauthToken))
 }
 
 /// Where the program is, what its hooks run, and what its sessions are given. Its `Debug` names
@@ -182,7 +138,7 @@ pub struct ClaudeConfig {
     pub skills_dir: PathBuf,
     /// `.catervas/team.yaml`, read at each session start for the protected paths.
     pub team_file: PathBuf,
-    /// The whole environment the program gets besides its credential; nothing else is inherited.
+    /// The whole environment the program gets; nothing else is inherited.
     pub env: BTreeMap<String, String>,
 }
 
@@ -202,13 +158,8 @@ impl fmt::Debug for ClaudeConfig {
     }
 }
 
-/// The credential sessions start with, shared so that connecting the account again replaces it
-/// for the next session without a restart.
-pub type SharedCredential = Arc<Mutex<ClaudeCredential>>;
-
 /// Starts Claude Code sessions as child processes, and resumes the ones it started.
 pub struct ClaudeAdapter {
-    credential: SharedCredential,
     config: ClaudeConfig,
     /// Each session this adapter started: its spec, and a token cancelled once its process is
     /// gone.
@@ -219,7 +170,6 @@ impl fmt::Debug for ClaudeAdapter {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ClaudeAdapter")
-            .field("credential", &self.credential)
             .field("config", &self.config)
             .finish_non_exhaustive()
     }
@@ -233,13 +183,9 @@ impl ClaudeAdapter {
     ///
     /// `Spawn` when the program cannot be run or names no version; `VersionTooOld` when it is
     /// older than the minimum.
-    pub fn new(
-        credential: SharedCredential,
-        config: ClaudeConfig,
-    ) -> Result<ClaudeAdapter, RuntimeError> {
+    pub fn new(config: ClaudeConfig) -> Result<ClaudeAdapter, RuntimeError> {
         check_version(&version_output(&config)?)?;
         Ok(ClaudeAdapter {
-            credential,
             config,
             specs: Mutex::new(BTreeMap::new()),
         })
@@ -272,7 +218,7 @@ impl ClaudeAdapter {
             .args(&args)
             .current_dir(&spec.cwd)
             .env_clear()
-            .envs(child_env(&locked(&self.credential), &self.config.env))
+            .envs(child_env(&self.config.env))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -741,20 +687,12 @@ pub fn write_session_files(
     crate::skills::write_plugin(&plugin, &spec.skills).map_err(|error| io(&plugin, error))
 }
 
-/// The program's whole environment: `base`, the credential's one variable, and `QUIET`.
+/// The program's whole environment: `base` and `QUIET`. No key of Catervas's is added: Claude Code
+/// finds its own sign-in, and a key the user set in `base` passes through as it was found (ADR
+/// 0084).
 #[must_use]
-pub fn child_env(
-    credential: &ClaudeCredential,
-    base: &BTreeMap<String, String>,
-) -> BTreeMap<String, String> {
+pub fn child_env(base: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut env = base.clone();
-    env.remove(API_KEY);
-    env.remove(OAUTH_TOKEN);
-    let (name, secret) = match credential {
-        ClaudeCredential::ApiKey(secret) => (API_KEY, secret),
-        ClaudeCredential::OauthToken(secret) => (OAUTH_TOKEN, secret),
-    };
-    env.insert(name.to_string(), secret.expose().to_string());
     for (name, value) in QUIET {
         env.insert((*name).to_string(), (*value).to_string());
     }
@@ -1064,8 +1002,8 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::{
-        ClaudeConfig, ClaudeCredential, CredentialKind, Secret, allowed_builtins, check_version,
-        child_env, claude_args, credential_from_env, write_session_files,
+        ClaudeConfig, Secret, allowed_builtins, check_version, child_env, claude_args,
+        credential_variable, write_session_files,
     };
     use crate::daemon::DaemonInfo;
     use crate::recorded::fixtures::a_session_spec;
@@ -1490,28 +1428,31 @@ mod tests {
     }
 
     #[test]
-    fn passes_only_the_base_environment_and_one_credential() {
-        let base = BTreeMap::from([("PATH".to_string(), "/usr/bin".to_string())]);
-        let api_key = ClaudeCredential::ApiKey(Secret::new("sk-key".to_string()));
-        let quiet = |pairs: [(&str, &str); 2]| -> BTreeMap<String, String> {
+    fn passes_the_base_environment_and_no_key_of_its_own() {
+        let base = BTreeMap::from([
+            ("PATH".to_string(), "/usr/bin".to_string()),
+            ("HOME".to_string(), "/home/a".to_string()),
+        ]);
+        let quiet = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
             pairs
-                .into_iter()
-                .chain([
+                .iter()
+                .chain(&[
                     ("CLAUDE_CODE_DISABLE_AUTO_MEMORY", "1"),
                     ("DISABLE_AUTOUPDATER", "1"),
                 ])
-                .map(|(key, value)| (key.to_string(), value.to_string()))
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
                 .collect()
         };
         assert_eq!(
-            child_env(&api_key, &base),
-            quiet([("ANTHROPIC_API_KEY", "sk-key"), ("PATH", "/usr/bin")])
+            child_env(&base),
+            quiet(&[("HOME", "/home/a"), ("PATH", "/usr/bin")])
         );
-        let token = ClaudeCredential::OauthToken(Secret::new("oauth".to_string()));
-        assert_eq!(
-            child_env(&token, &base),
-            quiet([("CLAUDE_CODE_OAUTH_TOKEN", "oauth"), ("PATH", "/usr/bin")])
-        );
+        // A key the user set passes through as it was found, and no other is added.
+        let mut with_key = base.clone();
+        with_key.insert("ANTHROPIC_API_KEY".to_string(), "from-user".to_string());
+        let env = child_env(&with_key);
+        assert_eq!(env["ANTHROPIC_API_KEY"], "from-user");
+        assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"));
         let overridden = BTreeMap::from([
             ("DISABLE_AUTOUPDATER".to_string(), "0".to_string()),
             (
@@ -1519,7 +1460,7 @@ mod tests {
                 "0".to_string(),
             ),
         ]);
-        let env = child_env(&token, &overridden);
+        let env = child_env(&overridden);
         assert_eq!(env["DISABLE_AUTOUPDATER"], "1");
         assert_eq!(env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"], "1");
     }
@@ -1822,47 +1763,37 @@ mod tests {
     }
 
     #[test]
-    fn prefers_the_api_key_and_ignores_blank_values() {
+    fn names_the_variable_an_account_comes_from() {
         let env = |pairs: &[(&str, &str)]| -> BTreeMap<String, String> {
             pairs
                 .iter()
                 .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
                 .collect()
         };
-        assert!(matches!(
-            credential_from_env(&env(&[
+        assert_eq!(
+            credential_variable(&env(&[
                 ("ANTHROPIC_API_KEY", "sk-key"),
                 ("CLAUDE_CODE_OAUTH_TOKEN", "oauth")
             ])),
-            Some(ClaudeCredential::ApiKey(secret)) if secret.expose() == "sk-key"
-        ));
-        assert!(matches!(
-            credential_from_env(&env(&[
+            Some("ANTHROPIC_API_KEY")
+        );
+        assert_eq!(
+            credential_variable(&env(&[
                 ("ANTHROPIC_API_KEY", "  "),
                 ("CLAUDE_CODE_OAUTH_TOKEN", "oauth")
             ])),
-            Some(ClaudeCredential::OauthToken(secret)) if secret.expose() == "oauth"
-        ));
-        assert!(credential_from_env(&env(&[("CLAUDE_CODE_OAUTH_TOKEN", "")])).is_none());
-        assert!(credential_from_env(&env(&[])).is_none());
-        // What the browser is told of each, never the secret itself.
-        let key = ClaudeCredential::ApiKey(Secret::new("sk-key".to_string()));
-        let token = ClaudeCredential::OauthToken(Secret::new("oauth".to_string()));
-        assert_eq!(key.kind(), CredentialKind::ApiKey);
-        assert_eq!(token.kind(), CredentialKind::SubscriptionToken);
-        assert_eq!(
-            serde_json::to_value(key.kind()).ok(),
-            Some("api_key".into())
+            Some("CLAUDE_CODE_OAUTH_TOKEN")
         );
         assert_eq!(
-            serde_json::to_value(token.kind()).ok(),
-            Some("subscription_token".into())
+            credential_variable(&env(&[("CLAUDE_CODE_OAUTH_TOKEN", "")])),
+            None
         );
+        assert_eq!(credential_variable(&env(&[])), None);
     }
 
     #[test]
     fn hides_a_secret_when_printed() {
-        let credential = ClaudeCredential::ApiKey(Secret::new("sk-very-secret".to_string()));
+        let credential = Secret::new("sk-very-secret".to_string());
         let printed = format!("{credential:?}");
         assert!(printed.contains("[redacted]"), "{printed}");
         assert!(!printed.contains("sk-very-secret"), "{printed}");

@@ -1,0 +1,18 @@
+# /etc/systemd/system/db-backup.timer
+[Unit]
+Description=Database backup
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1d
+
+[Install]
+WantedBy=timers.target
+
+# /etc/systemd/system/db-backup.service
+[Unit]
+Description=Back up the database
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/local/bin/db-backup

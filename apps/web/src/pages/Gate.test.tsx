@@ -158,7 +158,7 @@ describe("acceptance gate", () => {
 			within(about)
 				.getByRole("link", { name: "See the whole history" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-1");
+		).toBe("/t/shop/tasks/CTV-1");
 		await expectNoAxeViolations(container);
 	});
 

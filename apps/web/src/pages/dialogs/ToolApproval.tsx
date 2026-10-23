@@ -1,7 +1,7 @@
 import { Button, Dialog, TextArea } from "@catervas/ui";
 import { useId, useState } from "react";
-import { Link } from "react-router";
 import { useCommand } from "../../app/command.ts";
+import { Link } from "../../app/links.tsx";
 import { t } from "../../strings/t.ts";
 import type { AllowanceRow, Allowances } from "../allowances.tsx";
 import styles from "../pages.module.css";

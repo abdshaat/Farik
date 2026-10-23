@@ -7,9 +7,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
-use crate::claude::CredentialKind;
-use crate::credential::Source;
-
 /// Why the host did not do what the wizard asked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SetupError {
@@ -67,14 +64,28 @@ pub trait SetupHost: Send + Sync {
         repos: &[MemberRequest],
         no_sandbox: bool,
     ) -> Result<PathBuf, SetupError>;
-    /// Keeps the pasted `secret` of `kind`, and answers where, and whether a project that waited
-    /// on the credential is now being taken on.
+    /// Takes on the project that waited on an AI account, now that Claude Code works, and
+    /// answers whether there was one.
     ///
     /// # Errors
     ///
-    /// `Refused` with the sentence to show, which never quotes the secret.
-    fn connect(&self, kind: CredentialKind, secret: &str) -> Result<(Source, bool), SetupError>;
-    /// The sandbox image is ready: takes on the project that waited on the sandbox, if one did,
+    /// `Failed` when something broke.
+    fn take_on_waiting(&self) -> Result<bool, SetupError>;
+    /// Keeps the limits the computer's teams share where the next `catervas serve` reads them
+    /// (ADR 0059): `Some(Some(n))` sets one, `Some(None)` clears it, `None` leaves it as it is.
+    ///
+    /// # Errors
+    ///
+    /// `Failed` when they cannot be written.
+    fn set_limits(
+        &self,
+        agents_at_once: Option<Option<usize>>,
+        daily_cap_usd: Option<Option<f64>>,
+    ) -> Result<(), SetupError> {
+        let _ = (agents_at_once, daily_cap_usd);
+        Ok(())
+    }
+    /// The sandbox image is ready: takes on the projects that waited on the sandbox, if any did,
     /// and answers whether it did.
     fn sandbox_ready(&self) -> bool {
         false
@@ -83,8 +94,6 @@ pub trait SetupHost: Send + Sync {
     fn home(&self) -> PathBuf;
     /// The environment the computer's programs are looked for and run in.
     fn env(&self) -> BTreeMap<String, String>;
-    /// The credential there is now, read afresh, and where it came from.
-    fn account(&self) -> Option<(CredentialKind, Source)>;
 }
 
 /// What `folders.list` refuses a path outside home with.

@@ -63,7 +63,7 @@ test("an escalation is answered from Today in one action", async ({ page }) => {
 			page.getByRole("button", { name: "Give it more room" }),
 		).toBeEnabled();
 		await page.getByRole("button", { name: "Give it more room" }).click();
-		await expect(page).toHaveURL(`${new URL(serve.url).origin}/`);
+		await expect(page).toHaveURL(/\/t\/[^/]+\/$/);
 		await expect(
 			page.getByText("Theo needs your help", { exact: true }),
 		).toHaveCount(0);

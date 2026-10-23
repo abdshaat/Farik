@@ -1,0 +1,6 @@
+{
+  "name": "opal-shop",
+  "dependencies": {
+    "@acme/ui": "^4.0.0"
+  }
+}

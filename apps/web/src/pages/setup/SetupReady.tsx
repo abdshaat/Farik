@@ -2,6 +2,7 @@ import { Avatar, type AvatarKey, Button, RoleTag } from "@catervas/ui";
 import { Navigate, useNavigate } from "react-router";
 import { useCommand } from "../../app/command.ts";
 import { useQuery } from "../../app/store.ts";
+import { ON_CURRENT } from "../../app/teams.ts";
 import type { en } from "../../strings/en.ts";
 import { t } from "../../strings/t.ts";
 import type { Catervafication } from "../CatervaficationCard.tsx";
@@ -34,11 +35,12 @@ export function SetupReady() {
 	);
 	const { data: team } = useQuery<{ team: Team }>("team.get", {});
 	const { busy, refusal, send } = useCommand(() =>
-		navigate("/", { replace: true }),
+		navigate("/", { replace: true, state: ON_CURRENT }),
 	);
 	// A new project, or one already started, has nothing to offer: it lands where it did.
 	// An offer that cannot be read is no offer.
-	if (error || (offer && !offer.offered)) return <Navigate to="/" replace />;
+	if (error || (offer && !offer.offered))
+		return <Navigate to="/" replace state={ON_CURRENT} />;
 	if (!offer || !team) return null;
 	const active = team.team.agents.filter((a) => a.status === "active");
 	return (
@@ -87,7 +89,9 @@ export function SetupReady() {
 					>
 						{t("readyStart")}
 					</Button>
-					<Button onClick={() => navigate("/", { replace: true })}>
+					<Button
+						onClick={() => navigate("/", { replace: true, state: ON_CURRENT })}
+					>
 						{t("readyLater")}
 					</Button>
 					<span className={styles.note}>{t("readyLaterNote")}</span>

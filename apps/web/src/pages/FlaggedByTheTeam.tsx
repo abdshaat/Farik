@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link } from "../app/links.tsx";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import type { Agent } from "./setup/TeamSetup.tsx";

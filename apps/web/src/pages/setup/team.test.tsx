@@ -14,6 +14,7 @@ import type { FakeSocket } from "../../test/fake-socket.ts";
 import {
 	answerQuery,
 	answerStatus,
+	intoTeam,
 	renderApp,
 } from "../../test/render-app.tsx";
 import { onlyInTips } from "../../test/tips.ts";
@@ -1045,7 +1046,7 @@ describe("team setup", () => {
 	});
 
 	it("starts_the_team", async () => {
-		const { socket } = await renderApp("/setup/finish");
+		const { socket, hub, sockets } = await renderApp("/setup/finish");
 		const s = socket as FakeSocket;
 		const wire = proposed();
 		await answerQuery(s, "team.propose", wire);
@@ -1064,7 +1065,7 @@ describe("team setup", () => {
 		await s.reply(s.calls("team.start")[1] as never, {});
 		// The offer to document the project has none for this team: it goes on to Today.
 		await answerQuery(s, "catervafication.get", { offered: false, roles: [] });
-		await answerStatus(s, false, 1, { setup_pending: false });
+		await intoTeam(hub as FakeSocket, sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 });

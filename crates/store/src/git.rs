@@ -638,6 +638,84 @@ impl Git {
         }
     }
 
+    /// The repository's main worktree, the first one `git worktree list` names, so that every
+    /// linked worktree folds into its repository. A bare repository's is its own folder; a folder in
+    /// no repository has none.
+    ///
+    /// # Errors
+    ///
+    /// `NotInstalled` when git cannot be run; `CommandFailed` when git refuses the listing.
+    pub fn main_worktree(&self) -> Result<Option<String>, GitError> {
+        if !self.is_repository() {
+            return Ok(None);
+        }
+        let listed = self.at_root(&["worktree", "list", "--porcelain"])?;
+        Ok(listed
+            .lines()
+            .next()
+            .and_then(|line| line.strip_prefix("worktree "))
+            .map(str::to_string))
+    }
+
+    /// The address of the repository's remote: `origin`'s, else the first remote by name, as
+    /// `git remote get-url` gives it (so a `url.<base>.insteadOf` rewrite is applied). None when the
+    /// repository has no remote.
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn remote_url(&self) -> Result<Option<String>, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&["remote"])?;
+        let mut names: Vec<&str> = listed.lines().filter(|name| !name.is_empty()).collect();
+        names.sort_unstable();
+        let Some(name) = names
+            .iter()
+            .find(|name| **name == "origin")
+            .or(names.first())
+        else {
+            return Ok(None);
+        };
+        let address = self.at_root(&["remote", "get-url", name])?;
+        Ok((!address.is_empty()).then_some(address))
+    }
+
+    /// The email git commits as here, the repository's own setting or the global one; none when
+    /// git knows nobody.
+    ///
+    /// # Errors
+    ///
+    /// `NotInstalled` when git cannot be run.
+    pub fn user_email(&self) -> Result<Option<String>, GitError> {
+        match self.at_root(&["config", "--get", "user.email"]) {
+            Ok(email) if !email.is_empty() => Ok(Some(email)),
+            // `config --get` exits 1 for a key that is not set.
+            Ok(_) | Err(GitError::CommandFailed { .. }) => Ok(None),
+            Err(other) => Err(other),
+        }
+    }
+
+    /// Whether any commit on any ref was authored by `email`, compared without regard to case and
+    /// as a whole address (the `<>` around it matter).
+    ///
+    /// # Errors
+    ///
+    /// `NotARepository`, `NotInstalled`, or `CommandFailed` when git refuses.
+    pub fn has_commit_by(&self, email: &str) -> Result<bool, GitError> {
+        self.require_repository()?;
+        let author = format!("--author=<{email}>");
+        let found = self.at_root(&[
+            "log",
+            "--all",
+            "-1",
+            "--format=%H",
+            "--fixed-strings",
+            "--regexp-ignore-case",
+            &author,
+        ])?;
+        Ok(!found.is_empty())
+    }
+
     /// How many commits `head` has that `base` does not.
     ///
     /// # Errors
@@ -675,6 +753,36 @@ impl Git {
         })
     }
 
+    /// How many commits of `branch` were committed from `since` up to `until`, no merge commit among
+    /// them, and when `by` is an address, only those it authored (compared without regard to case,
+    /// as a whole address).
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `branch` names nothing; `NotARepository` or `NotInstalled`.
+    pub fn commits_in_period(
+        &self,
+        branch: &str,
+        since: chrono::DateTime<chrono::Utc>,
+        until: chrono::DateTime<chrono::Utc>,
+        by: Option<&str>,
+    ) -> Result<u32, GitError> {
+        self.require_repository()?;
+        let since = format!("--since={} +0000", since.timestamp());
+        let until = format!("--until={} +0000", until.timestamp());
+        let author = by.map(|email| format!("--author=<{email}>"));
+        let mut arguments = vec!["rev-list", "--count", "--no-merges", &since, &until];
+        if let Some(author) = &author {
+            arguments.extend(["--fixed-strings", "--regexp-ignore-case", author]);
+        }
+        arguments.extend([branch, "--"]);
+        let counted = self.at_root(&arguments)?;
+        counted.parse().map_err(|_| GitError::CommandFailed {
+            command: "rev-list --count".to_string(),
+            stderr: format!("answered {counted:?}, which is not a number of commits"),
+        })
+    }
+
     /// Every entry under `dir` as `rev` has it, at any depth, in git's order; a directory `rev`
     /// does not hold gives none.
     ///
@@ -697,6 +805,27 @@ impl Git {
                     blob: blob.to_string(),
                     path: path.to_string(),
                 })
+            })
+            .collect())
+    }
+
+    /// Every file `rev` holds, at any depth, with its size in bytes, in git's order. A symbolic
+    /// link and a submodule are not files and are left out.
+    ///
+    /// # Errors
+    ///
+    /// `CommandFailed` when `rev` names nothing, as in a repository with no commit.
+    pub fn tree_sizes(&self, rev: &str) -> Result<Vec<(String, u64)>, GitError> {
+        self.require_repository()?;
+        let listed = self.at_root(&["--literal-pathspecs", "ls-tree", "-r", "-l", "-z", rev])?;
+        Ok(listed
+            .split('\0')
+            .filter_map(|entry| {
+                let (meta, path) = entry.split_once('\t')?;
+                let mut meta = meta.split_whitespace();
+                let mode = meta.next()?;
+                let size = meta.nth(2)?.parse().ok()?;
+                (mode.starts_with("100")).then(|| (path.to_string(), size))
             })
             .collect())
     }
@@ -1473,6 +1602,30 @@ fn as_someone<'a>(directory: &Path, arguments: &[&'a str]) -> Vec<&'a str> {
 /// directory are the same string; it wants git 2.31 or newer, which `docs/standards/code.md`
 /// records.
 const COMMON_DIRECTORY: [&str; 3] = ["rev-parse", "--path-format=absolute", "--git-common-dir"];
+
+/// Whether the tree at `directory` has changes that are not committed (`git status --porcelain`).
+/// It takes no optional lock, so that reading a folder the owner works in never writes to it.
+///
+/// # Errors
+///
+/// `CommandFailed` when `directory` is not in a repository, `NotInstalled` when git cannot be run.
+pub fn has_uncommitted(directory: &Path) -> Result<bool, GitError> {
+    Ok(!run_git(directory, &["--no-optional-locks", "status", "--porcelain"])?.is_empty())
+}
+
+/// How many commits of the checked-out branch at `directory` its upstream does not have
+/// (`git rev-list @{u}..HEAD --count`); none when the branch has no upstream.
+///
+/// # Errors
+///
+/// `NotInstalled` when git cannot be run.
+pub fn unpushed_commits(directory: &Path) -> Result<u32, GitError> {
+    match run_git(directory, &["rev-list", "@{u}..HEAD", "--count"]) {
+        Ok(count) => Ok(count.trim().parse().unwrap_or(0)),
+        Err(error @ GitError::NotInstalled { .. }) => Err(error),
+        Err(_) => Ok(0),
+    }
+}
 
 /// Runs git in `directory` and hands back what it said on standard output, with the newline git
 /// ends it with taken off.

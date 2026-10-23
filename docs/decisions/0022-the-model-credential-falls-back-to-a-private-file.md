@@ -1,7 +1,7 @@
 # 0022. The model credential falls back to a private file
 
 Date: 2026-09-29
-Status: accepted
+Status: superseded by ADR 0084 (2026-10-21)
 
 ## Context
 

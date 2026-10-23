@@ -123,7 +123,7 @@ test("the user mentions an agent in the channel, and the agent's reply appears b
 		await expect(reply.getByText("Replying to You")).toBeVisible();
 		await expect(reply.getByRole("link", { name: "CTV-1" })).toHaveAttribute(
 			"href",
-			"/tasks/CTV-1",
+			/\/t\/[^/]+\/tasks\/CTV-1$/,
 		);
 		await screenshots(page, "channel");
 

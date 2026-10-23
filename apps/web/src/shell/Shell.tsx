@@ -1,23 +1,18 @@
 import icon from "@catervas/brand/assets/icons/icon-48.png";
 import { Button } from "@catervas/ui";
 import { useCallback, useSyncExternalStore } from "react";
-import {
-	Link,
-	Navigate,
-	NavLink,
-	Outlet,
-	useLocation,
-	useNavigate,
-} from "react-router";
+import { Outlet, useLocation, useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
 import { landing } from "../app/landing.ts";
+import { Link, Navigate, NavLink, useNavigate } from "../app/links.tsx";
 import { type ServeStatus, useQuery } from "../app/store.ts";
-import { ChangeProject } from "../pages/ChangeProject.tsx";
+import { pageOf } from "../app/teams.ts";
 import { Opening } from "../pages/Opening.tsx";
 import type { Team } from "../pages/setup/TeamSetup.tsx";
 import { t } from "../strings/t.ts";
 import { PauseControl } from "./PauseControl.tsx";
 import styles from "./Shell.module.css";
+import { TeamSwitcher } from "./TeamSwitcher.tsx";
 
 const WIDE = "(min-width: 1024px)";
 
@@ -53,33 +48,46 @@ export function useWide(): boolean {
 	return useMedia(WIDE);
 }
 
+/** The places off a team: every team, and this computer's own settings. */
+const COMPUTER_PLACES = [
+	["/teams", "allTeams"],
+	["/analytics", "analytics"],
+	["/computer", "computerPlace"],
+] as const;
+
 export function Shell() {
 	const wide = useWide();
 	const { status, client } = useConnection();
 	const navigate = useNavigate();
-	const { data, again } = useQuery<ServeStatus>("serve.status", {});
+	// Inside a team the rail is the team's; on All teams and This computer it is the computer's.
+	const { team } = useParams();
+	const inTeam = team !== undefined;
+	const { data, again } = useQuery<ServeStatus>("serve.status", {}, !inTeam);
 	// One agent alone is paused and resumed by its name, not as a team (ADR 0071).
 	// Asked only once a project is open: before that there is no team.
 	const { data: held } = useQuery<{ team: Team }>(
 		"team.get",
 		{},
-		!data?.projectRoot,
+		!inTeam || !data?.projectRoot,
 	);
 	const solo = held?.team?.policy?.solo
 		? held.team.agents.find((a) => a.status !== "retired")?.displayName
 		: undefined;
-	const path = useLocation().pathname;
+	const path = pageOf(useLocation().pathname);
 	// The chats fill the window and scroll inside it, so the window itself does not.
 	const filled = path === "/channel" || path.startsWith("/channel/");
 	// Nothing shows, and nothing is asked of the project, until Catervas says where it stands.
-	if (!data) return <Opening />;
+	if (inTeam && !data) return <Opening />;
 	// During setup, every path goes where "/" would.
-	if (landing(data) !== "/") return <Navigate to={landing(data)} replace />;
+	if (data && landing(data) !== "/")
+		return <Navigate to={landing(data)} replace />;
 	// Files and Settings sit under Team on a phone (web-ui.md), so the bar has five places.
+	const shown = inTeam ? PLACES : COMPUTER_PLACES;
 	const places = (
 		<ul className={styles.places}>
-			{PLACES.filter(([to]) => wide || !UNDER_TEAM.includes(to)).map(
-				([to, word]) => (
+			{shown
+				.filter(([to]) => wide || !UNDER_TEAM.includes(to))
+				.map(([to, word]) => (
 					<li key={to}>
 						{!wide && to === "/team" && path.startsWith("/files") ? (
 							// Files sits under Team on a phone: Team stays marked (NavLink marks only its own path).
@@ -92,8 +100,7 @@ export function Shell() {
 							</NavLink>
 						)}
 					</li>
-				),
-			)}
+				))}
 		</ul>
 	);
 	const dismissKeys = async (thenTeam: boolean) => {
@@ -106,9 +113,8 @@ export function Shell() {
 			// Closed connection or a refusal: the notice stays, so the user can choose again.
 		}
 	};
-	const copied = data.keysCopied;
-	const name = data.projectRoot?.split(/[\\/]/).at(-1);
-	const pause = data && (
+	const copied = data?.keysCopied;
+	const pause = data && inTeam && (
 		<PauseControl paused={data.paused} short={!wide} solo={solo} />
 	);
 	return (
@@ -121,20 +127,9 @@ export function Shell() {
 						<img src={icon} alt="" width="24" height="24" />
 						{t("brand")}
 					</p>
+					<TeamSwitcher team={team} />
 					<nav aria-label={t("navRail")}>{places}</nav>
 					<div className={styles.foot}>
-						{data.projectRoot && (
-							<ChangeProject
-								root={data.projectRoot}
-								short
-								rowClass={styles.nameRow}
-								lead={
-									<p className={styles.project} title={data.projectRoot}>
-										{name}
-									</p>
-								}
-							/>
-						)}
 						<p className={styles.conn}>
 							<span
 								className={`${styles.dot}${status === "open" ? ` ${styles.live}` : ""}`}
@@ -142,7 +137,7 @@ export function Shell() {
 							/>
 							{t(status === "open" ? "connected" : "connecting")}
 						</p>
-						{data && (
+						{data && inTeam && (
 							<p>
 								{solo
 									? t(data.paused ? "soloPaused" : "soloWorking", {
@@ -157,16 +152,7 @@ export function Shell() {
 			) : (
 				<header className={styles.top}>
 					<div className={styles.topGroup}>
-						{data.projectRoot ? (
-							<ChangeProject
-								root={data.projectRoot}
-								short
-								rowClass={styles.nameRow}
-								lead={<span>{name}</span>}
-							/>
-						) : (
-							<span>{t("brand")}</span>
-						)}
+						<TeamSwitcher team={team} />
 					</div>
 					{pause}
 				</header>
@@ -191,7 +177,7 @@ export function Shell() {
 					</div>
 				)}
 				<Outlet />
-				{!wide && path.startsWith("/team") && (
+				{!wide && inTeam && path.startsWith("/team") && (
 					<p className={styles.under}>
 						<Link to="/files">{t("files")}</Link>
 						<Link to="/settings">{t("settings")}</Link>

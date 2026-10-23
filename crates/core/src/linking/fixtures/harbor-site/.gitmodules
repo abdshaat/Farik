@@ -1,0 +1,3 @@
+[submodule "theme"]
+	path = themes/harbor
+	url = git@github.com:harbor-co/harbor-theme.git

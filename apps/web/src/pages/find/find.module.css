@@ -1,0 +1,362 @@
+/* The pages that find the owner's projects: they sit in the setup's panels (docs/design/mockups/ManyFindOffer). */
+.card {
+	display: grid;
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+	padding: var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+}
+.card h2,
+.card h3,
+.card p,
+.card ul {
+	margin: 0;
+}
+.card h2 {
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+.card h3 {
+	font-weight: 600;
+}
+.card ul {
+	padding-left: var(--catervas-space-4);
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+.muted {
+	color: var(--catervas-color-ink-muted);
+}
+.actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+}
+.strip {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+	margin: 0;
+	max-width: 720px;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-working);
+	background: var(--catervas-color-surface);
+}
+.counts {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-5);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.count {
+	font:
+		var(--catervas-type-heading-weight) var(--catervas-type-heading-size) /
+		var(--catervas-type-heading-line-height) var(--catervas-type-heading-family);
+}
+.reading {
+	margin: 0;
+	font-family: var(--catervas-type-code-family);
+}
+.prompt {
+	color: var(--catervas-color-action);
+}
+.options {
+	display: grid;
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+}
+.option {
+	display: grid;
+	gap: var(--catervas-space-1);
+	justify-items: start;
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	text-align: left;
+	font: inherit;
+	color: inherit;
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	cursor: pointer;
+}
+.option strong {
+	font-weight: 600;
+}
+.option span {
+	color: var(--catervas-color-ink-muted);
+}
+.alert {
+	margin: 0;
+	max-width: 720px;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-status-waiting);
+}
+.form {
+	display: grid;
+	gap: var(--catervas-space-4);
+}
+.form p {
+	margin: 0 0 var(--catervas-space-2);
+}
+.list {
+	display: grid;
+	gap: 0;
+	margin: 0;
+	padding: 0;
+	max-width: 720px;
+	list-style: none;
+	border-top: 1px solid var(--catervas-color-rule);
+}
+.row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: var(--catervas-space-1) var(--catervas-space-4);
+	align-items: center;
+	padding: var(--catervas-space-3) 0;
+	border-bottom: 1px solid var(--catervas-color-rule);
+}
+.rowHead {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+	align-items: center;
+	overflow-wrap: anywhere;
+}
+.meta {
+	grid-column: 1;
+	margin: 0;
+	color: var(--catervas-color-ink-muted);
+}
+.badge {
+	padding: 0 var(--catervas-space-2);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	font:
+		var(--catervas-type-small-weight) var(--catervas-type-small-size) /
+		var(--catervas-type-small-line-height) var(--catervas-type-small-family);
+}
+.more {
+	font: inherit;
+	color: inherit;
+	background: transparent;
+	border: 0;
+	cursor: pointer;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.panel {
+	grid-column: 1 / -1;
+	display: grid;
+	gap: var(--catervas-space-2);
+	justify-items: start;
+	padding: var(--catervas-space-2) var(--catervas-space-3);
+	border-left: 3px solid var(--catervas-color-rule);
+}
+.panel p,
+.panel ul {
+	margin: 0;
+}
+.panel ul {
+	padding-left: var(--catervas-space-4);
+}
+.pick {
+	display: flex;
+	gap: 2px;
+	margin: 0;
+	padding: 2px;
+	min-width: 0;
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-raised);
+	background: var(--catervas-color-page);
+}
+.pick legend {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+.pick label {
+	display: flex;
+	align-items: center;
+	min-height: 36px;
+	padding: 2px var(--catervas-space-3);
+	border-radius: calc(var(--catervas-radius-raised) - 2px);
+	cursor: pointer;
+}
+.pick label:has(input:checked) {
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	font-weight: 600;
+}
+.pick label:has(input:focus-visible) {
+	outline: 2px solid var(--catervas-color-ink);
+	outline-offset: 2px;
+}
+.pick input {
+	position: absolute;
+	opacity: 0;
+	width: 1px;
+	height: 1px;
+}
+.section {
+	display: grid;
+	gap: var(--catervas-space-2);
+	max-width: 720px;
+}
+.section > button {
+	justify-self: start;
+}
+.legend {
+	margin: 0;
+	padding-left: var(--catervas-space-4);
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+.foot {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+}
+.drop {
+	display: grid;
+	gap: var(--catervas-space-2);
+	justify-items: start;
+	max-width: 720px;
+	padding: var(--catervas-space-4);
+	border: 2px dashed var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+}
+.file {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	opacity: 0;
+}
+.tiles {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.tile {
+	display: grid;
+	gap: var(--catervas-space-1);
+	justify-items: start;
+	width: 100%;
+	height: 100%;
+	box-sizing: border-box;
+	padding: var(--catervas-space-3);
+	text-align: left;
+	font: inherit;
+	color: inherit;
+	background: var(--catervas-color-surface);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	cursor: pointer;
+}
+.tile span {
+	color: var(--catervas-color-ink-muted);
+}
+.tile[aria-pressed="true"] {
+	background: var(--catervas-color-ink);
+	color: var(--catervas-color-page);
+	border-color: var(--catervas-color-ink);
+}
+.tile[aria-pressed="true"] span {
+	color: inherit;
+}
+
+/* "Do these work together?" (docs/design/mockups/ManyLinkPair). */
+.pair {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--catervas-space-3);
+	max-width: 720px;
+}
+.pcard {
+	display: grid;
+	gap: var(--catervas-space-1);
+	min-width: 0;
+	padding: var(--catervas-space-3) var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+	overflow-wrap: anywhere;
+}
+.pcardMeta {
+	color: var(--catervas-color-ink-muted);
+}
+.proof {
+	max-width: 720px;
+	margin: 0;
+}
+.maybe {
+	display: grid;
+	gap: var(--catervas-space-1);
+	justify-items: start;
+	padding: var(--catervas-space-2) 0;
+}
+
+/* "Your teams" (docs/design/mockups/ManyYourTeams). */
+.tcards {
+	display: grid;
+	gap: var(--catervas-space-4);
+	max-width: 720px;
+}
+.tcard {
+	display: grid;
+	gap: var(--catervas-space-3);
+	padding: var(--catervas-space-4);
+	border: 1px solid var(--catervas-color-rule);
+	border-radius: var(--catervas-radius-control);
+}
+.tcard h2,
+.tcard p,
+.tcard ul {
+	margin: 0;
+}
+.thead {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-3);
+	align-items: center;
+	justify-content: space-between;
+}
+.tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--catervas-space-2);
+	padding: 0;
+	list-style: none;
+}
+.ptag {
+	padding: 0 var(--catervas-space-2);
+	border: 1px solid var(--catervas-color-control-border);
+	border-radius: var(--catervas-radius-control);
+	overflow-wrap: anywhere;
+}
+.notes {
+	padding-left: var(--catervas-space-4);
+	display: grid;
+	gap: var(--catervas-space-1);
+	color: var(--catervas-color-ink-muted);
+}
+.field {
+	display: grid;
+	gap: var(--catervas-space-1);
+}
+.field select {
+	min-height: 36px;
+	font: inherit;
+}

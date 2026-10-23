@@ -3,12 +3,20 @@
 
 /// What each agent does, and what moved.
 pub mod activity;
+/// What the analytics read from the machine index.
+pub mod analytics;
 /// What the log says about autopilot (ADR 0082).
 pub mod autopilot;
 /// The copy of a private folder a task is judged against.
 pub mod baseline;
 /// The branch names a new branch may not take.
 pub mod branches;
+/// Reading claude.ai's data export into the machine index, from the zip, without extracting it.
+pub mod claude_export;
+/// Reading Claude Code's transcripts into the machine index, and placing each session in its project.
+pub mod claude_history;
+/// Reading the connectors Claude's settings name into the machine index, never a key.
+pub mod claude_services;
 /// A task's diff, and an epic's.
 pub mod diff;
 /// Where the team's documents are read from.
@@ -23,8 +31,14 @@ pub mod files;
 pub mod folder_docs;
 /// The repository Catervas works in.
 pub mod git;
+/// Finding the owner's jobs in their repositories, on this computer and in Claude Code's records.
+pub mod jobs;
+/// The files proofs of linking are read from, and the owner's answers about pairs.
+pub mod linking;
 /// The team's documents kept on this computer.
 pub mod local_documents;
+/// The machine-level index of the owner's Claude Code history, apart from every project's log.
+pub mod machine;
 /// The marketing plans the log holds.
 pub mod marketing;
 /// Whether Catervas may merge its pull requests on this computer.
@@ -43,6 +57,8 @@ pub mod projections;
 pub mod purchase_orders;
 /// Where the files and the log disagree.
 pub mod reconcile;
+/// What the daily reminder reads from the machine index, from git and from Claude Code's folder.
+pub mod reminders;
 /// The renewals Catervas flagged for the owner.
 pub mod renewals;
 /// A project folder's member repositories on the file system.

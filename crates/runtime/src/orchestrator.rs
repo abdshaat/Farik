@@ -28,6 +28,7 @@ use crate::preview::PreviewFactory;
 use crate::sandbox::{Sandbox, SandboxError, SandboxFactory};
 use crate::session::{RuntimeAdapter, RuntimeError};
 use crate::sleep::Sleeper;
+use crate::slots::Slots;
 use crate::tools::ToolDeps;
 use crate::transitions::TransitionError;
 
@@ -77,6 +78,9 @@ pub struct OrchestratorDeps {
     /// Which agents have a session running in this process, and the turn every tick holds but
     /// while its session runs (ADR 0064).
     pub work: Arc<Work>,
+    /// What the teams of one `catervas serve` share: places for sessions, the AI account's sleep
+    /// and the computer's daily cap (ADR 0059). `None` for a process that drives one team.
+    pub slots: Option<Arc<Slots>>,
 }
 
 /// Why a tick could not finish. Something the governor refused is not one of these: it is an
@@ -549,6 +553,13 @@ impl Orchestrator {
         deps.tools
             .transitions
             .set_busy(Arc::new(move |agent| work.is_busy(agent)));
+        // The teams of one serve count what each spent today toward the computer's cap, from
+        // what this one had spent before it started.
+        if let Some(slots) = &deps.slots {
+            let now = deps.tools.clock.now();
+            let spent = crate::cost::day_usd(&deps.tools.projections, now).unwrap_or(0.0);
+            slots.record_spend(&deps.tools.ids.project_id, spent, now);
+        }
         Orchestrator {
             deps,
             sandboxes: Mutex::new(BTreeMap::new()),
@@ -2299,5 +2310,81 @@ mod tests {
                 if why == "the team's daily budget is spent"
         ));
         assert_eq!(adapter.starts().len(), 2);
+    }
+
+    /// Waits up to ten seconds for `done`.
+    async fn waited_for(what: &str, done: impl Fn() -> bool) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !done() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{what} did not happen"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
+    #[tokio::test]
+    #[ignore = "needs the git program: cargo xtask check --integration"]
+    async fn waits_for_a_place_held_by_another_team() {
+        use crate::orchestrator::fixtures::HeldAdapter;
+        use crate::recorded::fixtures::UsageThenWaitAdapter;
+        use crate::slots::Slots;
+        use catervas_core::pricing::Usage;
+        use catervas_protocol::clock::MovableClock;
+
+        let (first, second) = (
+            Harness::new("slots-a", |_| {}),
+            Harness::new("slots-b", |_| {}),
+        );
+        for harness in [&first, &second] {
+            harness.in_progress("CTV-1", "dev-a", "dev-b");
+        }
+        let slots = Slots::new(Some(1), None);
+        let held = || {
+            HeldAdapter::new(std::sync::Arc::new(UsageThenWaitAdapter::completing(
+                Usage::default(),
+            )))
+        };
+        let (adapter_a, adapter_b) = (held(), held());
+        let clock = || std::sync::Arc::new(MovableClock::new(at()));
+        let orchestrator_a = std::sync::Arc::new(first.orchestrator_sharing(
+            adapter_a.clone(),
+            clock(),
+            std::sync::Arc::clone(&slots),
+        ));
+        let orchestrator_b = std::sync::Arc::new(second.orchestrator_sharing(
+            adapter_b.clone(),
+            clock(),
+            std::sync::Arc::clone(&slots),
+        ));
+        until(&orchestrator_a, |p| {
+            started_of(p, "dev-a", Some("CTV-1"), "implement")
+        })
+        .await;
+        waited_for("the first team's session starts", || {
+            adapter_a.starts().len() == 1
+        })
+        .await;
+        until(&orchestrator_b, |p| {
+            started_of(p, "dev-a", Some("CTV-1"), "implement")
+        })
+        .await;
+
+        // The second team's session waits for the place, and records nothing meanwhile.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(second.events(&[EventKind::SessionStarted]).is_empty());
+        assert!(adapter_b.starts().is_empty());
+
+        adapter_a.release("dev-a");
+        until(&orchestrator_a, |p| {
+            matches!(p, super::Progress::Ticked(super::TickReport::Acted { .. }))
+        })
+        .await;
+        waited_for("the second team's session starts", || {
+            adapter_b.starts().len() == 1
+        })
+        .await;
+        assert_eq!(second.events(&[EventKind::SessionStarted]).len(), 1);
     }
 }

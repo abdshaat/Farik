@@ -1,6 +1,6 @@
 import type { Event, QueryName, RpcError } from "@catervas/protocol-client";
 import { useEffect, useRef, useState } from "react";
-import { useConnection } from "./connection.tsx";
+import { useConnection, useHub } from "./connection.tsx";
 
 const REFETCH_MS = 250;
 
@@ -9,7 +9,8 @@ export type ServeStatus = {
 	/** Null while Catervas is being set up, before a project is chosen. */
 	projectRoot: string | null;
 	paused: boolean;
-	credential: string | null;
+	/** Whether Claude Code is signed in. */
+	signedIn: boolean;
 	port: number;
 	/** Why taking the chosen project on failed, or null. */
 	takeOnError: string | null;
@@ -35,7 +36,27 @@ export function useQuery<T>(
 	params: object,
 	skip = false,
 ): { data: T | undefined; error: RpcError | undefined; again: () => void } {
-	const { client, events } = useConnection();
+	return useQueryOn<T>(useConnection(), name, params, skip);
+}
+
+/** `useQuery`, asked of the hub: what belongs to the computer, whatever team the address names. */
+export function useHubQuery<T>(
+	name: QueryName,
+	params: object,
+	skip = false,
+): { data: T | undefined; error: RpcError | undefined; again: () => void } {
+	return useQueryOn<T>(useHub(), name, params, skip);
+}
+
+function useQueryOn<T>(
+	{
+		client,
+		events,
+	}: Pick<ReturnType<typeof useConnection>, "client" | "events">,
+	name: QueryName,
+	params: object,
+	skip: boolean,
+): { data: T | undefined; error: RpcError | undefined; again: () => void } {
 	const [result, setResult] = useState<{
 		data: T | undefined;
 		error: RpcError | undefined;

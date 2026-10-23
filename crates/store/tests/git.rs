@@ -1969,3 +1969,129 @@ fn finds_a_worktrees_git_store_and_a_password_in_its_settings() {
     ]);
     assert!(git.config_holds_a_secret().expect("the read works"));
 }
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn finds_a_repositorys_main_worktree() {
+    let repository = TempRepo::new("main-worktree");
+    let root = repository
+        .path
+        .canonicalize()
+        .expect("the repository exists")
+        .to_string_lossy()
+        .into_owned();
+    let inside = repository.path.join("sub/folder");
+    std::fs::create_dir_all(&inside).expect("a subfolder");
+    let linked = repository.path.join(".claude/worktrees/x");
+    repository.git(&["worktree", "add", "-b", "x", &linked.to_string_lossy()]);
+
+    for folder in [repository.path.clone(), inside, linked] {
+        assert_eq!(
+            Git::open(folder).main_worktree().expect("git answers"),
+            Some(root.clone())
+        );
+    }
+    let plain = std::env::temp_dir().join(format!("catervas-plain-{}", std::process::id()));
+    std::fs::create_dir_all(&plain).expect("a plain folder");
+    assert_eq!(
+        Git::open(plain.clone())
+            .main_worktree()
+            .expect("git answers"),
+        None
+    );
+    let _ = std::fs::remove_dir_all(&plain);
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn knows_who_committed() {
+    let repository = TempRepo::new("who-committed");
+    repository.git(&["config", "user.email", "me@example.invalid"]);
+    repository.write("mine.txt", "mine\n");
+    repository.commit("a commit of mine");
+    let git = repository.adapter();
+    assert_eq!(
+        git.user_email().expect("git answers"),
+        Some("me@example.invalid".to_string())
+    );
+    assert!(
+        git.has_commit_by("me@example.invalid")
+            .expect("git answers")
+    );
+    assert!(
+        git.has_commit_by("ME@example.invalid")
+            .expect("git answers")
+    );
+    assert!(!git.has_commit_by("e@example.invalid").expect("git answers"));
+    assert!(
+        !git.has_commit_by("other@example.invalid")
+            .expect("git answers")
+    );
+
+    repository.git(&["checkout", "-b", "elsewhere"]);
+    repository.git(&[
+        "-c",
+        "user.email=other@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "somebody else's",
+    ]);
+    // Back on `main`, the other branch's commit is on no checked-out ref but is still found.
+    repository.git(&["checkout", "main"]);
+    assert!(
+        git.has_commit_by("other@example.invalid")
+            .expect("git answers")
+    );
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn reads_a_repositorys_remote() {
+    let repository = TempRepo::new("remote-url");
+    let remote = || repository.adapter().remote_url().expect("the read works");
+    assert_eq!(remote(), None, "no remote, none");
+    git_in(
+        &repository.path,
+        &[
+            "remote",
+            "add",
+            "zeta",
+            "https://example.invalid/me/zeta.git",
+        ],
+    );
+    assert_eq!(
+        remote().as_deref(),
+        Some("https://example.invalid/me/zeta.git")
+    );
+    git_in(
+        &repository.path,
+        &["remote", "add", "upstream", "git@example.invalid:me/up.git"],
+    );
+    assert_eq!(
+        remote().as_deref(),
+        Some("git@example.invalid:me/up.git"),
+        "with no origin, the first remote by name"
+    );
+    git_in(
+        &repository.path,
+        &[
+            "remote",
+            "add",
+            "origin",
+            "https://example.invalid/me/origin.git",
+        ],
+    );
+    assert_eq!(
+        remote().as_deref(),
+        Some("https://example.invalid/me/origin.git"),
+        "origin's, whatever the others"
+    );
+    let plain = repository.path.join("not-a-repository");
+    std::fs::create_dir_all(&plain).expect("a directory");
+    let nowhere = Git::open(std::env::temp_dir().join("catervas-no-remote-nowhere"));
+    assert!(matches!(
+        nowhere.remote_url(),
+        Err(GitError::NotARepository)
+    ));
+}

@@ -1,10 +1,10 @@
 import mark from "@catervas/brand/assets/logo-mark-1254.png";
 import { Button, RoleTag, uiStrings } from "@catervas/ui";
 import { type FormEvent, type ReactNode, useState } from "react";
-import { Link, useNavigate } from "react-router";
 import { agentLine } from "../app/agentLine.ts";
 import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
+import { Link, useNavigate } from "../app/links.tsx";
 import { type ProductPlanState, projectName } from "../app/productPlan.ts";
 import { daemonSaid, saidAll } from "../app/refusals.ts";
 import { useQuery } from "../app/store.ts";
@@ -39,6 +39,7 @@ import {
 import { FlaggedByTheTeam, type FlaggedRow } from "./FlaggedByTheTeam.tsx";
 import { GoalCard, type GoalState } from "./GoalCard.tsx";
 import { channelName, longRange, money } from "./marketing.ts";
+import { NeedsYouPart } from "./NeedsYouPart.tsx";
 import { type OrderWaiting, PurchaseOrderRow } from "./OrderRow.tsx";
 import type { OrderAsk } from "./orders.ts";
 import {
@@ -174,6 +175,7 @@ export function Today() {
 		team: Team;
 		kits?: RoleKit[];
 		hiddenSuggestions?: { agent: string; server: string }[];
+		foundServices?: { agent: string; server: string; name: string }[];
 		requestedConnections?: { agent: string; server: string; why: string }[];
 	}>("team.get", {});
 	// What agents made on other services, for a call that waits past its allowance.
@@ -337,6 +339,7 @@ export function Today() {
 			{documenting?.offered && (
 				<CatervaficationCard again={askDocumentingAgain} />
 			)}
+			<NeedsYouPart />
 			{autopilot && (
 				<FlaggedByTheTeam rows={autopilot.flagged} agents={agents} />
 			)}
@@ -432,6 +435,7 @@ export function Today() {
 					kits={team.kits ?? []}
 					hidden={team.hiddenSuggestions ?? []}
 					requested={team.requestedConnections ?? []}
+					found={team.foundServices ?? []}
 				/>
 			)}
 			<ChannelPreview agents={agents} />

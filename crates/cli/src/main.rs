@@ -29,9 +29,10 @@ fn main() -> std::process::ExitCode {
     io.interrupts = Interrupts::CtrlC;
     io.session_ids = Arc::new(RandomSessionIds);
     io.open_url = Arc::new(open_in_browser);
-    io.credential_stores = catervas::system_credential_stores(&io.env, true);
+    io.forget_keychain = true;
     io.connector_secrets = catervas::system_connector_secrets(&io.env);
     io.own_program = std::env::current_exe().ok();
+    io.notify = Arc::new(catervas_runtime::notify::run_program);
     let code = run_cli(&arguments, &mut io);
     std::process::ExitCode::from(u8::try_from(code).unwrap_or(1))
 }

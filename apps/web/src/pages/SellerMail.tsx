@@ -1,7 +1,7 @@
 import { Button } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
 import { useCommand } from "../app/command.ts";
+import { Link } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";

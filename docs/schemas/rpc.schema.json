@@ -74,7 +74,9 @@
         "folder_doc_proposals.list",
         "files.tree",
         "files.read",
-        "repos.list"
+        "repos.list",
+        "teams.list",
+        "computer.get"
       ]
     },
     "subscribeRequest": {
@@ -325,6 +327,12 @@
               "$ref": "#/$defs/reposListQuery"
             },
             {
+              "$ref": "#/$defs/teamsListQuery"
+            },
+            {
+              "$ref": "#/$defs/computerGetQuery"
+            },
+            {
               "$ref": "#/$defs/purchaseOrdersListQuery"
             },
             {
@@ -520,7 +528,13 @@
           "$ref": "#/$defs/projectCreateFolderRequest"
         },
         {
-          "$ref": "#/$defs/accountConnectRequest"
+          "$ref": "#/$defs/accountSignInRequest"
+        },
+        {
+          "$ref": "#/$defs/accountSignInCodeRequest"
+        },
+        {
+          "$ref": "#/$defs/accountCheckRequest"
         },
         {
           "$ref": "#/$defs/sandboxBuildRequest"
@@ -548,6 +562,144 @@
         },
         {
           "$ref": "#/$defs/documentAttachRequest"
+        },
+        {
+          "$ref": "#/$defs/teamsCurrentRequest"
+        },
+        {
+          "$ref": "#/$defs/teamsRemoveRequest"
+        },
+        {
+          "$ref": "#/$defs/teamsUndoRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersGetRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersSetRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersSnoozeRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersDismissRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersGiveRequest"
+        },
+        {
+          "$ref": "#/$defs/remindersMineRequest"
+        },
+        {
+          "$ref": "#/$defs/analyticsGetRequest"
+        },
+        {
+          "$ref": "#/$defs/analyticsMineRequest"
+        },
+        {
+          "$ref": "#/$defs/computerSetRequest"
+        },
+        {
+          "$ref": "#/$defs/findingOfferRequest"
+        },
+        {
+          "$ref": "#/$defs/findingCatalogRequest"
+        },
+        {
+          "$ref": "#/$defs/findingStartRequest"
+        },
+        {
+          "$ref": "#/$defs/findingStopRequest"
+        },
+        {
+          "$ref": "#/$defs/findingStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/findingListRequest"
+        },
+        {
+          "$ref": "#/$defs/findingIgnoredRequest"
+        },
+        {
+          "$ref": "#/$defs/findingChooseRequest"
+        },
+        {
+          "$ref": "#/$defs/findingSeparateRequest"
+        },
+        {
+          "$ref": "#/$defs/findingLocateRequest"
+        },
+        {
+          "$ref": "#/$defs/findingDeclareServicesRequest"
+        },
+        {
+          "$ref": "#/$defs/findingAddProjectRequest"
+        },
+        {
+          "$ref": "#/$defs/findingAddRoutineRequest"
+        },
+        {
+          "$ref": "#/$defs/findingRetentionRequest"
+        },
+        {
+          "$ref": "#/$defs/findingKeepLongerRequest"
+        },
+        {
+          "$ref": "#/$defs/findingPauseRequest"
+        },
+        {
+          "$ref": "#/$defs/findingExportDismissedRequest"
+        },
+        {
+          "$ref": "#/$defs/findingForgetRequest"
+        },
+        {
+          "$ref": "#/$defs/githubConnectRequest"
+        },
+        {
+          "$ref": "#/$defs/githubStatusRequest"
+        },
+        {
+          "$ref": "#/$defs/githubDisconnectRequest"
+        },
+        {
+          "$ref": "#/$defs/githubCopyRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingPairsRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingMaybeRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingGroupsRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingAnswerRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalGetRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalEditRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalMoveOutRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalRevertRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalNamesEstimateRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalNamesRequest"
+        },
+        {
+          "$ref": "#/$defs/proposalCreateRequest"
+        },
+        {
+          "$ref": "#/$defs/linkingRejectRequest"
         },
         {
           "$ref": "#/$defs/repoAddRequest"
@@ -583,7 +735,7 @@
           "$ref": "#/$defs/criteriaSaveRequest"
         },
         {
-          "$ref": "#/$defs/accountDisconnectRequest"
+          "$ref": "#/$defs/accountSignOutRequest"
         },
         {
           "$ref": "#/$defs/projectNoteRequest"
@@ -665,7 +817,7 @@
         },
         "result": {
           "type": "object",
-          "description": "subscribeResult for subscribe, emptyResult for unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountConnectResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
+          "description": "subscribeResult for subscribe, emptyResult for unsubscribe, commandReply for command, the query's own result def for query, and the method's own result def (projectOpenResult, projectCreateResult, which project.create_folder answers too, accountSignInResult, which account.sign_in answers, accountCheckResult, which account.check and account.sign_in_code answer, accountSignOutResult, sandboxBuildResult, browserPullResult) for a setup method, and each other method's own result def."
         }
       }
     },
@@ -1118,6 +1270,21 @@
             }
           }
         },
+        "found_services": {
+          "type": "array",
+          "description": "The services found on this computer that an active agent's kit offers a connector for (docs/SPEC.md 6.7), read from .catervas/local/found-services.json, which the proposal wrote when it made the team: one entry for each found service, with the first active agent whose kit offers it and does not hold it. Today suggests connecting each, as 'You use Zoho Books with Claude. Connect it for Finn?'.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["agent", "server", "service_id", "name"],
+            "properties": {
+              "agent": { "type": "string" },
+              "server": { "type": "string" },
+              "service_id": { "type": "string" },
+              "name": { "type": "string" }
+            }
+          }
+        },
         "kits": {
           "type": "array",
           "description": "Each role on the team whose kit has a service to connect by name, with the copy the page shows (ADR 0036). A container connector, which Catervas runs itself, is not listed, and nor is a role with no service.",
@@ -1267,19 +1434,8 @@
         "paused": {
           "type": "boolean"
         },
-        "credential": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
-                "api_key",
-                "subscription_token"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "signed_in": {
+          "type": "boolean"
         },
         "port": {
           "type": "integer",
@@ -1341,7 +1497,7 @@
       "required": [
         "project_root",
         "paused",
-        "credential",
+        "signed_in",
         "take_on_error",
         "port",
         "setup_pending",
@@ -1671,8 +1827,9 @@
         }
       }
     },
-    "accountConnectRequest": {
-      "title": "Account Connect Request",
+    "accountSignInRequest": {
+      "title": "Account Sign In Request",
+      "description": "Starts Claude Code's own sign-in (claude auth login, ADR 0084) with no terminal and answers the address of its page: console is true for an Anthropic Console account, false for a Claude subscription. Any earlier sign-in is ended. Refused while the account comes from the environment.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1689,27 +1846,84 @@
           "$ref": "#/$defs/requestId"
         },
         "method": {
-          "const": "account.connect"
+          "const": "account.sign_in"
         },
         "params": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "kind": {
-              "type": "string",
-              "enum": [
-                "api_key",
-                "subscription_token"
-              ]
-            },
-            "secret": {
-              "type": "string"
+            "console": {
+              "type": "boolean"
             }
           },
           "required": [
-            "kind",
-            "secret"
+            "console"
           ]
+        }
+      }
+    },
+    "accountSignInCodeRequest": {
+      "title": "Account Sign In Code Request",
+      "description": "Hands the code the sign-in page showed to the waiting sign-in, then checks the connection. The code is never kept, logged or echoed, and a refusal of these params carries no data.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.sign_in_code"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          },
+          "required": [
+            "code"
+          ]
+        }
+      }
+    },
+    "accountCheckRequest": {
+      "title": "Account Check Request",
+      "description": "Checks the connection with one tiny request through Claude Code (ADR 0084).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "account.check"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
         }
       }
     },
@@ -1936,7 +2150,7 @@
         },
         "taking_on": {
           "type": "boolean",
-          "description": "Whether the project that stopped because this computer's sandbox was not ready is now being taken on, the sandbox image being ready: Catervas restarts on it (spec 0.139)."
+          "description": "Whether the project that stopped because this computer's sandbox was not ready is now being taken on, the sandbox image being ready: Catervas restarts on it (spec 0.153)."
         }
       },
       "required": [
@@ -1951,38 +2165,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "provider": {
-          "oneOf": [
-            {
-              "const": "anthropic"
-            },
-            {
-              "type": "null"
-            }
-          ]
+        "signed_in": {
+          "type": "boolean"
         },
         "kind": {
           "oneOf": [
             {
               "type": "string",
               "enum": [
-                "api_key",
-                "subscription_token"
-              ]
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "source": {
-          "oneOf": [
-            {
-              "type": "string",
-              "enum": [
+                "subscription",
+                "console",
                 "environment",
-                "keychain",
-                "file"
+                "other"
               ]
             },
             {
@@ -1992,17 +2186,20 @@
         },
         "environment_variable": {
           "type": "string",
-          "description": "The variable the credential comes from, when it comes from the environment: Catervas cannot remove it, so the page names it rather than offering Disconnect."
+          "description": "The variable the account comes from, when it comes from the environment: Catervas cannot sign that out, so the page names it."
         },
         "key_refused": {
           "type": "boolean",
-          "description": "True while the team is paused because the model provider refused the credential (docs/SPEC.md 5.5): the key did not work, and connecting the account again resumes the team. Left out otherwise."
+          "description": "True while the team is paused because the model provider refused the credential (docs/SPEC.md 5.5): signing in again, or a working check, resumes the team. Left out otherwise."
+        },
+        "kept_key_removed": {
+          "type": "boolean",
+          "description": "True from the first start of this version, when Catervas removed, unread, the key it used to keep (ADR 0084), until the daemon stops. Left out otherwise."
         }
       },
       "required": [
-        "provider",
-        "kind",
-        "source"
+        "signed_in",
+        "kind"
       ]
     },
     "projectOpenResult": {
@@ -2029,25 +2226,44 @@
         "project_root"
       ]
     },
-    "accountConnectResult": {
+    "accountSignInResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "stored_in": {
+        "url": {
           "type": "string",
-          "enum": [
-            "keychain",
-            "file"
-          ]
-        },
-        "taking_on": {
-          "type": "boolean",
-          "description": "True when a project that waited on the credential is now being taken on, so the daemon restarts on it."
+          "description": "The address of Claude's sign-in page, on one of Anthropic's hosts."
         }
       },
       "required": [
-        "stored_in",
-        "taking_on"
+        "url"
+      ]
+    },
+    "accountCheckResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "working",
+            "key_refused",
+            "limit_reached",
+            "not_signed_in",
+            "failed"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "description": "Claude Code's words, only with failed."
+        },
+        "taking_on": {
+          "type": "boolean",
+          "description": "In setup mode, true when a project that waited on the account is now being taken on, so the daemon restarts on it."
+        }
+      },
+      "required": [
+        "outcome"
       ]
     },
     "browserPullRequest": {
@@ -2997,6 +3213,2127 @@
               "integration_branch": { "type": ["string", "null"] },
               "missing": { "type": "boolean" }
             }
+          }
+        }
+      }
+    },
+    "teamsListQuery": {
+      "title": "Teams List Query",
+      "description": "Every team on this computer, as teamsListResult shapes them (docs/SPEC.md 4.1, 8.1; ADR 0059). Answered by the hub alone, on /hub/rpc and on /rpc while there is no current team.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "teams.list" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "teamsListResult": {
+      "description": "teams in the order state.json lists their projects: slug (the name of the team in an address, /t/<slug>/rpc), name, root (the project's folder), status (running, paused, elsewhere when another process drives the project and serve tries it again every minute, missing when the project has no team.yaml any more, failed with the sentence in failed when its drive ended with an error), working_agents (sessions running now), waiting (what waits on the owner, as waiting.list counts it), today_usd and month_usd (what its sessions cost on this UTC day and since the first of this UTC month), undoable (a team Catervas made from the proposal whose log has no session.started: teams.undo takes it back). current is the slug /rpc answers for, or null. account_asleep_until is when the AI account's limit resets while every team waits for it, else null.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["teams", "current", "account_asleep_until"],
+      "properties": {
+        "teams": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "name", "root", "status", "working_agents", "waiting", "today_usd", "month_usd", "undoable"],
+            "properties": {
+              "slug": { "type": "string" },
+              "name": { "type": "string" },
+              "root": { "type": "string" },
+              "status": { "enum": ["running", "paused", "elsewhere", "missing", "failed"] },
+              "failed": { "type": "string" },
+              "working_agents": { "type": "integer", "minimum": 0 },
+              "waiting": { "type": "integer", "minimum": 0 },
+              "today_usd": { "type": "number" },
+              "month_usd": { "type": "number" },
+              "undoable": { "type": "boolean" }
+            }
+          }
+        },
+        "current": { "type": ["string", "null"] },
+        "account_asleep_until": { "type": ["string", "null"] }
+      }
+    },
+    "computerGetQuery": {
+      "title": "Computer Get Query",
+      "description": "The limits this computer's teams share and what they spent today, as computerGetResult shapes them (docs/SPEC.md 5.5; ADR 0059). Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "params"],
+      "properties": {
+        "name": { "const": "computer.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "computerGetResult": {
+      "description": "agents_at_once is how many agent sessions run at once across the teams (null: no limit), daily_cap_usd the most the teams together spend on a UTC day (null: no cap), spent_today_usd what they spent on this UTC day.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agents_at_once", "daily_cap_usd", "spent_today_usd"],
+      "properties": {
+        "agents_at_once": { "type": ["integer", "null"] },
+        "daily_cap_usd": { "type": ["number", "null"] },
+        "spent_today_usd": { "type": "number" }
+      }
+    },
+    "teamsCurrentRequest": {
+      "title": "Teams Current Request",
+      "description": "Makes the team slug the one /rpc answers for (docs/SPEC.md 8.1; ADR 0059). Answers emptyResult; an unknown slug is refused with -32005 and team_unknown.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "teams.current" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug"],
+          "properties": { "slug": { "type": "string" } }
+        }
+      }
+    },
+    "teamsRemoveRequest": {
+      "title": "Teams Remove Request",
+      "description": "Stops the team slug's drive and forgets its project (docs/SPEC.md 4.1; ADR 0059). It deletes no file, and it needs confirmed true: without it the call is refused with -32005 and confirmation_needed. A slug no team has is refused with team_unknown. Answers teamsRemoveResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "teams.remove" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug"],
+          "properties": {
+            "slug": { "type": "string" },
+            "confirmed": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "teamsRemoveResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["removed"],
+      "properties": { "removed": { "const": true } }
+    },
+    "teamsUndoRequest": {
+      "title": "Teams Undo Request",
+      "description": "Takes back a team Catervas made from the proposal while it has not started a session (docs/SPEC.md 4.1; ADR 0059): stops its drive, removes it from the hub and state.json, and deletes what Catervas made for it, the .catervas folder in the owner's folder or the project folder or new folder, but a folder whose git log holds a commit that is not Catervas's is left, and the answer's left says so. The projects go back to the proposal. A team with a session.started is refused with -32005 and team_has_started, a slug no made team has with team_unknown. Answers teamsUndoResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "teams.undo" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug"],
+          "properties": { "slug": { "type": "string" } }
+        }
+      }
+    },
+    "teamsUndoResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["removed"],
+      "properties": { "removed": { "const": true }, "left": { "type": "string" } }
+    },
+    "remindersGetRequest": {
+      "title": "Reminders Get Request",
+      "description": "The daily digest of what needs the owner (docs/SPEC.md 4.4, F12; ADR 0059): sessions they may have forgotten, session crons ending soon, scheduled runs and deployments that failed or went silent, workflows GitHub turned off, what waits on them in each team for over a day, and connectors Claude Code says need signing in again. The digest is kept in memory from the owner's time each day (reminder_time, 09:00 by default); with none yet it is computed at once. Answers remindersGetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "remindersSetRequest": {
+      "title": "Reminders Set Request",
+      "description": "Sets when the daily reminder comes and where its notice shows, and keeps it in state.json (reminder_time, reminder_browser, reminder_system). time is HH:MM on this computer's clock; browser is the notice in an open Catervas tab, system the notice from the computer when none is open; both are on by default. A field that is left out is kept. A time that is not HH:MM is refused with -32005 and bad_time. Answers remindersSetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "time": { "type": "string" },
+            "browser": { "type": "boolean" },
+            "system": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "remindersSnoozeRequest": {
+      "title": "Reminders Snooze Request",
+      "description": "Hides the item key from the digest for a day or a week. An item that is not in the digest is refused with -32005 and unknown_item. Answers emptyResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.snooze" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "for"],
+          "properties": {
+            "key": { "type": "string" },
+            "for": { "enum": ["day", "week"] }
+          }
+        }
+      }
+    },
+    "remindersDismissRequest": {
+      "title": "Reminders Dismiss Request",
+      "description": "Hides the item key until it changes: it comes back when what it says is not what it said (a new failure, a new deadline). An item that is not in the digest is refused with -32005 and unknown_item. Answers emptyResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.dismiss" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": { "key": { "type": "string" } }
+        }
+      }
+    },
+    "remindersGiveRequest": {
+      "title": "Reminders Give Request",
+      "description": "Gives the item key to the team of its project: files a request in that team with request.file, in words made from the item (a forgotten session's title, project, days, reason and branch), for its Product Manager to sort. An item that is not in the digest is refused with -32005 and unknown_item, one a team cannot finish with cannot_give, and one whose project has no team this serve drives with no_team_for_this. Answers remindersGiveResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.give" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key"],
+          "properties": { "key": { "type": "string" } }
+        }
+      }
+    },
+    "remindersMineRequest": {
+      "title": "Reminders Mine Request",
+      "description": "The part of the digest that is this team's: the items about its project, its member repositories and what waits on the owner in it. Answered on the team's socket (/t/<team>/rpc), shown on its Today. Answers remindersMineResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "reminders.mine" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "remindersItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "kind", "title", "detail"],
+      "description": "One item of the digest. key is stable from one day to the next (<rule>:<thing key>). kind is session, cron, schedule, deploy, team, service, run or connect_github. explain is cron or off for an item that is explained behind an info button. resume holds the shell command that resumes a session, github_url the repository's actions or deployments page, give the request that would be filed and the team it would go to, answer the team whose page answers the item, and connect_github is true when the item offers to connect GitHub.",
+      "properties": {
+        "key": { "type": "string" },
+        "kind": { "enum": ["session", "cron", "schedule", "deploy", "team", "service", "run", "connect_github"] },
+        "title": { "type": "string" },
+        "detail": { "type": "string" },
+        "project": { "type": "string" },
+        "explain": { "enum": ["cron", "off"] },
+        "resume": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": { "command": { "type": "string" } }
+        },
+        "github_url": { "type": "string" },
+        "give": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text"],
+          "properties": {
+            "text": { "type": "string" },
+            "team": { "type": "string" },
+            "team_name": { "type": "string" }
+          }
+        },
+        "answer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["team"],
+          "properties": { "team": { "type": "string" } }
+        },
+        "connect_github": { "const": true }
+      }
+    },
+    "remindersGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "count", "headline", "time", "browser", "system", "notified", "groups"],
+      "description": "at is when the digest was computed. count is the things that need the owner, not today's runs. headline is the first two items' short words. time, browser and system are the owner's settings. notified is how the owner was told: browser, system, or none when the program failed; null when they were not told. groups holds the non-empty groups, in order: forgotten, ending, schedules, teams, services, and runs (today's runs, collapsed on the page).",
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "count": { "type": "integer", "minimum": 0 },
+        "headline": { "type": "string" },
+        "time": { "type": "string" },
+        "browser": { "type": "boolean" },
+        "system": { "type": "boolean" },
+        "notified": { "enum": ["browser", "system", "none", null] },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["group", "items"],
+            "properties": {
+              "group": { "enum": ["forgotten", "ending", "schedules", "teams", "services", "runs"] },
+              "items": { "type": "array", "items": { "$ref": "#/$defs/remindersItem" } }
+            }
+          }
+        }
+      }
+    },
+    "remindersSetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["time", "browser", "system"],
+      "properties": {
+        "time": { "type": "string" },
+        "browser": { "type": "boolean" },
+        "system": { "type": "boolean" }
+      }
+    },
+    "remindersGiveResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "team"],
+      "properties": { "task_id": { "type": "string" }, "team": { "type": "string" } }
+    },
+    "remindersMineResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "count", "items"],
+      "properties": {
+        "at": { "type": "string", "format": "date-time" },
+        "count": { "type": "integer", "minimum": 0 },
+        "items": { "type": "array", "items": { "$ref": "#/$defs/remindersItem" } }
+      }
+    },
+    "remindersDueNotification": {
+      "title": "Reminders Due Notification",
+      "description": "What the hub pushes to every page of the computer on its /hub/rpc socket when the daily digest is due and a Catervas tab is open (docs/SPEC.md 4.4): the page shows one browser notice for the digest at, and none for a digest it showed. With no tab open the computer is notified instead and nothing is pushed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "const": "reminders.due" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["at", "count", "headline", "time"],
+          "properties": {
+            "at": { "type": "string", "format": "date-time" },
+            "count": { "type": "integer", "minimum": 1 },
+            "headline": { "type": "string" },
+            "time": { "type": "string" }
+          }
+        }
+      }
+    },
+    "analyticsPeriod": {
+      "enum": ["week", "month"],
+      "description": "The period an answer covers: the week of now, Monday to Sunday, or the calendar month of now, in the computer's local time."
+    },
+    "analyticsGetRequest": {
+      "title": "Analytics Get Request",
+      "description": "Analytics for every team side by side (docs/SPEC.md 4.4, F17; ADR 0059): usage split between the owner's own Claude Code sessions in each team's projects and the team's Catervas agents, counted once per reply; the workflow; and the blockers. An answer is kept for 60 seconds. Answers analyticsGetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "analytics.get" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["period"],
+          "properties": { "period": { "$ref": "#/$defs/analyticsPeriod" } }
+        }
+      }
+    },
+    "analyticsMineRequest": {
+      "title": "Analytics Mine Request",
+      "description": "One team's part of the analytics, with its task cycle time and throughput, for its Costs page's Activity tab. Answered on the team's socket (/t/<team>/rpc). Answers analyticsMineResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "analytics.mine" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["period"],
+          "properties": { "period": { "$ref": "#/$defs/analyticsPeriod" } }
+        }
+      }
+    },
+    "analyticsTeamUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "name", "owner_usd", "agents_usd", "unpriced_replies"],
+      "description": "A team's usage in the period, in US dollars: owner_usd is what the owner's own Claude Code sessions in the team's project and member repositories used, priced by the shipped price table, one reply once; agents_usd is what the team's Catervas agents spent, from its log; unpriced_replies counts the owner's replies on a model the table has no price for, whose tokens cost nothing here.",
+      "properties": {
+        "slug": { "type": "string" },
+        "name": { "type": "string" },
+        "owner_usd": { "type": "number", "minimum": 0 },
+        "agents_usd": { "type": "number", "minimum": 0 },
+        "unpriced_replies": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "analyticsWorkflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "active_hours", "commits", "used_most", "per_day"],
+      "description": "sessions are the owner's with a reply in the period plus the team's agent sessions started; active_hours the owner's replies less than five minutes apart plus the agents' session durations, to a tenth; commits those on the integration branch of each root, by the owner and by Catervas's identity (catervas@localhost); pull_requests those created in the period, from GitHub when connected, else the team's own pull_request.opened events, left out when neither knows; used_most the owner's three most used tools; per_day the sessions on each local day of the period.",
+      "properties": {
+        "sessions": { "type": "integer", "minimum": 0 },
+        "active_hours": { "type": "number", "minimum": 0 },
+        "commits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["owner", "team"],
+          "properties": {
+            "owner": { "type": "integer", "minimum": 0 },
+            "team": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "pull_requests": { "type": "integer", "minimum": 0 },
+        "used_most": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["label", "calls"],
+            "properties": {
+              "label": { "type": "string" },
+              "calls": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "per_day": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["day", "sessions"],
+            "properties": {
+              "day": { "type": "string", "format": "date" },
+              "sessions": { "type": "integer", "minimum": 0 }
+            }
+          }
+        }
+      }
+    },
+    "analyticsBlocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "count", "examples"],
+      "description": "One kind of blocker with how many there are and up to three of them named in words. Only kinds with something to show are listed, in this order: waiting_on_you, schedules (failing, silent or turned off), deploys (failed), blocked (tasks blocked over three days), forgotten (sessions), denials (tool calls refused in the period).",
+      "properties": {
+        "kind": { "enum": ["waiting_on_you", "schedules", "deploys", "blocked", "forgotten", "denials"] },
+        "count": { "type": "integer", "minimum": 1 },
+        "examples": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "analyticsGetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["period", "billing", "teams", "watched_usd", "claude_ai_conversations", "workflow", "blockers"],
+      "description": "billing is api when the account is a subscription, so that the amounts are what the same use would cost on Claude's API, and spent otherwise. watched_usd is the owner's usage in projects no team holds. claude_ai_conversations counts the conversations of the owner's claude.ai export active in the period; the export carries no usage figures.",
+      "properties": {
+        "period": { "$ref": "#/$defs/analyticsPeriod" },
+        "billing": { "enum": ["api", "spent"] },
+        "teams": { "type": "array", "items": { "$ref": "#/$defs/analyticsTeamUsage" } },
+        "watched_usd": { "type": "number", "minimum": 0 },
+        "claude_ai_conversations": { "type": "integer", "minimum": 0 },
+        "workflow": { "$ref": "#/$defs/analyticsWorkflow" },
+        "blockers": { "type": "array", "items": { "$ref": "#/$defs/analyticsBlocker" } }
+      }
+    },
+    "analyticsMineResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["period", "billing", "team", "workflow", "blockers", "cycle_days", "throughput"],
+      "description": "The team's part of analyticsGetResult. cycle_days is the mean days from a task's first in_progress to accepted for tasks accepted in the period, null when none were; throughput is how many were.",
+      "properties": {
+        "period": { "$ref": "#/$defs/analyticsPeriod" },
+        "billing": { "enum": ["api", "spent"] },
+        "team": { "$ref": "#/$defs/analyticsTeamUsage" },
+        "workflow": { "$ref": "#/$defs/analyticsWorkflow" },
+        "blockers": { "type": "array", "items": { "$ref": "#/$defs/analyticsBlocker" } },
+        "cycle_days": { "type": ["number", "null"], "minimum": 0 },
+        "throughput": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "computerSetRequest": {
+      "title": "Computer Set Request",
+      "description": "Sets the limits this computer's teams share (docs/SPEC.md 5.5; ADR 0059), writes them to state.json and applies them at once; a running session is never stopped. A field that is left out is kept; null clears it. agents_at_once outside 1 to 16 is refused with -32005 and agents_at_once_out_of_range; daily_cap_usd of 0 or less, or over 100000, with daily_cap_out_of_range. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "computer.set" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "agents_at_once": { "type": ["integer", "null"] },
+            "daily_cap_usd": { "type": ["number", "null"] }
+          }
+        }
+      }
+    },
+    "findingOfferRequest": {
+      "title": "Finding Offer Request",
+      "description": "Whether there is Claude Code history on this computer to look through (docs/SPEC.md 4.1, 4.4; ADR 0059). Reads no transcript: it counts the .jsonl files under the history's projects folder. Answers findingOfferResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.offer"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingCatalogRequest": {
+      "title": "Finding Catalog Request",
+      "description": "The services the owner can say they use with Claude, in the catalog's order: what the page shows to tap, and the ids finding.declare_services takes (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingCatalogResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.catalog"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingStartRequest": {
+      "title": "Finding Start Request",
+      "description": "Starts the scan of the Claude Code history in the background, the owner's consent (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingStartResult; started is false, with nothing else done, while a scan runs. Refused with -32005 and finding_paused while finding is paused.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.start"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingStopRequest": {
+      "title": "Finding Stop Request",
+      "description": "Ends a running scan between two transcript files (docs/SPEC.md 4.1, 4.4; ADR 0059). What it read stays in the index and the next scan goes on from there. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.stop"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingStatusRequest": {
+      "title": "Finding Status Request",
+      "description": "Where the scan is: its phase, live counts, how long it has left once 20 files are read, and the settings around it (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingStatusResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.status"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingListRequest": {
+      "title": "Finding List Request",
+      "description": "The found list in sections: main (newest first), explored, gone, home, computer_jobs, and the ignored rows (docs/SPEC.md 4.1, 4.4; ADR 0059). Every row has the Team, Watch or Ignore Catervas suggests and the owner's choice, if any. Answers findingListResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.list"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingIgnoredRequest": {
+      "title": "Finding Ignored Request",
+      "description": "The rows the owner chose Ignore for (docs/SPEC.md 4.1, 4.4; ADR 0059). Choosing Team or Watch for one brings it back to the list. Answers findingIgnoredResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.ignored"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingChooseRequest": {
+      "title": "Finding Choose Request",
+      "description": "Keeps the owner's choice for the project key (docs/SPEC.md 4.1, 4.4; ADR 0059). Nothing is made of it here. An unknown key is refused with -32005 and unknown_project. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.choose"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "choice"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "choice": {
+              "enum": [
+                "team",
+                "watch",
+                "ignore"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "findingSeparateRequest": {
+      "title": "Finding Separate Request",
+      "description": "'These are different': folder stops being folded with the other folders of the project key, which share a repository (docs/SPEC.md 4.1, 4.4; ADR 0059). Refused with -32005 and unknown_project when the key or the folder is not one of a project with several folders. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.separate"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "folder"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "folder": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "findingLocateRequest": {
+      "title": "Finding Locate Request",
+      "description": "Locate: the gone folder key is at path now, a repository's top folder inside home (relative to home, or absolute), and its sessions follow (docs/SPEC.md 4.1, 4.4; ADR 0059). Refused with -32005 and unknown_project, not_gone, the member path refusals (not_there, outside_home, home_itself, not_a_repository, not_the_top), or not_the_same_repository. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.locate"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "key",
+            "path"
+          ],
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        }
+      }
+    },
+    "findingDeclareServicesRequest": {
+      "title": "Finding Declare Services Request",
+      "description": "The services the owner says they use with Claude: catalog ids, and other, a name with no catalog id, which forms nothing (docs/SPEC.md 4.1, 4.4; ADR 0059). Replaces the declared set. A declared bookkeeping service with no connector project forms one. An id the catalog lacks is refused with -32005 and unknown_service. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.declare_services"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "ids"
+          ],
+          "properties": {
+            "ids": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "string",
+                "maxLength": 64
+              }
+            },
+            "other": {
+              "type": "string",
+              "maxLength": 100
+            }
+          }
+        }
+      }
+    },
+    "findingAddProjectRequest": {
+      "title": "Finding Add Project Request",
+      "description": "Adds a project by hand, in a folder under home (relative to home), a repository's address, or both (docs/SPEC.md 4.1, 4.4; ADR 0059). Refused with -32005 and cannot_add, with the reason, for a blank name, no place, an address that is not a repository's, or a folder that is not there or is home. Answers findingAddProjectResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.add_project"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "folder": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "repository": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        }
+      }
+    },
+    "findingAddRoutineRequest": {
+      "title": "Finding Add Routine Request",
+      "description": "Adds a routine typed in, under the project key or, with none, the computer's (docs/SPEC.md 4.1, 4.4; ADR 0059). schedule is free text, such as 'every Monday at 9'. An unknown project_key is refused with -32005 and unknown_project. Answers findingAddRoutineResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.add_routine"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "schedule"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "project_key": {
+              "type": "string"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          }
+        }
+      }
+    },
+    "findingRetentionRequest": {
+      "title": "Finding Retention Request",
+      "description": "How long Claude Code keeps its history, as its settings.json says (docs/SPEC.md 4.1, 4.4; ADR 0059). Answers findingRetentionResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.retention"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingKeepLongerRequest": {
+      "title": "Finding Keep Longer Request",
+      "description": "Writes cleanupPeriodDays into Claude Code's settings.json, the one write Catervas makes there, only on the owner's press (docs/SPEC.md 4.1, 4.4; ADR 0059). Every other key and the file's mode stay. days other than 90, 365 and 3650 is refused with -32005 and retention_not_offered. Answers findingKeepLongerResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.keep_longer"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "days"
+          ],
+          "properties": {
+            "days": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "findingPauseRequest": {
+      "title": "Finding Pause Request",
+      "description": "Pauses or resumes finding (docs/SPEC.md 4.1, 4.4; ADR 0059); kept in state.json as finding_paused. While paused no scan starts, one that runs ends, and the daily rescan stops. Answers findingPauseResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.pause"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "paused"
+          ],
+          "properties": {
+            "paused": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "findingExportDismissedRequest": {
+      "title": "Finding Export Dismissed Request",
+      "description": "The owner dismissed the card that offers claude.ai's export (docs/SPEC.md 4.1, 4.4; ADR 0059); kept in state.json as export_card dismissed. A drop of an export clears it. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.export_dismissed"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {}
+        }
+      }
+    },
+    "findingForgetRequest": {
+      "title": "Finding Forget Request",
+      "description": "Forgets everything Catervas found: deletes machine.db, clears export_card and sets finding_paused in state.json, so finding is paused after it (docs/SPEC.md 4.1, 4.4; ADR 0059). A scan that runs is stopped first. Without confirmed true it is refused with -32005 and forget_needs_confirming. Answers findingForgetResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "method",
+        "params"
+      ],
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0"
+        },
+        "id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "method": {
+          "const": "finding.forget"
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "confirmed": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "githubConnectRequest": {
+      "title": "Github Connect Request",
+      "description": "Connects GitHub for this computer with a fine-grained, read-only token the owner pastes (docs/SPEC.md 4.4, 6.7, 8.6; ADR 0059, ADR 0044): the token is checked with GitHub, kept under machine:github in the connector key store, and the owner's repositories and Claude's work in them are read. Refused with -32005 and github_token_refused (GitHub did not accept it), github_rate_limited, github_unreachable or no_secret_store; a refusal never holds the token. Answers githubConnectResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.connect" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["token"],
+          "properties": { "token": { "type": "string", "minLength": 1, "maxLength": 1000 } }
+        }
+      }
+    },
+    "githubStatusRequest": {
+      "title": "Github Status Request",
+      "description": "Whether GitHub is connected for this computer, and as whom (docs/SPEC.md 4.4; ADR 0059). Answers githubStatusResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.status" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "githubDisconnectRequest": {
+      "title": "Github Disconnect Request",
+      "description": "Forgets the GitHub token kept for this computer (docs/SPEC.md 4.4; ADR 0059). The repositories already read stay in the index, marked not seen lately. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.disconnect" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "githubCopyRequest": {
+      "title": "Github Copy Request",
+      "description": "Copies a repository of the owner's to this computer: git clone into a new folder named name (default: the repository's name, lowercase) under parent, relative to home, with the token given to git through its environment and never on a command line (docs/SPEC.md 4.4, 8.6; ADR 0059). The folder becomes a project. Refused with -32005 and github_not_connected, unknown_repository, outside_home, bad_name, folder_taken or copy_failed (git's last line, the token cut out). Answers githubCopyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "github.copy" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["full_name", "parent"],
+          "properties": {
+            "full_name": { "type": "string" },
+            "parent": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        }
+      }
+    },
+    "linkingPairsRequest": {
+      "title": "Linking Pairs Request",
+      "description": "The pairs of projects chosen as teams that have a proof they work together, one to ask the owner about at a time, read again from their committed files at HEAD as it is asked (docs/SPEC.md 4.4, 8.4; ADR 0059). A pair already answered Yes, or whose projects are one group through other Yes answers, is not listed; one answered No is listed again only for a proof of a kind it was not shown with. Answers linkingPairsResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.pairs" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "linkingMaybeRequest": {
+      "title": "Linking Maybe Request",
+      "description": "The pairs of projects chosen as teams that have only hints, no proof, and no answer: listed as Maybe related, and counted as separate unless the owner opens one (docs/SPEC.md 4.4; ADR 0059). Answers linkingMaybeResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.maybe" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "linkingGroupsRequest": {
+      "title": "Linking Groups Request",
+      "description": "The groups of projects the owner's Yes answers form, and no others: a hint joins nothing, and a Yes whose proof no longer holds joins nothing (docs/SPEC.md 4.4; ADR 0059). Answers linkingGroupsResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.groups" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "linkingAnswerRequest": {
+      "title": "Linking Answer Request",
+      "description": "The owner's answer about the pair a and b, in either order (docs/SPEC.md 4.4, 8.4; ADR 0059). A Yes needs a proof that holds now, found again from the files, else -32005 and proof_no_longer_holds; from_maybe says the owner chose it from the list of pairs with hints only, and then a Yes is kept with no proof. Refused with -32005 and unknown_project when a key is not one of the projects chosen as teams. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.answer" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["a", "b", "answer"],
+          "properties": {
+            "a": { "type": "string" },
+            "b": { "type": "string" },
+            "answer": { "enum": ["yes", "no"] },
+            "from_maybe": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "proposalGetRequest": {
+      "title": "Proposal Get Request",
+      "description": "The teams to make from the projects the owner chose and the links between them, one card each, newest work first (docs/SPEC.md 4.4; ADR 0059): a team for each group of linked projects with a project chosen as a team and no driven team, a team for each such project alone, and an add_to_team card for the projects of a group that has a project of a driven team. A card's name, purpose and template are the owner's edits or Claude's suggestions marked from_claude, else the suggestion. Answers proposalGetResult. Answered by the hub alone.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.get" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "proposalEditRequest": {
+      "title": "Proposal Edit Request",
+      "description": "The owner's edit of a card: its name (1 to 100 characters, not blank), its purpose (at most 200) and the team it starts from. A template that is not a ready-made team and not one of the owner's saved teams is refused with -32005 and template_unknown. An edit by the owner takes the from_claude mark away. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.edit" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string" },
+            "name": { "type": "string", "maxLength": 100 },
+            "template": { "type": "string" },
+            "purpose": { "type": "string", "maxLength": 200 }
+          }
+        }
+      }
+    },
+    "proposalMoveOutRequest": {
+      "title": "Proposal Move Out Request",
+      "description": "Moves the project key out of the card id: it becomes a card of its own, and No is kept between it and each project that stays, so that finding does not group them again. A card of one project, or a project not in the card, is refused with -32005 and unknown_project. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.move_out" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "key"],
+          "properties": { "id": { "type": "string" }, "key": { "type": "string" } }
+        }
+      }
+    },
+    "proposalRevertRequest": {
+      "title": "Proposal Revert Request",
+      "description": "Forgets the edits of a card, Claude's suggested name and purpose among them: Keep the folder name. Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.revert" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": { "id": { "type": "string" } }
+        }
+      }
+    },
+    "proposalCreateRequest": {
+      "title": "Proposal Create Request",
+      "description": "Makes the teams of the cards, each alone and paused (docs/SPEC.md 4.1, 4.4; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. ids names the cards to make, else every card; only names project keys, and makes the cards whose projects are all among them. The proofs of each card's links are checked again first: a card whose proof no longer holds is split back into its projects, and the answer says which. A new_team card makes one team (a folder of the owner's, a project folder for several repositories, or a new folder for work done through connectors); an add_to_team card adds its projects as repositories to the team. A card that fails stops only itself. Answers proposalCreateResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.create" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed"],
+          "properties": {
+            "confirmed": { "type": "boolean" },
+            "ids": { "type": "array", "items": { "type": "string" } },
+            "only": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "linkingRejectRequest": {
+      "title": "Linking Reject Request",
+      "description": "Keeps No between the project key and each project of others, without asking whether a proof holds: the owner took a repository out of a team (docs/SPEC.md 4.4; ADR 0059). Answers emptyResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "linking.reject" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["key", "others"],
+          "properties": { "key": { "type": "string" }, "others": { "type": "array", "items": { "type": "string" } } }
+        }
+      }
+    },
+    "proposalNamesEstimateRequest": {
+      "title": "Proposal Names Estimate Request",
+      "description": "What asking Claude for better names would cost, worked out from the length of the prompt and the price table's Haiku rates for at most 400 output tokens, shown to the owner first (docs/SPEC.md 8.6). Answers proposalNamesEstimateResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.names_estimate" },
+        "params": { "type": "object", "additionalProperties": false, "properties": {} }
+      }
+    },
+    "proposalNamesRequest": {
+      "title": "Proposal Names Request",
+      "description": "Asks the owner's Claude Code once, with Haiku and no tools, for a name, a purpose and a template for each card (docs/SPEC.md 8.6; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. The prompt holds only folder names, the first 40 lines of each README at HEAD, the titles of the last 20 sessions and the jobs' names, each scrubbed of keys first. The answer is stored as edits marked from_claude; a name over 40 characters or a purpose over 120 is cut, a template that is not in the list is ignored, and nothing Claude says changes a link. A run that fails is -32005 and names_failed with Claude Code's words. Answers proposalNamesResult.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method", "params"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "#/$defs/requestId" },
+        "method": { "const": "proposal.names" },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["confirmed"],
+          "properties": { "confirmed": { "type": "boolean" } }
+        }
+      }
+    },
+    "findingRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "name",
+        "kind",
+        "folders",
+        "last_at",
+        "jobs",
+        "services",
+        "suggested",
+        "choice",
+        "already_team",
+        "gone",
+        "claude_work"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "folder",
+            "connector",
+            "claude_ai",
+            "hand",
+            "job",
+            "github"
+          ]
+        },
+        "folders": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "last_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "schedule"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "schedule": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggested": {
+          "enum": [
+            "team",
+            "watch",
+            "ignore",
+            null
+          ]
+        },
+        "choice": {
+          "enum": [
+            "team",
+            "watch",
+            "ignore",
+            null
+          ]
+        },
+        "already_team": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gone": {
+          "type": "boolean"
+        },
+        "claude_work": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name"],
+            "properties": {
+              "kind": { "enum": ["branch", "pull"] },
+              "name": { "type": "string" },
+              "number": { "type": "integer" },
+              "draft": { "type": "boolean" }
+            }
+          }
+        },
+        "github": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["full_name", "private", "default_branch", "pushed_at", "not_seen_lately"],
+          "properties": {
+            "full_name": { "type": "string" },
+            "private": { "type": "boolean" },
+            "default_branch": { "type": "string" },
+            "pushed_at": { "type": "string" },
+            "not_seen_lately": { "type": "boolean" }
+          }
+        }
+      },
+      "description": "One row of the found list. key is the project's key: its normalised repository address, else its real path, the connector project's name, or the claude.ai uuid. kind is folder, connector, claude_ai, hand, github (a repository on the owner's GitHub that no folder on this computer has; github is then its details) or job (a job or routine on this computer with no project). claude_work lists the claude/ branches and open pull requests from them that Claude Code on the web made in its GitHub repository. suggested is the Team, Watch or Ignore Catervas suggests (null for a gone folder), choice the owner's own, already_team the slug of the team whose project folder is one of folders."
+    },
+    "findingOfferResult": {
+      "description": "history is claude_code when the history's projects folder holds a .jsonl file, else none; sessions_dir_exists whether that folder is there.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "history",
+        "sessions_dir_exists"
+      ],
+      "properties": {
+        "history": {
+          "enum": [
+            "claude_code",
+            "none"
+          ]
+        },
+        "sessions_dir_exists": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingCatalogResult": {
+      "description": "Each service has its catalog id, the name it is shown under, and its kind: bookkeeping, spreadsheets, payments, selling, marketing, code or other.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "services"
+      ],
+      "properties": {
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "bookkeeping",
+                  "spreadsheets",
+                  "payments",
+                  "selling",
+                  "marketing",
+                  "code",
+                  "other"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "findingStartResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "started"
+      ],
+      "properties": {
+        "started": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingStatusResult": {
+      "description": "phase is idle, running, stopped or done. The counts are published at most every 250 ms, and version counts the publications. seconds_left is set only after 20 files. error is why a scan ended when it failed. paused, index_exists and export_dismissed are the settings around finding.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "phase",
+        "files_total",
+        "files_read",
+        "sessions",
+        "projects",
+        "jobs",
+        "reading",
+        "unreadable",
+        "error",
+        "started_at",
+        "ended_at",
+        "seconds_left",
+        "paused",
+        "index_exists",
+        "export_dismissed",
+        "version"
+      ],
+      "properties": {
+        "phase": {
+          "enum": [
+            "idle",
+            "running",
+            "stopped",
+            "done"
+          ]
+        },
+        "files_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_read": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "projects": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "jobs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reading": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unreadable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "started_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ended_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seconds_left": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "paused": {
+          "type": "boolean"
+        },
+        "index_exists": {
+          "type": "boolean"
+        },
+        "export_dismissed": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "findingListResult": {
+      "description": "main, explored, gone and computer_jobs are the sections, newest first, without the rows the owner ignored; ignored holds those. home is how many sessions ran in the home folder and the connector projects they formed.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "main",
+        "explored",
+        "gone",
+        "home",
+        "computer_jobs",
+        "ignored"
+      ],
+      "properties": {
+        "main": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "explored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "gone": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "home": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sessions",
+            "formed_into"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "formed_into": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "computer_jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        },
+        "ignored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        }
+      }
+    },
+    "findingIgnoredResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ignored"
+      ],
+      "properties": {
+        "ignored": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/findingRow"
+          }
+        }
+      }
+    },
+    "findingAddProjectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "root",
+        "repository",
+        "same_as"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "root": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repository": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "same_as": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "findingAddRoutineResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        }
+      }
+    },
+    "findingRetentionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanup_period_days",
+        "default"
+      ],
+      "properties": {
+        "cleanup_period_days": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "default": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingKeepLongerResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanup_period_days"
+      ],
+      "properties": {
+        "cleanup_period_days": {
+          "enum": [
+            90,
+            365,
+            3650
+          ]
+        }
+      }
+    },
+    "findingPauseResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paused"
+      ],
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        }
+      }
+    },
+    "findingForgetResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forgotten"
+      ],
+      "properties": {
+        "forgotten": {
+          "const": true
+        }
+      }
+    },
+    "githubConnectResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["login"],
+      "properties": { "login": { "type": "string" } }
+    },
+    "githubStatusResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connected"],
+      "properties": { "connected": { "type": "boolean" }, "login": { "type": "string" } }
+    },
+    "githubCopyResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["folder"],
+      "properties": { "folder": { "type": "string" } }
+    },
+    "linkingProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "last_at", "folder"],
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "last_at": { "type": ["string", "null"] },
+        "folder": { "type": ["string", "null"] }
+      }
+    },
+    "linkingProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "a", "b", "sentence", "ends"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "path_dependency",
+            "submodule",
+            "declared_package",
+            "deploys",
+            "workflow",
+            "domain",
+            "claude_ai_names"
+          ]
+        },
+        "a": { "type": "string" },
+        "b": { "type": "string" },
+        "sentence": { "type": "string" },
+        "ends": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["project", "name", "file", "line", "text"],
+            "properties": {
+              "project": { "type": "string" },
+              "name": { "type": "string" },
+              "file": { "type": "string" },
+              "line": { "type": "integer", "minimum": 1 },
+              "text": { "type": "string", "maxLength": 160 }
+            }
+          }
+        }
+      }
+    },
+    "linkingHints": {
+      "type": "array",
+      "items": { "enum": ["same_owner", "same_days", "similar_names", "wrote_both"] }
+    },
+    "linkingPairsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pairs"],
+      "properties": {
+        "pairs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["a", "b", "proof", "also", "hints"],
+            "properties": {
+              "a": { "$ref": "#/$defs/linkingProject" },
+              "b": { "$ref": "#/$defs/linkingProject" },
+              "proof": { "$ref": "#/$defs/linkingProof" },
+              "also": { "type": "array", "items": { "type": "string" } },
+              "hints": { "$ref": "#/$defs/linkingHints" }
+            }
+          }
+        }
+      }
+    },
+    "linkingMaybeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maybe"],
+      "properties": {
+        "maybe": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["a", "b", "hints"],
+            "properties": {
+              "a": { "$ref": "#/$defs/linkingProject" },
+              "b": { "$ref": "#/$defs/linkingProject" },
+              "hints": { "$ref": "#/$defs/linkingHints" }
+            }
+          }
+        }
+      }
+    },
+    "linkingGroupsResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["groups"],
+      "properties": {
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["projects", "names", "why"],
+            "properties": {
+              "projects": { "type": "array", "items": { "type": "string" } },
+              "names": { "type": "array", "items": { "type": "string" } },
+              "why": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "proposalProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "name", "services"],
+      "properties": {
+        "key": { "type": "string" },
+        "name": { "type": "string" },
+        "folder": { "type": "string" },
+        "services": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "proposalGetResult": {
+      "description": "cards: id (a hash of the sorted keys of the group, stable), kind (new_team or add_to_team), projects (key, name, folder with home written ~, the services it uses through Claude), jobs (their names), why (one sentence for each reason the projects are together), name, purpose (when there is one), template (a ready-made team's or a saved team's slug), folder (a new folder's, written from home, for work done through connectors), from_claude (name or purpose came from Claude and not yet the owner's), and for add_to_team the slug and name of the team. templates are the ready-made teams and the owner\u0027s saved teams a card can start from, by slug and name.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cards", "templates"],
+      "properties": {
+        "templates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "name"],
+            "properties": { "slug": { "type": "string" }, "name": { "type": "string" } }
+          }
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "projects", "jobs", "why", "name", "template", "from_claude"],
+            "properties": {
+              "id": { "type": "string" },
+              "kind": { "enum": ["new_team", "add_to_team"] },
+              "projects": { "type": "array", "items": { "$ref": "#/$defs/proposalProject" } },
+              "jobs": { "type": "array", "items": { "type": "string" } },
+              "why": { "type": "array", "items": { "type": "string" } },
+              "name": { "type": "string" },
+              "purpose": { "type": "string" },
+              "template": { "type": "string" },
+              "folder": { "type": "string" },
+              "from_claude": { "type": "boolean" },
+              "team": { "type": "string" },
+              "team_name": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "proposalNamesEstimateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usd", "input_tokens"],
+      "properties": { "usd": { "type": "number", "minimum": 0 }, "input_tokens": { "type": "integer", "minimum": 0 } }
+    },
+    "proposalNamesResult": {
+      "description": "cost_usd is the total_cost_usd Claude Code reported; cards are the names kept, by card id.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cost_usd", "cards"],
+      "properties": {
+        "cost_usd": { "type": "number", "minimum": 0 },
+        "cards": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name"],
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "purpose": { "type": "string" }, "template": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "proposalCreateResult": {
+      "description": "made: a team made (card id, slug, name, root); added: projects added to a team (card id, team, the names added); failed: a card that failed (card id, name, reason beginning with its code); split: a card whose proof no longer held, with the keys of its projects, which were made apart.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["made", "added", "failed", "split"],
+      "properties": {
+        "made": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "slug", "name", "root"],
+            "properties": { "id": { "type": "string" }, "slug": { "type": "string" }, "name": { "type": "string" }, "root": { "type": "string" } }
+          }
+        },
+        "added": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "team", "names"],
+            "properties": { "id": { "type": "string" }, "team": { "type": "string" }, "names": { "type": "array", "items": { "type": "string" } } }
+          }
+        },
+        "failed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "reason"],
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "reason": { "type": "string" } }
+          }
+        },
+        "split": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "projects"],
+            "properties": { "id": { "type": "string" }, "projects": { "type": "array", "items": { "type": "string" } } }
           }
         }
       }
@@ -4668,7 +7005,7 @@
     },
     "procurementMailboxConnectRequest": {
       "title": "Procurement Mailbox Connect Request",
-      "description": "Connects the procurement mailbox (docs/SPEC.md 6.6, 6.10; ADR 0039): Catervas logs in to both servers over TLS with the certificate checked, sending nothing, then keeps the password in the OS keychain (or, without one, a private file) and records mailbox.connected. provider is gmail, icloud, fastmail (whose servers Catervas knows and uses in place of imap and smtp), other (the servers given) or microsoft, which is refused mailbox_provider_unsupported before any connection, as is an address at outlook.com, hotmail.com, live.com or msn.com. folder defaults to INBOX, signature to none and disclose_ai to true. A refusal of these params carries no data, as account.connect's does; a refusal of the mailbox is mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server or mailbox_settings_invalid, each in Catervas's words, never quoting the password. Connecting again replaces all of it. Answers emptyResult.",
+      "description": "Connects the procurement mailbox (docs/SPEC.md 6.6, 6.10; ADR 0039): Catervas logs in to both servers over TLS with the certificate checked, sending nothing, then keeps the password in the OS keychain (or, without one, a private file) and records mailbox.connected. provider is gmail, icloud, fastmail (whose servers Catervas knows and uses in place of imap and smtp), other (the servers given) or microsoft, which is refused mailbox_provider_unsupported before any connection, as is an address at outlook.com, hotmail.com, live.com or msn.com. folder defaults to INBOX, signature to none and disclose_ai to true. A refusal of these params carries no data, as account.sign_in_code's does; a refusal of the mailbox is mailbox_login_failed, mailbox_needs_tls, mailbox_certificate, mailbox_unreachable, mailbox_server or mailbox_settings_invalid, each in Catervas's words, never quoting the password. Connecting again replaces all of it. Answers emptyResult.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -5256,9 +7593,9 @@
         }
       }
     },
-    "accountDisconnectRequest": {
-      "title": "Account Disconnect Request",
-      "description": "Deletes the AI account's credential from every store that holds it and, when one did, pauses the team. A credential from the environment cannot be removed: nothing is deleted, and the answer names its variable.",
+    "accountSignOutRequest": {
+      "title": "Account Sign Out Request",
+      "description": "Signs Claude Code out (claude auth logout) and, when the team was running, pauses it. An account from the environment cannot be signed out: nothing runs, and the answer names its variable.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -5275,7 +7612,7 @@
           "$ref": "#/$defs/requestId"
         },
         "method": {
-          "const": "account.disconnect"
+          "const": "account.sign_out"
         },
         "params": {
           "type": "object",
@@ -5414,31 +7751,20 @@
         "models"
       ]
     },
-    "accountDisconnectResult": {
+    "accountSignOutResult": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "removed_from": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "keychain",
-              "file"
-            ]
-          }
-        },
         "paused": {
           "type": "boolean",
-          "description": "Whether this call paused the team: true only when a credential was removed and the team was running. A team already paused stays paused and answers false."
+          "description": "Whether this call paused the team: true only when Claude Code was signed out and the team was running. A team already paused stays paused and answers false."
         },
         "environment_variable": {
           "type": "string",
-          "description": "The variable the credential comes from, when it comes from the environment and so could not be removed."
+          "description": "The variable the account comes from, when it comes from the environment and so could not be signed out."
         }
       },
       "required": [
-        "removed_from",
         "paused"
       ]
     },
@@ -5707,7 +8033,7 @@
     },
     "connectorToolsRequest": {
       "title": "Connector Tools Request",
-      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.connect's does.",
+      "description": "Lists a custom MCP server's tools, started or reached with the agent's keys, or with the sign-in an attempt made when the server has oauth, as ConnectorAdd's second step shows them (docs/SPEC.md 5.6; ADRs 0030 and 0033). Nothing is kept, and the attempt is not used up. A server with oauth and no attempt is refused sign_in_needed; an attempt that is unknown, used, expired, unfinished, or another server's is refused sign_in_unknown. A refusal of these params carries no data, as account.sign_in_code's does.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -5785,7 +8111,7 @@
     },
     "connectorConnectRequest": {
       "title": "Connector Connect Request",
-      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else paid, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.connect's does; a refusal of the entry carries the team's errors, each at its field.",
+      "description": "Gives the agent a custom MCP server (docs/SPEC.md 5.6, 6.7; ADR 0030): its tools listed with the keys, each usable one labelled by tags or else paid, the keys kept in the keychain or a private file beside the definition's spec_sha256, then connector_connect handled, which writes the team file and appends connector.connected. A server with oauth takes attempt, a finished sign-in, in place of keys, and uses it up; its grant is kept where keys are, and a grant it replaces is asked to be forgotten. A refusal of these params carries no data, as account.sign_in_code's does; a refusal of the entry carries the team's errors, each at its field.",
       "type": "object",
       "additionalProperties": false,
       "required": [

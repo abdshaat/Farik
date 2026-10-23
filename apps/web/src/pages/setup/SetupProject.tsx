@@ -1,9 +1,10 @@
 import { Button, Choice, TextArea, TextField } from "@catervas/ui";
 import { useEffect, useState } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { useConnection } from "../../app/connection.tsx";
 import { daemonSaid } from "../../app/refusals.ts";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
+import { ON_CURRENT } from "../../app/teams.ts";
 import {
 	AttachButton,
 	AttachedChips,
@@ -31,7 +32,6 @@ export function slug(name: string): string {
 export function SetupProject() {
 	const { client, status, reopen } = useConnection();
 	const navigate = useNavigate();
-	const stored = (useLocation().state as { stored?: string } | null)?.stored;
 	const { data: serve } = useQuery<ServeStatus>("serve.status", {});
 	const [view, setView] = useState<"question" | "project" | "parent">(
 		"question",
@@ -70,7 +70,8 @@ export function SetupProject() {
 
 	// Catervas restarts on the chosen project; once the page is connected to it again, it goes home.
 	useEffect(() => {
-		if (opening && status === "open") navigate("/", { replace: true });
+		if (opening && status === "open")
+			navigate("/", { replace: true, state: ON_CURRENT });
 	}, [opening, status, navigate]);
 
 	const take = async (
@@ -179,11 +180,6 @@ export function SetupProject() {
 		>
 			{leaving && (
 				<p role="status">{t("movingFrom").replace("{name}", base(leaving))}</p>
-			)}
-			{stored && (
-				<p role="status">
-					{t(stored === "keychain" ? "storedKeychain" : "storedFile")}
-				</p>
 			)}
 			{serve?.takeOnError && (
 				<p role="alert" className={styles.alert}>

@@ -1,0 +1,8 @@
+# m h dom mon dow command
+SHELL=/bin/bash
+GITHUB_TOKEN=ghp_SECRET-CRON-ENV
+0 2 * * * API_KEY=SECRET-CRON-INLINE /home/me/shop/bin/sync.sh --token SECRET-CRON-ARG
+*/15 * * * * cd ~/blog && ./publish.sh > /dev/null 2>&1
+@daily $HOME/notes/backup.sh
+0 1 * * * /usr/bin/backup-all % SECRET-CRON-STDIN
+not a cron line

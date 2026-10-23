@@ -4,6 +4,7 @@ import { Stepper } from "@catervas/ui";
 import type { ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { t } from "../../strings/t.ts";
+import { StillLooking } from "../find/StillLooking.tsx";
 import styles from "./setup.module.css";
 
 const MAY = t("wizardMay");
@@ -35,8 +36,11 @@ const NO_SANDBOX = "catervas.noSandbox";
 export function Wizard(props: {
 	step: number;
 	title: string;
+	/** The line under the title; none when empty. */
 	lead: string;
 	children: ReactNode;
+	/** Beside the title in place of the setup's steps (the pages that find projects have their own), or none when false. */
+	nav?: ReactNode | false;
 	/** A saved team's permission answers carried over: "What they may do" is not a step. */
 	carried?: boolean;
 	/** Called before a step-list link leaves the screen, to keep what was typed. */
@@ -68,20 +72,25 @@ export function Wizard(props: {
 				</p>
 			</aside>
 			<main className={styles.main}>
-				<nav aria-label={t("setupSteps")}>
-					<Stepper
-						steps={steps}
-						current={current}
-						{...(props.links !== false && {
-							onPick: (i: number) => {
-								props.onLeave?.();
-								navigate(paths[i] ?? "/");
-							},
-						})}
-					/>
-				</nav>
+				{props.nav === undefined ? (
+					<nav aria-label={t("setupSteps")}>
+						<Stepper
+							steps={steps}
+							current={current}
+							{...(props.links !== false && {
+								onPick: (i: number) => {
+									props.onLeave?.();
+									navigate(paths[i] ?? "/");
+								},
+							})}
+						/>
+					</nav>
+				) : (
+					props.nav
+				)}
+				{props.nav === undefined && <StillLooking />}
 				<h1 className={styles.title}>{props.title}</h1>
-				<p className={styles.lead}>{props.lead}</p>
+				{props.lead && <p className={styles.lead}>{props.lead}</p>}
 				{props.children}
 			</main>
 		</div>

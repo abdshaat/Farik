@@ -202,7 +202,7 @@ describe("team page", () => {
 			within(list)
 				.getByRole("link", { name: "Edit Theo" })
 				.getAttribute("href"),
-		).toBe("/team/theo");
+		).toBe("/t/shop/team/theo");
 		expect(screen.getByText(en.firstDay, { exact: false })).toBeTruthy();
 		expect(screen.getByText("5 agents work on Corner Bakery.")).toBeTruthy();
 		for (const line of en.teamPageRules.split("\n")) onlyInTips(line);
@@ -361,7 +361,7 @@ describe("team page", () => {
 		]);
 		expect(
 			within(cost).getByRole("link", { name: "Costs" }).getAttribute("href"),
-		).toBe("/costs");
+		).toBe("/t/shop/costs");
 		await expectNoAxeViolations(container);
 
 		// Add someone offers the Designer, with a picture nobody on the team has.
@@ -762,28 +762,6 @@ describe("team page", () => {
 		fireEvent.click(await screen.findByRole("button", { name: en.teamAdd }));
 		await sent(team.s, "team.save");
 		await failed(team.s, "team.save");
-	});
-
-	it("says_a_failed_disconnect_in_plain_words", async () => {
-		const { socket } = await renderApp("/settings/account");
-		const s = socket as FakeSocket;
-		await answerStatus(s, false);
-		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "api_key",
-			source: "keychain",
-		});
-		const row = await screen.findByRole("region", { name: en.accountRow });
-		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountDisconnect }),
-		);
-		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountDisconnectYes }),
-		);
-		const gone = await sent(s, "account.disconnect");
-		await s.fail(gone, -32603, "keyring: platform secure storage failure");
-		expect(await within(row).findByText(en.refuseOther)).toBeTruthy();
-		expect(within(row).queryByText(/keyring/)).toBeNull();
 	});
 
 	it("switches_a_connector", async () => {
@@ -1530,256 +1508,154 @@ describe("team page", () => {
 		).toBe(true);
 	});
 
-	it("shows_disconnects_and_connects_the_account_again", async () => {
+	it("checks_and_signs_out_of_the_ai_account", async () => {
 		const { container, socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "api_key",
-			source: "keychain",
+			signed_in: true,
+			kind: "subscription",
 		});
 		const row = await screen.findByRole("region", { name: en.accountRow });
-		// The row is there before the account's answer is drawn in it.
-		expect(await within(row).findByText(/an API key/)).toBeTruthy();
-		expect(within(row).getByText(en.accountKeychain)).toBeTruthy();
+		expect(
+			await within(row).findByText(
+				"Claude, through Claude Code: signed in with your Claude subscription.",
+			),
+		).toBeTruthy();
 		await expectNoAxeViolations(container);
 
-		// Disconnecting pauses the team, so it is asked once more first.
+		// Check connection runs the check and says its outcome.
+		fireEvent.click(within(row).getByRole("button", { name: en.accountCheck }));
+		await s.reply(await sent(s, "account.check"), { outcome: "working" });
+		expect(await within(row).findByText(en.connectionWorks)).toBeTruthy();
+		fireEvent.click(within(row).getByRole("button", { name: en.accountCheck }));
+		await waitFor(() => expect(s.calls("account.check")).toHaveLength(2));
+		await s.reply(s.calls("account.check")[1] as never, {
+			outcome: "failed",
+			detail: "Overloaded",
+		});
+		expect(
+			await within(row).findByText("It didn’t work: Overloaded"),
+		).toBeTruthy();
+
+		// Sign out is asked twice, then runs Claude Code's logout and shows the way back in.
 		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountDisconnect }),
+			within(row).getByRole("button", { name: en.accountSignOut }),
 		);
 		expect(within(row).getByText(en.accountConfirm)).toBeTruthy();
-		expect(s.calls("account.disconnect")).toHaveLength(0);
+		expect(s.calls("account.sign_out")).toHaveLength(0);
 		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountDisconnectYes }),
+			within(row).getByRole("button", { name: en.accountSignOutYes }),
 		);
-		const gone = await sent(s, "account.disconnect");
-		expect(gone.params).toEqual({});
-		await s.reply(gone, { removed_from: ["keychain"], paused: true });
-		expect(await within(row).findByText(en.accountGone)).toBeTruthy();
-		// The row reads the account again rather than saying it is still kept.
-		const again = await waitFor(() => {
+		const out = await sent(s, "account.sign_out");
+		await s.reply(out, { paused: true });
+		// The row reads the account again.
+		await waitFor(() => {
 			const asked = s
 				.calls("query")
 				.filter((q) => q.params.name === "account.status");
 			if (asked.length < 2) throw new Error("the account was not asked again");
-			return asked.at(-1) as never;
 		});
-		await s.reply(again, { provider: null, kind: null, source: null });
+		await answerQuery(s, "account.status", { signed_in: false, kind: null });
 		expect(await within(row).findByText(en.accountNone)).toBeTruthy();
-		expect(within(row).queryByText(en.accountKeychain)).toBeNull();
-		await expectNoAxeViolations(container);
-
-		// Another account is connected right here, without starting Catervas again.
-		const button = within(row).getByRole("button", {
-			name: en.accountConnect,
-		}) as HTMLButtonElement;
-		expect(within(row).queryByText(en.accountKeyRefused)).toBeNull();
-		expect(button.disabled).toBe(true);
-		fireEvent.click(within(row).getByLabelText(en.apiKey));
-		fireEvent.change(within(row).getByLabelText(en.apiKeyField), {
-			target: { value: "sk-ant-api03-new" },
-		});
-		fireEvent.click(button);
-		const connect = await sent(s, "account.connect");
-		expect(connect.params).toEqual({
-			kind: "api_key",
-			secret: "sk-ant-api03-new",
-		});
-		await s.reply(connect, { stored_in: "keychain", taking_on: false });
-		const third = await waitFor(() => {
-			const asked = s
-				.calls("query")
-				.filter((q) => q.params.name === "account.status");
-			if (asked.length < 3) throw new Error("the account was not asked again");
-			return asked.at(-1) as never;
-		});
-		await s.reply(third, {
-			provider: "anthropic",
-			kind: "api_key",
-			source: "keychain",
-		});
-		expect(await within(row).findByText(en.accountBack)).toBeTruthy();
-		expect(within(row).getByText(/an API key/)).toBeTruthy();
-		expect(within(row).queryByText(en.accountGone)).toBeNull();
-		// It can be disconnected again.
 		expect(
-			within(row).getByRole("button", { name: en.accountDisconnect }),
-		).toBeTruthy();
-		await expectNoAxeViolations(container);
-	});
-
-	it("says_the_key_did_not_work_and_connects_again", async () => {
-		const { container, socket } = await renderApp("/settings/account");
-		const s = socket as FakeSocket;
-		await answerStatus(s, true);
-		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
-			key_refused: true,
-		});
-		const row = await screen.findByRole("region", { name: en.accountRow });
-		expect(await within(row).findByText(en.accountKeyRefused)).toBeTruthy();
-		await expectNoAxeViolations(container);
-		const button = within(row).getByRole("button", {
-			name: en.accountConnectAgain,
-		}) as HTMLButtonElement;
-		// Nothing to send until a key is typed.
-		expect(button.disabled).toBe(true);
-		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
-			target: { value: "sk-ant-api-wrong" },
-		});
-		fireEvent.click(button);
-		// The daemon's refusal is said in plain words, never its own.
-		const wrong = await sent(s, "account.connect");
-		await s.fail(
-			wrong,
-			-32005,
-			"that is not a Claude subscription token: a subscription token starts with sk-ant-oat",
-		);
-		expect(await within(row).findByText(en.setupNotSubscription)).toBeTruthy();
-		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
-			target: { value: "sk-ant-oat01-new" },
-		});
-		fireEvent.click(button);
-		const connect = await waitFor(() => {
-			const all = s.calls("account.connect");
-			const second = all[1];
-			if (!second) throw new Error("no second account.connect");
-			return second;
-		});
-		expect(connect.params).toEqual({
-			kind: "subscription_token",
-			secret: "sk-ant-oat01-new",
-		});
-		await s.reply(connect, { stored_in: "keychain", taking_on: false });
-		// The row reads the account again, and the key works now.
-		const again = await waitFor(() => {
-			const asked = s
-				.calls("query")
-				.filter((q) => q.params.name === "account.status");
-			if (asked.length < 2) throw new Error("the account was not asked again");
-			return asked.at(-1) as never;
-		});
-		await s.reply(again, {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
-		});
-		await waitFor(() =>
-			expect(within(row).queryByText(en.accountKeyRefused)).toBeNull(),
-		);
-		expect(within(row).getByText(/your Claude subscription/)).toBeTruthy();
-	});
-
-	it("connects_a_refused_key_again_after_disconnecting_it", async () => {
-		const { socket } = await renderApp("/settings/account");
-		const s = socket as FakeSocket;
-		await answerStatus(s, true);
-		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "api_key",
-			source: "keychain",
-			key_refused: true,
-		});
-		const row = await screen.findByRole("region", { name: en.accountRow });
-		fireEvent.click(
-			await within(row).findByRole("button", { name: en.accountDisconnect }),
-		);
-		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountDisconnectYes }),
-		);
-		await s.reply(await sent(s, "account.disconnect"), {
-			removed_from: ["keychain"],
-			paused: false,
-		});
-		const asked = () =>
-			s.calls("query").filter((q) => q.params.name === "account.status");
-		const nth = (n: number) =>
-			waitFor(() => {
-				if (asked().length < n) throw new Error("the account was not asked");
-				return asked().at(-1) as never;
-			});
-		await s.reply(await nth(2), {
-			provider: null,
-			kind: null,
-			source: null,
-			key_refused: true,
-		});
-		// One key field, the refused key's, not a second one beside it.
-		await within(row).findByText(en.accountNone);
-		expect(within(row).getAllByLabelText(en.subscriptionKey)).toHaveLength(1);
-		expect(
-			within(row).queryByRole("button", { name: en.accountConnect }),
-		).toBeNull();
-		fireEvent.change(within(row).getByLabelText(en.subscriptionKey), {
-			target: { value: "sk-ant-oat01-new" },
-		});
-		fireEvent.click(
-			within(row).getByRole("button", { name: en.accountConnectAgain }),
-		);
-		await s.reply(await sent(s, "account.connect"), {
-			stored_in: "keychain",
-			taking_on: false,
-		});
-		await s.reply(await nth(3), {
-			provider: "anthropic",
-			kind: "subscription_token",
-			source: "keychain",
-		});
-		// The connect resumed the team: Disconnect is back, and nothing says it is paused.
-		expect(
-			await within(row).findByRole("button", { name: en.accountDisconnect }),
-		).toBeTruthy();
-		expect(within(row).queryByText(en.accountGone)).toBeNull();
-	});
-
-	it("says_a_refused_key_from_the_environment_is_changed_where_catervas_runs", async () => {
-		const { socket } = await renderApp("/settings/account");
-		const s = socket as FakeSocket;
-		await answerStatus(s, true);
-		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "api_key",
-			source: "environment",
-			environment_variable: "ANTHROPIC_API_KEY",
-			key_refused: true,
-		});
-		const row = await screen.findByRole("region", { name: en.accountRow });
-		expect(
-			await within(row).findByText(
-				en.accountKeyRefusedEnvironment.replace(
-					"{variable}",
-					"ANTHROPIC_API_KEY",
-				),
-			),
+			within(row).getByRole("button", { name: en.signInClaude }),
 		).toBeTruthy();
 		expect(
-			within(row).queryByRole("button", { name: en.accountConnectAgain }),
-		).toBeNull();
+			within(row).getByRole("button", { name: en.signInConsole }),
+		).toBeTruthy();
+		expect(within(row).getByText(en.accountSignedOut)).toBeTruthy();
 	});
 
-	it("names_the_variable_a_key_from_the_environment_comes_from", async () => {
+	it("says_a_failed_sign_out_in_plain_words", async () => {
 		const { socket } = await renderApp("/settings/account");
 		const s = socket as FakeSocket;
 		await answerStatus(s, false);
 		await answerQuery(s, "account.status", {
-			provider: "anthropic",
-			kind: "api_key",
-			source: "environment",
+			signed_in: true,
+			kind: "console",
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		fireEvent.click(
+			await within(row).findByRole("button", { name: en.accountSignOut }),
+		);
+		fireEvent.click(
+			within(row).getByRole("button", { name: en.accountSignOutYes }),
+		);
+		await s.fail(
+			await sent(s, "account.sign_out"),
+			-32005,
+			"Claude Code did not sign out: keyring: platform secure storage failure",
+		);
+		expect(await within(row).findByText(en.signOutFailed)).toBeTruthy();
+		expect(within(row).queryByText(/keyring/)).toBeNull();
+	});
+
+	it("says_the_account_comes_from_the_environment", async () => {
+		const { socket } = await renderApp("/settings/account");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "account.status", {
+			signed_in: true,
+			kind: "environment",
 			environment_variable: "ANTHROPIC_API_KEY",
 		});
 		const row = await screen.findByRole("region", { name: en.accountRow });
 		expect(
 			await within(row).findByText(
-				en.accountKept.replace("{variable}", "ANTHROPIC_API_KEY"),
+				"It comes from ANTHROPIC_API_KEY where you start Catervas. Remove it there to sign in here instead.",
 			),
 		).toBeTruthy();
 		expect(
-			within(row).queryByRole("button", { name: en.accountDisconnect }),
+			within(row).queryByRole("button", { name: en.accountSignOut }),
 		).toBeNull();
+		// Check connection stays.
+		expect(
+			within(row).getByRole("button", { name: en.accountCheck }),
+		).toBeTruthy();
+	});
+
+	it("offers_sign_in_again_after_a_refused_key", async () => {
+		const { socket } = await renderApp("/settings/account");
+		const s = socket as FakeSocket;
+		await answerStatus(s, false);
+		await answerQuery(s, "account.status", {
+			signed_in: true,
+			kind: "console",
+			key_refused: true,
+			kept_key_removed: true,
+		});
+		const row = await screen.findByRole("region", { name: en.accountRow });
+		expect(await within(row).findByText(en.connectionKeyRefused)).toBeTruthy();
+		expect(
+			within(row).getByRole("heading", { name: en.accountSignInAgain }),
+		).toBeTruthy();
+		expect(
+			within(row).getByRole("button", { name: en.signInClaude }),
+		).toBeTruthy();
+		expect(
+			within(row).getByRole("button", { name: en.signInConsole }),
+		).toBeTruthy();
+		// The key an earlier version kept was removed, and the row says so.
+		expect(within(row).getByText(en.accountKeptKeyRemoved)).toBeTruthy();
+
+		// A sign-in that works says so and reads the account again.
+		vi.stubGlobal(
+			"open",
+			vi.fn(() => ({}) as Window),
+		);
+		fireEvent.click(within(row).getByRole("button", { name: en.signInClaude }));
+		await s.reply(await sent(s, "account.sign_in"), {
+			url: "https://claude.com/x",
+		});
+		fireEvent.change(await within(row).findByLabelText(en.signInCode), {
+			target: { value: "abc" },
+		});
+		fireEvent.click(within(row).getByRole("button", { name: en.signInFinish }));
+		await s.reply(await sent(s, "account.sign_in_code"), {
+			outcome: "working",
+		});
+		expect(await within(row).findByText(en.accountSignedBack)).toBeTruthy();
 	});
 });
 
@@ -1927,7 +1803,7 @@ describe("team templates", () => {
 			within(line)
 				.getByRole("link", { name: en.settings })
 				.getAttribute("href"),
-		).toBe("/settings/saved-teams");
+		).toBe("/t/shop/settings/saved-teams");
 		expect(screen.queryByRole("dialog")).toBeNull();
 		await expectNoAxeViolations(container);
 	});
@@ -1953,7 +1829,7 @@ describe("team templates", () => {
 			within(dialog)
 				.getByRole("link", { name: en.settings })
 				.getAttribute("href"),
-		).toBe("/settings/saved-teams");
+		).toBe("/t/shop/settings/saved-teams");
 		await expectNoAxeViolations(container);
 		fireEvent.click(within(dialog).getByRole("button", { name: en.useShow }));
 		const asked = await query(s, "template.preview");

@@ -144,8 +144,8 @@ const shown = () =>
 	screen
 		.getAllByRole("link")
 		.map((a) => a.getAttribute("href") ?? "")
-		.filter((href) => /^\/tasks\/CTV-\d+$/.test(href))
-		.map((href) => href.slice("/tasks/".length))
+		.filter((href) => /^\/t\/shop\/tasks\/CTV-\d+$/.test(href))
+		.map((href) => href.slice("/t/shop/tasks/".length))
 		.sort();
 
 const chip = (name: string) => screen.getByRole("button", { name });
@@ -213,7 +213,7 @@ describe("board", () => {
 			within(review)
 				.getByRole("link", { name: "New checkout page" })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-9");
+		).toBe("/t/shop/tasks/CTV-9");
 		expect(within(review).getByText("CTV-9").className).toContain(styles.meta);
 		const heading = within(review).getByRole("link", {
 			name: "New checkout page",

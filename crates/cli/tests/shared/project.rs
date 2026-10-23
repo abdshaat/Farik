@@ -530,14 +530,26 @@ pub fn scratch(name: &str) -> PathBuf {
     path
 }
 
-/// A directory holding a `claude` that prints `version` whatever it is asked, and the `PATH` that
-/// finds it first.
+/// A directory holding a `claude` that prints `version` when it is asked anything but its sign-in,
+/// answers `auth status --json` signed in with a subscription (or signed out, once `signed-out` is
+/// made beside it) and a connection check with a good answer, and the `PATH` that finds it first.
 pub fn a_claude_saying(name: &str, version: &str) -> (PathBuf, String) {
     use std::os::unix::fs::PermissionsExt;
 
     let directory = scratch(name);
     let source = directory.join("claude.txt");
-    std::fs::write(&source, format!("#!/bin/sh\necho '{version}'\n")).expect("written");
+    std::fs::write(&source, format!(
+            "#!/bin/sh\n\
+             if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n\
+               if [ -f \"$(dirname \"$0\")/signed-out\" ]; then echo '{{\"loggedIn\": false}}'; \
+               else echo '{{\"loggedIn\": true, \"authMethod\": \"oauth_token\"}}'; fi\n\
+               exit 0\n\
+             fi\n\
+             if [ \"$1\" = -p ]; then\n\
+               echo '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"OK\"}}'; exit 0\n\
+             fi\n\
+             echo '{version}'\n"
+        )).expect("written");
     // Copied rather than written in place: a file this process holds open for writing is
     // inherited by whatever another test thread forks meanwhile, and running it then fails with
     // "text file busy".

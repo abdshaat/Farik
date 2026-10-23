@@ -13,6 +13,7 @@ export function TextField({
 	error,
 	type = "text",
 	required,
+	autoComplete,
 }: {
 	id: string;
 	label: string;
@@ -23,6 +24,8 @@ export function TextField({
 	error?: string;
 	type?: "text" | "password" | "url";
 	required?: boolean;
+	/** The input's `autocomplete`, for a field a browser must not remember. */
+	autoComplete?: string;
 }) {
 	const describedBy =
 		[info && `${id}-info`, hint && `${id}-hint`, error && `${id}-error`]
@@ -55,6 +58,7 @@ export function TextField({
 				className={`${styles.input} ${error ? styles.invalid : ""}`}
 				value={value}
 				required={required}
+				autoComplete={autoComplete}
 				aria-invalid={error ? true : undefined}
 				aria-describedby={describedBy}
 				onChange={(e) => onChange(e.target.value)}

@@ -15,14 +15,16 @@ import type { FakeSocket } from "../../test/fake-socket.ts";
 import {
 	answerQuery,
 	answerStatus,
+	intoTeam,
 	renderApp,
+	teamList,
 } from "../../test/render-app.tsx";
 import { bodyOf, refusedBy } from "../../test/schema.ts";
 import { joinedNames } from "./SetupReady.tsx";
 
 const READY = { state: "ready", version: "2.1.300" };
 const MISSING = { state: "missing" };
-const NO_PROJECT = { project_root: null, credential: null };
+const NO_PROJECT = { project_root: null, signed_in: false };
 
 const agent = (id: string, name: string, role: string, avatar: string) => ({
 	id,
@@ -146,59 +148,115 @@ describe("setup", () => {
 		);
 	});
 
-	it("connects_a_subscription_key", async () => {
+	it("signs_in_through_claude_code_and_continues", async () => {
+		const open = vi.fn(() => ({}) as Window);
+		vi.stubGlobal("open", open);
 		const { container, socket } = await renderApp("/setup/account");
 		const s = socket as FakeSocket;
-		await answerQuery(s, "account.status", {
-			provider: null,
-			kind: null,
-			source: null,
-		});
-		const field = await screen.findByLabelText(en.subscriptionKey);
+		await answerQuery(s, "account.status", { signed_in: false, kind: null });
+		const claude = await screen.findByRole("button", { name: en.signInClaude });
 		await expectNoAxeViolations(container);
+		// Nothing is checked while nothing is signed in.
+		expect(s.calls("account.check")).toHaveLength(0);
 
-		fireEvent.change(field, { target: { value: "sk-ant-api01-wrong" } });
-		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
-		const refused = await sent(s, "account.connect");
-		await s.fail(
-			refused,
-			-32005,
-			"that is not a Claude subscription token: a subscription token starts with sk-ant-oat",
-		);
-		const why = await screen.findByText(en.setupNotSubscription);
-		expect(field.getAttribute("aria-describedby")).toContain(why.id);
+		fireEvent.click(claude);
+		const started = await sent(s, "account.sign_in");
+		expect(started.params).toEqual({ console: false });
+		expect(
+			refusedBy(
+				"accountSignInRequest",
+				started.params as Record<string, unknown>,
+			),
+		).toEqual([]);
+		const address = "https://claude.com/cai/oauth/authorize?code=true";
+		await s.reply(started, { url: address });
+		expect(open).toHaveBeenCalledWith(address, "_blank", "noopener");
+		expect(await screen.findByText(en.signInOnThePage)).toBeTruthy();
+		expect(
+			screen
+				.getByRole("link", { name: en.signInOpenAgain })
+				.getAttribute("href"),
+		).toBe(address);
 
-		fireEvent.change(field, { target: { value: "sk-ant-oat01-test" } });
-		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
-		await waitFor(() => expect(s.calls("account.connect")).toHaveLength(2));
-		const call = s.calls("account.connect")[1];
-		if (!call) throw new Error("no second account.connect");
-		expect(call.params).toEqual({
-			kind: "subscription_token",
-			secret: "sk-ant-oat01-test",
-		});
-		await s.reply(call, { stored_in: "file", taking_on: false });
-		expect(await screen.findByText(en.storedFile)).toBeTruthy();
+		const field = screen.getByLabelText(en.signInCode);
+		expect(field.getAttribute("type")).toBe("password");
+		expect(field.getAttribute("autocomplete")).toBe("off");
+		fireEvent.change(field, { target: { value: " abc " } });
+		fireEvent.click(screen.getByRole("button", { name: en.signInFinish }));
+		const given = await sent(s, "account.sign_in_code");
+		expect(given.params).toEqual({ code: "abc" });
+		expect(
+			refusedBy(
+				"accountSignInCodeRequest",
+				given.params as Record<string, unknown>,
+			),
+		).toEqual([]);
+		await s.reply(given, { outcome: "working" });
 		expect(
 			await screen.findByRole("heading", { name: en.projectTitle }),
 		).toBeTruthy();
 		cleanup();
 
-		// A computer with a keychain: the page says the key went there.
-		const again = (await renderApp("/setup/account")).socket as FakeSocket;
-		await answerQuery(again, "account.status", {
-			provider: null,
+		// The Console account is the other button.
+		const other = (await renderApp("/setup/account")).socket as FakeSocket;
+		await answerQuery(other, "account.status", {
+			signed_in: false,
 			kind: null,
-			source: null,
 		});
-		fireEvent.change(await screen.findByLabelText(en.subscriptionKey), {
-			target: { value: "sk-ant-oat01-test" },
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.signInConsole }),
+		);
+		expect((await sent(other, "account.sign_in")).params).toEqual({
+			console: true,
 		});
-		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
-		const kept = await sent(again, "account.connect");
-		await again.reply(kept, { stored_in: "keychain", taking_on: false });
-		expect(await screen.findByText(en.storedKeychain)).toBeTruthy();
-		expect(screen.queryByText(en.storedFile)).toBeNull();
+	});
+
+	it("checks_an_account_already_signed_in", async () => {
+		const { socket } = await renderApp("/setup/account");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "account.status", {
+			signed_in: true,
+			kind: "subscription",
+		});
+		expect(await screen.findByText(en.signedInSubscription)).toBeTruthy();
+		// The check goes out with no press.
+		const checked = await sent(s, "account.check");
+		await s.reply(checked, { outcome: "working" });
+		expect(await screen.findByText(en.connectionWorks)).toBeTruthy();
+		const onward = screen.getByRole("button", { name: en.continue });
+		expect((onward as HTMLButtonElement).disabled).toBe(false);
+		cleanup();
+
+		// A refused key says so, and offers the two sign-ins.
+		const refused = (await renderApp("/setup/account")).socket as FakeSocket;
+		await answerQuery(refused, "account.status", {
+			signed_in: true,
+			kind: "console",
+		});
+		await refused.reply(await sent(refused, "account.check"), {
+			outcome: "key_refused",
+		});
+		expect(await screen.findByText(en.connectionKeyRefused)).toBeTruthy();
+		expect(screen.getByRole("button", { name: en.signInClaude })).toBeTruthy();
+		expect(screen.getByRole("button", { name: en.signInConsole })).toBeTruthy();
+		expect(
+			(screen.getByRole("button", { name: en.continue }) as HTMLButtonElement)
+				.disabled,
+		).toBe(true);
+		cleanup();
+
+		// A key from the environment is named by its variable.
+		const named = (await renderApp("/setup/account")).socket as FakeSocket;
+		await answerQuery(named, "account.status", {
+			signed_in: true,
+			kind: "environment",
+			environment_variable: "ANTHROPIC_API_KEY",
+		});
+		expect(
+			await screen.findByText(
+				"Claude Code is signed in with ANTHROPIC_API_KEY from where you started Catervas.",
+			),
+		).toBeTruthy();
 	});
 
 	it("says_each_setup_refusal_in_plain_words", async () => {
@@ -275,23 +333,88 @@ describe("setup", () => {
 		expect(screen.queryByText(/step 3/)).toBeNull();
 	});
 
-	it("takes_the_waiting_project_on_once_connected", async () => {
+	it("says_each_sign_in_refusal_in_plain_words", async () => {
+		vi.stubGlobal(
+			"open",
+			vi.fn(() => ({}) as Window),
+		);
+		const { socket } = await renderApp("/setup/account");
+		const s = socket as FakeSocket;
+		await answerQuery(s, "account.status", { signed_in: false, kind: null });
+		const cases: [string, string][] = [
+			[
+				"no sign-in is waiting for a code: press Sign in again",
+				en.signInNoneWaiting,
+			],
+			["Claude Code did not sign you in: Invalid code", en.signInFailed],
+		];
+		for (const [turn, [sentence, words]] of cases.entries()) {
+			fireEvent.click(
+				await screen.findByRole("button", { name: en.signInClaude }),
+			);
+			await waitFor(() =>
+				expect(s.calls("account.sign_in")).toHaveLength(turn + 1),
+			);
+			await s.reply(s.calls("account.sign_in")[turn] as never, {
+				url: "https://claude.com/x",
+			});
+			fireEvent.change(await screen.findByLabelText(en.signInCode), {
+				target: { value: "wrong" },
+			});
+			fireEvent.click(screen.getByRole("button", { name: en.signInFinish }));
+			await waitFor(() =>
+				expect(s.calls("account.sign_in_code")).toHaveLength(turn + 1),
+			);
+			await s.fail(
+				s.calls("account.sign_in_code")[turn] as never,
+				-32005,
+				sentence,
+			);
+			expect(await screen.findByText(words)).toBeTruthy();
+			expect(screen.queryByText(/Invalid code/)).toBeNull();
+			// The code is gone, and the sign-in starts again from the choices.
+			expect(screen.queryByLabelText(en.signInCode)).toBeNull();
+		}
+		// The page never says the daemon's own words for an address it could not give.
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.signInClaude }),
+		);
+		await waitFor(() => expect(s.calls("account.sign_in")).toHaveLength(3));
+		await s.fail(
+			s.calls("account.sign_in")[2] as never,
+			-32005,
+			"Claude Code did not give a sign-in address: Opening browser...",
+		);
+		expect(await screen.findByText(en.signInNoAddress)).toBeTruthy();
+		expect(screen.queryByText(/Opening browser/)).toBeNull();
+	});
+
+	it("takes_the_waiting_project_on_once_signed_in", async () => {
+		vi.stubGlobal(
+			"open",
+			vi.fn(() => ({}) as Window),
+		);
 		const { socket, sockets } = await renderApp(
 			"/setup/account",
 			{ "GET /session": 204 },
 			<Status />,
 		);
 		const s = socket as FakeSocket;
-		await answerQuery(s, "account.status", {
-			provider: null,
-			kind: null,
-			source: null,
+		await answerQuery(s, "account.status", { signed_in: false, kind: null });
+		fireEvent.click(
+			await screen.findByRole("button", { name: en.signInClaude }),
+		);
+		await s.reply(await sent(s, "account.sign_in"), {
+			url: "https://claude.com/x",
 		});
-		const field = await screen.findByLabelText(en.subscriptionKey);
-		fireEvent.change(field, { target: { value: "sk-ant-oat01-test" } });
-		fireEvent.click(screen.getByRole("button", { name: en.saveContinue }));
-		const call = await sent(s, "account.connect");
-		await s.reply(call, { stored_in: "file", taking_on: true });
+		fireEvent.change(await screen.findByLabelText(en.signInCode), {
+			target: { value: "abc" },
+		});
+		fireEvent.click(screen.getByRole("button", { name: en.signInFinish }));
+		await s.reply(await sent(s, "account.sign_in_code"), {
+			outcome: "working",
+			taking_on: true,
+		});
 		expect(await screen.findByText(en.opening)).toBeTruthy();
 		expect(screen.getByTestId("status").textContent).toBe("reopening");
 
@@ -301,7 +424,7 @@ describe("setup", () => {
 		await waitFor(() => expect(sockets).toHaveLength(2));
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
-		await answerStatus(next, true);
+		await intoTeam(next, sockets, true);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 	});
 
@@ -484,8 +607,8 @@ describe("setup", () => {
 		expect(fetch).toHaveBeenCalledTimes(2);
 		const next = sockets[1] as FakeSocket;
 		act(() => next.emit("open", {}));
-		// "/" is Today's shell, which shows once Catervas answers.
-		await answerStatus(next, true);
+		// "/" is the new team's Today, which shows once Catervas answers.
+		await intoTeam(next, sockets, true);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(
 			await screen.findByText(en.pausedNothingNew, { exact: false }),
@@ -532,7 +655,7 @@ describe("setup", () => {
 		const second = await renderApp("/setup/project");
 		await answerStatus(second.socket as FakeSocket, false, 1, {
 			project_root: null,
-			credential: null,
+			signed_in: false,
 		});
 		await screen.findByRole("heading", { name: en.projectTitle });
 		expect(screen.queryByRole("button", { name: /^Keep / })).toBeNull();
@@ -560,15 +683,17 @@ describe("setup", () => {
 	});
 
 	it("sends_the_user_to_setup_without_a_project", async () => {
-		const first = await renderApp("/");
-		await answerStatus(first.socket as FakeSocket, false, 1, NO_PROJECT);
+		const first = await renderApp("/", undefined, undefined, { raw: true });
+		await answerQuery(first.hub as FakeSocket, "teams.list", teamList());
+		await answerStatus(first.hub as FakeSocket, false, 1, NO_PROJECT);
 		expect(
 			await screen.findByRole("heading", { name: en.computerTitle }),
 		).toBeTruthy();
 		cleanup();
 
-		const second = await renderApp("/");
-		await answerStatus(second.socket as FakeSocket, false, 1, {
+		const second = await renderApp("/", undefined, undefined, { raw: true });
+		await answerQuery(second.hub as FakeSocket, "teams.list", teamList());
+		await answerStatus(second.hub as FakeSocket, false, 1, {
 			...NO_PROJECT,
 			take_on_error: "the team's driver could not start",
 		});
@@ -576,7 +701,7 @@ describe("setup", () => {
 			await screen.findByRole("heading", { name: en.projectTitle }),
 		).toBeTruthy();
 		// The project screen asks for the status too.
-		await answerStatus(second.socket as FakeSocket, false, 1, {
+		await answerStatus(second.hub as FakeSocket, false, 1, {
 			...NO_PROJECT,
 			take_on_error: "the team's driver could not start",
 		});
@@ -679,14 +804,14 @@ describe("setup", () => {
 		});
 		expect(refusedBy("emptyBody", bodyOf(command))).toEqual([]);
 		await first.s.reply(command, { said: "started", events: [9] });
-		await answerStatus(first.s, false);
+		await intoTeam(first.hub as FakeSocket, first.sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		cleanup();
 
 		// Later sends nothing.
 		const second = await theOffer();
 		fireEvent.click(await screen.findByRole("button", { name: "Later" }));
-		await answerStatus(second.s, false);
+		await intoTeam(second.hub as FakeSocket, second.sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(second.s.calls("command")).toHaveLength(0);
 		cleanup();
@@ -722,8 +847,8 @@ describe("setup", () => {
 	});
 
 	it("goes_home_when_nothing_is_offered", async () => {
-		const { s } = await theOffer({ offered: false, roles: [] });
-		await answerStatus(s, false);
+		const { s, hub, sockets } = await theOffer({ offered: false, roles: [] });
+		await intoTeam(hub as FakeSocket, sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(
 			screen.queryByRole("heading", { name: "Your team is ready" }),
@@ -742,7 +867,7 @@ describe("setup", () => {
 			return frame;
 		});
 		await s.fail(asked, -32000, "the offer cannot be read");
-		await answerStatus(s, false);
+		await intoTeam(rendered.hub as FakeSocket, rendered.sockets);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
 		expect(s.calls("command")).toHaveLength(0);
 	});

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router";
+import { Link } from "../app/links.tsx";
 import type { Agent } from "../pages/setup/TeamSetup.tsx";
 import { t } from "../strings/t.ts";
 import styles from "./MessageText.module.css";

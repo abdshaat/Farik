@@ -1,7 +1,8 @@
 import { Button, DiffView, TextArea } from "@catervas/ui";
 import { Fragment, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useParams } from "react-router";
 import { useConnection } from "../app/connection.tsx";
+import { Link, useNavigate } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import { roleWord, sentence, statusWord } from "../app/words.ts";
 import { t } from "../strings/t.ts";

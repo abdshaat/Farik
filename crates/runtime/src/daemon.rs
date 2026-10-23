@@ -44,15 +44,19 @@ use crate::session::SessionPurpose;
 use crate::tools::{ToolContext, ToolDeps};
 
 pub(crate) mod ads_calls;
+pub mod analytics;
 mod app;
 mod board;
 mod documents;
+pub mod finding;
 #[cfg(test)]
 pub(crate) mod fixtures;
 mod gates;
 mod hooks;
+pub mod hub;
 mod mcp;
 pub(crate) mod own_calls;
+pub mod reminders;
 mod repos;
 mod setup;
 mod signed_in;
@@ -63,6 +67,9 @@ pub mod web;
 #[cfg(test)]
 pub(crate) use mcp::listed_names;
 
+pub use finding::{
+    Finding, FindingHost, FindingProgress, MadeProject, NamesRun, PlanKind, TeamPlan,
+};
 pub(crate) use hooks::APPROVAL_NEEDED;
 pub use hooks::{
     HookDecision, HookRequest, builtin_tool_tier, decide_pre_tool_use, record_post_tool_use,
@@ -72,6 +79,7 @@ pub(crate) use signed_in::{Fresh, refreshed_entry};
 pub use team::SETUP_PENDING;
 pub use team::{custom_entry, kit_entry, labelled, matches_kit, plan_tools_of};
 pub(crate) use team::{secret_at, with_server};
+pub use templates::apply_to_new_team;
 
 /// What a daemon with no project answers what needs one.
 pub(crate) const NO_PROJECT: &str = "catervas has no project yet";
@@ -260,6 +268,15 @@ pub struct DaemonState {
     campaign_made: tokio::sync::Notify,
     /// The sandbox image's build, run in the background while setup waits (ADR 0070).
     image_build: crate::computer::ImageBuild,
+    /// The teams `catervas serve` drives, on the hub's own state alone (ADR 0059).
+    hub: OnceLock<Arc<hub::Hub>>,
+    /// Cancelled when this state's daemon shuts down, which ends the sockets of its pages.
+    closing: OnceLock<CancellationToken>,
+    /// The name in an address of the team this state drives, and what the hub keeps of the daily
+    /// reminder, once the hub has added the team (step 07).
+    team_reminders: OnceLock<(String, Arc<reminders::Reminders>)>,
+    /// What the hub keeps for the team's analytics, once the hub has added the team (step 08).
+    team_analytics: OnceLock<(String, Arc<analytics::Analytics>, Arc<finding::Finding>)>,
 }
 
 /// What the spend watch knows of one plan (step 08g): when it last tried, what it last read, why
@@ -357,6 +374,10 @@ impl DaemonState {
             spend_reads: Mutex::default(),
             campaign_made: tokio::sync::Notify::new(),
             image_build: crate::computer::ImageBuild::default(),
+            hub: OnceLock::new(),
+            closing: OnceLock::new(),
+            team_reminders: OnceLock::new(),
+            team_analytics: OnceLock::new(),
         }
     }
 
@@ -390,7 +411,80 @@ impl DaemonState {
             spend_reads: Mutex::default(),
             campaign_made: tokio::sync::Notify::new(),
             image_build: crate::computer::ImageBuild::default(),
+            hub: OnceLock::new(),
+            closing: OnceLock::new(),
+            team_reminders: OnceLock::new(),
+            team_analytics: OnceLock::new(),
         }
+    }
+
+    /// Makes this the hub's own state: it routes each page to its team in `hub` (ADR 0059).
+    /// Answers `true`, or `false` when it was a hub already.
+    pub fn set_hub(&self, hub: Arc<hub::Hub>) -> bool {
+        self.hub.set(hub).is_ok()
+    }
+
+    /// Asks the orchestrator to stop, as `catervas stop` does: it waits for a running session's tick
+    /// to end, on a task of its own, and the run ends. Nothing is done on a daemon that takes no
+    /// commands.
+    pub fn request_run_stop(self: &Arc<Self>) {
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            let _ = handled(&state, Command::RunStop).await;
+        });
+    }
+
+    /// What ends the sockets of this state's pages: cancelled when its daemon shuts down, once it
+    /// is served.
+    pub(crate) fn closing(&self) -> Option<&CancellationToken> {
+        self.closing.get()
+    }
+
+    /// The teams this state is the hub of, when it is.
+    #[must_use]
+    pub fn hub(&self) -> Option<&Arc<hub::Hub>> {
+        self.hub.get()
+    }
+
+    /// Gives a team's state the name it has in an address and the daily reminder the hub keeps.
+    pub(crate) fn set_reminders(&self, slug: &str, reminders: Arc<reminders::Reminders>) -> bool {
+        self.team_reminders
+            .set((slug.to_string(), reminders))
+            .is_ok()
+    }
+
+    /// Gives a team's state the cache of analytics and the way to look through the computer's
+    /// history that the hub keeps.
+    pub(crate) fn set_analytics(
+        &self,
+        slug: &str,
+        analytics: Arc<analytics::Analytics>,
+        finding: Arc<finding::Finding>,
+    ) -> bool {
+        self.team_analytics
+            .set((slug.to_string(), analytics, finding))
+            .is_ok()
+    }
+
+    /// What the hub gave this team for its analytics, once it has added the team.
+    pub(crate) fn analytics_handle(
+        &self,
+    ) -> Option<&(String, Arc<analytics::Analytics>, Arc<finding::Finding>)> {
+        self.team_analytics.get()
+    }
+
+    /// The name in an address of the team this state drives, when the hub added it.
+    pub(crate) fn team_slug(&self) -> Option<&str> {
+        self.team_reminders.get().map(|(slug, _)| slug.as_str())
+    }
+
+    /// The daily reminder this state's pages ask about: the hub's own, or the one the hub gave the
+    /// team.
+    pub(crate) fn reminders(&self) -> Option<Arc<reminders::Reminders>> {
+        self.team_reminders
+            .get()
+            .map(|(_, reminders)| Arc::clone(reminders))
+            .or_else(|| self.hub().map(|hub| Arc::clone(&hub.reminders)))
     }
 
     /// The project `project.leave` is leaving, if it was asked to; serve reads it once the run has
@@ -1073,6 +1167,7 @@ async fn serve_on(
         pid: std::process::id(),
     };
     let cancel = CancellationToken::new();
+    let _ = state.closing.set(cancel.clone());
     let app = router(state, &info.token, cancel.clone());
     let (stop, stopped) = oneshot::channel::<()>();
     let server = tokio::spawn(async move {
@@ -1190,13 +1285,26 @@ pub(crate) fn router_serving<E: rust_embed::RustEmbed + 'static>(
     let browser = Router::new()
         .route("/", get(app::app_from::<E>))
         .route("/connect", get(app::app_from::<E>).post(web::connect))
-        .route("/rpc", get(web::rpc))
         .route("/session", get(web::session))
-        .route("/documents/raw", get(documents::raw))
         .route("/disconnect", post(web::disconnect))
-        .fallback(get(app::app_from::<E>))
-        .layer(Extension(cancel))
-        .with_state(Arc::clone(&state));
+        .fallback(get(app::app_from::<E>));
+    // The hub's own state answers `/rpc` and `/documents/raw` for the current team, and has a page
+    // route for each team and one for itself (ADR 0059); a team's daemon answers its own.
+    let browser = if state.hub().is_some() {
+        browser
+            .route("/rpc", get(hub::current_rpc))
+            .route("/documents/raw", get(hub::current_documents))
+            .route("/hub/rpc", get(web::rpc))
+            .route("/hub/export", post(finding::export))
+            .route("/t/{team}/rpc", get(hub::team_rpc))
+            .route("/t/{team}/documents/raw", get(hub::team_documents))
+    } else {
+        browser
+            .route("/rpc", get(web::rpc))
+            .route("/documents/raw", get(documents::raw))
+    }
+    .layer(Extension(cancel))
+    .with_state(Arc::clone(&state));
     // Outside the daemon-token layer: a Catervas connector's shim holds no daemon token, only the
     // ticket its launch was given, which names its session (ADR 0038, ADR 0042).
     let calls = Router::new()

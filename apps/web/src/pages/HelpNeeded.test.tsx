@@ -351,7 +351,7 @@ describe("help page", () => {
 			},
 		);
 		const read = await screen.findByRole("link", { name: "Review the plan" });
-		expect(read.getAttribute("href")).toBe("/tasks/CTV-1/plan");
+		expect(read.getAttribute("href")).toBe("/t/shop/tasks/CTV-1/plan");
 		fireEvent.click(read);
 		expect(s.calls("command")).toHaveLength(0);
 		await expectNoAxeViolations(container);

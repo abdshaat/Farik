@@ -1,8 +1,8 @@
 import { Button, Dialog } from "@catervas/ui";
 import { type ReactNode, useEffect, useState } from "react";
-import { Link } from "react-router";
 import { useCommand } from "../app/command.ts";
 import { useConnection } from "../app/connection.tsx";
+import { Link } from "../app/links.tsx";
 import { AgentPicture } from "../components/AgentPicture.tsx";
 import { t } from "../strings/t.ts";
 import { channelName } from "./marketing.ts";

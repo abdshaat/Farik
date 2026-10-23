@@ -507,7 +507,7 @@ describe("task detail", () => {
 			within(stuck)
 				.getByRole("link", { name: en.taskBlockedAnswer })
 				.getAttribute("href"),
-		).toBe("/tasks/CTV-1/help");
+		).toBe("/t/shop/tasks/CTV-1/help");
 	});
 
 	it("shows_the_designers_plan_and_who_approved_it", async () => {
@@ -885,7 +885,7 @@ describe("task detail", () => {
 			screen
 				.getByRole("link", { name: "Resume Iris on the Team page" })
 				.getAttribute("href"),
-		).toBe("/team/iris");
+		).toBe("/t/shop/team/iris");
 		cleanup();
 
 		await opened(CONTRACT, [], {
@@ -936,7 +936,7 @@ describe("task detail", () => {
 					name: "Turn Playwright on for Iris on the Team page",
 				})
 				.getAttribute("href"),
-		).toBe("/team/iris");
+		).toBe("/t/shop/team/iris");
 		await expectNoAxeViolations(container);
 	});
 
@@ -956,7 +956,7 @@ describe("task detail", () => {
 		const link = await screen.findByRole("link", {
 			name: "Turn Playwright on for Kai on the Team page",
 		});
-		expect(link.getAttribute("href")).toBe("/team/kai");
+		expect(link.getAttribute("href")).toBe("/t/shop/team/kai");
 		await expectNoAxeViolations(container);
 	});
 

@@ -26,6 +26,15 @@ const WORDS: Record<string, keyof typeof en> = {
 	template_unreadable: "templateUnreadable",
 	no_state_folder: "templateNoFolder",
 	template_changed: "templateChanged",
+	// The computer's limits and its teams (SPEC 4.1; ADR 0059).
+	agents_at_once_out_of_range: "refuseAgentsAtOnce",
+	daily_cap_out_of_range: "refuseComputerCap",
+	team_unknown: "refuseTeamUnknown",
+	// The daily reminder (SPEC 4.4).
+	no_team_for_this: "refuseNoTeamForThis",
+	unknown_item: "refuseReminderGone",
+	cannot_give: "refuseReminderCannotGive",
+	bad_time: "refuseReminderTime",
 	// The human's commands (SPEC 4.2), refused by the orchestrator with `code: detail`.
 	already_paused: "refuseAlreadyPaused",
 	not_paused: "refuseNotPaused",
@@ -165,6 +174,42 @@ const WORDS: Record<string, keyof typeof en> = {
 	documents_switching: "refuseDocumentsSwitching",
 	documents_in_flight: "refuseDocumentsInFlight",
 	documents_busy: "refuseDocumentsBusy",
+	// Finding the owner's projects (SPEC 4.1; ADR 0059).
+	finding_paused: "refuseFindingPaused",
+	unknown_project: "refuseUnknownProject",
+	proof_no_longer_holds: "refuseProofNoLongerHolds",
+	// The proposal of teams, creating them and taking one back (SPEC 4.1, 4.4).
+	names_failed: "refuseNamesFailed",
+	template_unknown: "refuseTemplateUnknown",
+	bad_name: "refuseBadName",
+	bad_purpose: "refuseBadPurpose",
+	unknown_card: "refuseUnknownCard",
+	team_has_started: "refuseTeamHasStarted",
+	conversion_not_available: "refuseConversionNotAvailable",
+	no_folder: "refuseNoFolder",
+	mixed_projects: "refuseMixedProjects",
+	has_team: "refuseHasTeam",
+	team_did_not_start: "refuseTeamDidNotStart",
+	not_available: "refuseNotAvailable",
+	not_gone: "refuseNotGone",
+	not_the_same_repository: "refuseNotSameRepository",
+	unknown_service: "refuseUnknownService",
+	cannot_add: "refuseCannotAdd",
+	retention_not_offered: "refuseRetention",
+	forget_needs_confirming: "refuseForgetConfirm",
+	not_there: "refuseFolderNotThere",
+	outside_home: "refuseFolderOutsideHome",
+	home_itself: "refuseFolderIsHome",
+	not_a_repository: "refuseFolderNotRepository",
+	not_the_top: "refuseFolderNotTop",
+	// GitHub for an owner who uses Claude on the web (SPEC 4.4; ADR 0059).
+	github_token_refused: "refuseGithubTokenRefused",
+	github_rate_limited: "refuseGithubRateLimited",
+	github_unreachable: "refuseGithubUnreachable",
+	github_not_connected: "refuseGithubNotConnected",
+	no_secret_store: "refuseNoSecretStore",
+	folder_taken: "refuseFolderTaken",
+	copy_failed: "refuseCopyFailed",
 };
 
 /** A refusal in plain words, `{key}` filled from `fill`: its code's sentence, or `other` for any other. */
@@ -197,7 +242,7 @@ export function saidAll(e: unknown): string {
 
 /**
  * The daemon's refusals that carry no code, by how its sentence starts (crates/cli/src/setup.rs,
- * crates/runtime/src/daemon/setup.rs, computer.rs, credential.rs, daemon/gates.rs), and the words
+ * crates/runtime/src/daemon/setup.rs, computer.rs, daemon/team.rs, daemon/gates.rs), and the words
  * a person reads for each.
  */
 const SENTENCES: [string, keyof typeof en][] = [
@@ -214,10 +259,11 @@ const SENTENCES: [string, keyof typeof en][] = [
 	["that description is too long", "setupDescribeLess"],
 	["a folder with that name is already there", "setupNameTaken"],
 	["git is not installed", "setupNoGit"],
-	["that is not a Claude subscription token", "setupNotSubscription"],
-	["that is not an Anthropic API key", "setupNotApiKey"],
-	["this computer has no keychain", "setupNoKeep"],
-	["your AI account's key comes from", "setupKeyFromEnvironment"],
+	["your AI account comes from", "setupKeyFromEnvironment"],
+	["no sign-in is waiting for a code", "signInNoneWaiting"],
+	["Claude Code did not give a sign-in address", "signInNoAddress"],
+	["Claude Code did not sign you in", "signInFailed"],
+	["Claude Code did not sign out", "signOutFailed"],
 	["Docker is not installed", "setupNoDocker"],
 	["the sandbox image could not be built", "setupBuildFailed"],
 	["the browser could not be fetched", "setupPullFailed"],

@@ -6,7 +6,6 @@ import {
 	StatusWord,
 } from "@catervas/ui";
 import { useState } from "react";
-import { Link } from "react-router";
 import {
 	LANES,
 	type Lane,
@@ -14,6 +13,7 @@ import {
 	type TaskRow,
 	taskNumber,
 } from "../app/lanes.ts";
+import { Link } from "../app/links.tsx";
 import { useQuery } from "../app/store.ts";
 import { roleWord, statusWord } from "../app/words.ts";
 import { useWide } from "../shell/Shell.tsx";

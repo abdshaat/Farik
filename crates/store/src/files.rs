@@ -744,6 +744,23 @@ pub fn yaml_value(text: &str, named: &str) -> Result<Value, FilesError> {
     })
 }
 
+/// Every document of a YAML file that may hold several (a Kubernetes manifest), read as
+/// `yaml_value` reads one, so an unquoted `on:` stays a key.
+///
+/// # Errors
+///
+/// `Invalid`, as `yaml_value`.
+pub fn yaml_documents(text: &str, named: &str) -> Result<Vec<Value>, FilesError> {
+    serde_saphyr::from_multiple_with_options(text, yaml_options()).map_err(|error| {
+        FilesError::Invalid {
+            path: named.to_string(),
+            detail: error
+                .render_with_formatter(&serde_saphyr::UserMessageFormatter)
+                .replace("<input>", named),
+        }
+    })
+}
+
 /// A contract as the YAML its file holds, after holding it to the rules a contract on the wire is
 /// held to. `write_contract` writes this text, and a session's prompt shows it, so the dialect is
 /// decided here once.
@@ -1010,6 +1027,16 @@ mod tests {
     use super::{
         DecisionEntry, FilesError, contract_path, memory_path, slug, template_yaml, yaml_value,
     };
+
+    #[test]
+    fn reads_every_document_of_a_yaml_file() {
+        let documents = super::yaml_documents("a: 1\n---\nb: 2\n", "f.yaml").expect("two");
+        assert_eq!(documents.len(), 2);
+        let on = super::yaml_documents("on: x\n", "f.yaml").expect("one");
+        assert!(on[0].get("on").is_some());
+        let twice = super::yaml_documents("a: 1\n---\nb: 1\nb: 2\n", "f.yaml");
+        assert!(matches!(twice, Err(FilesError::Invalid { .. })));
+    }
 
     #[test]
     fn reads_and_writes_the_repositories() {

@@ -3,7 +3,7 @@ import { BrowserRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { en } from "../strings/en.ts";
 import { fakeFetch, socketsMade } from "../test/fake-socket.ts";
-import { answerStatus } from "../test/render-app.tsx";
+import { answerQuery, answerStatus } from "../test/render-app.tsx";
 import { App } from "./App.tsx";
 import { ConnectionProvider, useConnection } from "./connection.tsx";
 
@@ -43,10 +43,33 @@ describe("connection", () => {
 			return s;
 		});
 		act(() => socket.emit("open", {}));
-		// "/" is Today, once Catervas says it has a project and its team.
+		// "/" is the only team's Today, once Catervas says it has a project and its team.
 		await answerStatus(socket, false);
+		await answerQuery(socket, "teams.list", {
+			teams: [
+				{
+					slug: "shop",
+					name: "shop",
+					root: "/home/me/shop",
+					status: "running",
+					working_agents: 0,
+					waiting: 0,
+					today_usd: 0,
+					month_usd: 0,
+				},
+			],
+			current: "shop",
+			account_asleep_until: null,
+		});
+		const team = await waitFor(() => {
+			const s = sockets.find((one) => one.url.endsWith("/t/shop/rpc"));
+			if (!s) throw new Error("no socket to the team");
+			return s;
+		});
+		act(() => team.emit("open", {}));
+		await answerStatus(team, false);
 		expect(await screen.findByRole("heading", { name: en.today })).toBeTruthy();
-		expect(location.pathname).toBe("/");
+		expect(location.pathname).toBe("/t/shop/");
 		expect(fetch).toHaveBeenCalledWith(
 			"/connect",
 			expect.objectContaining({
@@ -172,7 +195,7 @@ describe("connection", () => {
 		await flush();
 		const first = sockets[0];
 		if (!first) throw new Error("no socket was opened");
-		expect(first.url).toBe(`ws://${location.host}/rpc`);
+		expect(first.url).toBe(`ws://${location.host}/hub/rpc`);
 		act(() => first.emit("open", {}));
 		expect(status()).toBe("open");
 		expect(first.calls("subscribe")[0]?.params).toEqual({});
@@ -195,5 +218,52 @@ describe("connection", () => {
 		act(() => second.emit("open", {}));
 		expect(status()).toBe("open");
 		expect(second.calls("subscribe")[0]?.params).toEqual({ from_seq: 4 });
+	});
+
+	it("notifies_in_the_browser_when_the_digest_is_due", async () => {
+		const shown: { title: string; options: NotificationOptions }[] = [];
+		vi.stubGlobal(
+			"Notification",
+			Object.assign(
+				function Notification(title: string, options: NotificationOptions) {
+					shown.push({ title, options });
+				},
+				{ permission: "granted", requestPermission: async () => "granted" },
+			),
+		);
+		vi.stubGlobal("fetch", vi.fn(fakeFetch({ "GET /session": 204 })));
+		const { factory, sockets } = socketsMade();
+		render(
+			<ConnectionProvider socketFactory={factory}>
+				<Status />
+			</ConnectionProvider>,
+		);
+		const socket = await waitFor(() => {
+			const s = sockets[0];
+			if (!s) throw new Error("no socket was opened");
+			return s;
+		});
+		act(() => socket.emit("open", {}));
+		await waitFor(() => expect(status()).toBe("open"));
+		const due = {
+			at: "2026-10-22T09:00:00Z",
+			count: 9,
+			headline: "A price check failed, and Tidepool's last deploy failed.",
+			time: "09:00",
+		};
+		act(() => socket.notify("reminders.due", due));
+		await waitFor(() => expect(shown).toHaveLength(1));
+		expect(shown[0]?.title).toBe("Catervas · 09:00");
+		expect(shown[0]?.options.body).toBe(
+			"9 things need you. A price check failed, and Tidepool's last deploy failed.",
+		);
+		// The same digest, told again, shows nothing more; the next day's does.
+		act(() => socket.notify("reminders.due", due));
+		await act(async () => {});
+		expect(shown).toHaveLength(1);
+		act(() =>
+			socket.notify("reminders.due", { ...due, at: "2026-10-23T09:00:00Z" }),
+		);
+		await waitFor(() => expect(shown).toHaveLength(2));
 	});
 });
