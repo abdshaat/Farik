@@ -48,6 +48,9 @@ The plan below stands, except where this section says otherwise. Line numbers be
   - `asks_to_convert_a_one_repo_team_before_linking` (serving, ignored): asserts that `proposal.create` gives a one-repo team's card `conversion_needed`, and that the team is untouched.
   - `offers_the_conversion_for_a_one_repo_team` (web): asserts that the card shows the sentence, and that **Continue** opens the dialog filled with the project.
   - Commit: `feat(web): linking into a one-repo team asks to make it a team of several repositories`.
+  - Built as: `proposal.create`'s failed row for such a card begins `conversion_needed:` and carries `team` (the slug); "Your teams" shows "Adding <project> makes <team> a team of several repositories." with **Continue**, which goes to `/t/<team>/settings/repositories` with the project in the router's state, where `AddSecondRepository` opens with it as the second repository. The dialog's call goes to that team's socket, which "Your teams", a page of the hub, has not.
+
+- [x] `feat(web): linking into a one-repo team asks to make it a team of several repositories`
 
 ## Goal
 

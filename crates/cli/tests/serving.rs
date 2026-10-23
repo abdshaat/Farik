@@ -3647,7 +3647,8 @@ fn adds_a_linked_project_to_the_team_it_works_with() {
     let repos =
         std::fs::read_to_string(home.join("suite/suite/.catervas/repos.yaml")).expect("repos.yaml");
     assert!(repos.contains("extra"), "{repos}");
-    // A team of one repository cannot take a second until a project folder is made of it.
+    // A team of one repository takes a second only once the owner agrees to make a project folder
+    // of it: the card is told so, with the team, and nothing is changed.
     let failed = made["result"]["failed"]
         .as_array()
         .cloned()
@@ -3656,7 +3657,63 @@ fn adds_a_linked_project_to_the_team_it_works_with() {
     assert!(
         failed[0]["reason"]
             .as_str()
-            .is_some_and(|said| said.starts_with("conversion_not_available")),
+            .is_some_and(|said| said.starts_with("conversion_needed")),
+        "{made}"
+    );
+    assert!(failed[0]["team"].is_string(), "{made}");
+    let (ran, _, err) = serving.interrupted();
+    assert_eq!(ran.code, 130, "{err}");
+}
+
+#[test]
+#[ignore = "needs the git program: cargo xtask check --integration"]
+fn asks_to_convert_a_one_repo_team_before_linking() {
+    let (serving, home, state) = a_scanned_serve("proposal-convert", &["single", "other"]);
+    let hub = |method: &str, params: Value| {
+        call_at(serving.port, "/hub/rpc", &serving.cookie, method, params)
+    };
+    let one = hub(
+        "project.open",
+        json!({ "path": "single", "no_sandbox": true }),
+    );
+    assert!(one.get("error").is_none(), "{one}");
+    until("the team is listed", || listed_teams(&serving).len() == 1);
+    said_yes(&state, &home.join("single"), &home.join("other"));
+    let before = std::fs::read(home.join("single/.catervas/team.yaml")).expect("the team");
+
+    let proposed = hub("proposal.get", json!({}));
+    let cards = proposed["result"]["cards"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(cards.len(), 1, "{proposed}");
+    assert_eq!(cards[0]["kind"], "add_to_team", "{proposed}");
+    let slug = cards[0]["team"].as_str().expect("the team").to_string();
+    let made = hub("proposal.create", json!({ "confirmed": true }));
+
+    // The card is told the team must be converted first, and names it.
+    let failed = made["result"]["failed"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(failed.len(), 1, "{made}");
+    assert!(
+        failed[0]["reason"]
+            .as_str()
+            .is_some_and(|said| said.starts_with("conversion_needed")),
+        "{made}"
+    );
+    assert_eq!(failed[0]["team"], json!(slug), "{made}");
+    // Nothing was converted: no project folder lists members, and the team is as it was.
+    assert!(!home.join("single/.catervas/repos.yaml").exists());
+    assert_eq!(
+        std::fs::read(home.join("single/.catervas/team.yaml")).expect("the team"),
+        before
+    );
+    assert!(
+        made["result"]["added"]
+            .as_array()
+            .is_some_and(Vec::is_empty),
         "{made}"
     );
     let (ran, _, err) = serving.interrupted();

@@ -4599,7 +4599,7 @@
     },
     "proposalCreateRequest": {
       "title": "Proposal Create Request",
-      "description": "Makes the teams of the cards, each alone and paused (docs/SPEC.md 4.1, 4.4; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. ids names the cards to make, else every card; only names project keys, and makes the cards whose projects are all among them. The proofs of each card's links are checked again first: a card whose proof no longer holds is split back into its projects, and the answer says which. A new_team card makes one team (a folder of the owner's, a project folder for several repositories, or a new folder for work done through connectors); an add_to_team card adds its projects as repositories to the team. A card that fails stops only itself. Answers proposalCreateResult.",
+      "description": "Makes the teams of the cards, each alone and paused (docs/SPEC.md 4.1, 4.4; ADR 0059). It needs confirmed true: without it the call is refused with -32005 and confirmation_needed. ids names the cards to make, else every card; only names project keys, and makes the cards whose projects are all among them. The proofs of each card's links are checked again first: a card whose proof no longer holds is split back into its projects, and the answer says which. A new_team card makes one team (a folder of the owner's, a project folder for several repositories, or a new folder for work done through connectors); an add_to_team card adds its projects as repositories to the team, unless the team is one repository: then the card fails with conversion_needed and the team's slug, and nothing changes until the owner agrees to the move in that team's Settings. A card that fails stops only itself. Answers proposalCreateResult.",
       "type": "object",
       "additionalProperties": false,
       "required": ["jsonrpc", "id", "method", "params"],
@@ -5357,7 +5357,7 @@
       }
     },
     "proposalCreateResult": {
-      "description": "made: a team made (card id, slug, name, root); added: projects added to a team (card id, team, the names added); failed: a card that failed (card id, name, reason beginning with its code); split: a card whose proof no longer held, with the keys of its projects, which were made apart.",
+      "description": "made: a team made (card id, slug, name, root); added: projects added to a team (card id, team, the names added); failed: a card that failed (card id, name, reason beginning with its code, and for conversion_needed the team that must be converted first); split: a card whose proof no longer held, with the keys of its projects, which were made apart.",
       "type": "object",
       "additionalProperties": false,
       "required": ["made", "added", "failed", "split"],
@@ -5386,7 +5386,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["id", "name", "reason"],
-            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "reason": { "type": "string" } }
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "reason": { "type": "string" }, "team": { "type": "string", "description": "Only for conversion_needed: the slug of the team of one repository that adding the card's projects makes a team of several." } }
           }
         },
         "split": {

@@ -1,5 +1,6 @@
 import { Button, Choice, Dialog, Table } from "@catervas/ui";
 import { useState } from "react";
+import { useLocation } from "react-router";
 import { useConnection, useHub } from "../../app/connection.tsx";
 import { useNavigate } from "../../app/links.tsx";
 import { type ServeStatus, useQuery } from "../../app/store.ts";
@@ -33,7 +34,13 @@ export function Repositories() {
 		{},
 	);
 	const { data: serve } = useQuery<ServeStatus>("serve.status", {});
-	const [adding, setAdding] = useState(false);
+	// A "Your teams" card that adds a project to this team sends the owner here with it chosen.
+	const wanted = (
+		useLocation().state as {
+			addRepository?: { path: string; name?: string };
+		} | null
+	)?.addRepository;
+	const [adding, setAdding] = useState(wanted !== undefined);
 	// Where the team's notes are moving to, once the owner asked for the move.
 	const [moving, setMoving] = useState<string>();
 	const [leaving, setLeaving] = useState<Member>();
@@ -114,6 +121,7 @@ export function Repositories() {
 			{adding && serve?.projectRoot && (
 				<AddSecondRepository
 					root={serve.projectRoot}
+					{...(wanted && { second: wanted })}
 					onClose={() => setAdding(false)}
 					onMoved={(folder) => {
 						setAdding(false);

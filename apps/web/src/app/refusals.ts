@@ -185,7 +185,6 @@ const WORDS: Record<string, keyof typeof en> = {
 	bad_purpose: "refuseBadPurpose",
 	unknown_card: "refuseUnknownCard",
 	team_has_started: "refuseTeamHasStarted",
-	conversion_not_available: "refuseConversionNotAvailable",
 	no_folder: "refuseNoFolder",
 	mixed_projects: "refuseMixedProjects",
 	has_team: "refuseHasTeam",

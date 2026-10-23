@@ -2996,6 +2996,8 @@ export const en = {
 	yourTeamsWatched: "Watched, no team: {names}.",
 	yourTeamsFailedAt: "{name}: {why}",
 	yourTeamsFailed: "That did not go through. Try again.",
+	yourTeamsConvert:
+		"Adding {project} makes {team} a team of several repositories.",
 	yourTeamsSplit:
 		"Some projects no longer show they work together, so they are apart now. Look again.",
 	namesTitle: "Better names?",
@@ -3121,8 +3123,6 @@ export const en = {
 	refuseUnknownCard: "That team is not on the list any more. Look again.",
 	refuseTeamHasStarted:
 		"This team has started working. Remove it from All teams instead.",
-	refuseConversionNotAvailable:
-		"This team is one repository, and Catervas cannot yet make a project folder of it to add another.",
 	refuseNoFolder: "A project is not on this computer. Copy it here first.",
 	refuseMixedProjects:
 		"Work done through connectors and repositories cannot be one team.",
