@@ -446,6 +446,10 @@ fn command(refusal: &CommandRefusal) -> (&'static str, String) {
              only git status, diff, log, show, ls-files, grep, rev-parse and blame run here"
                 .to_string(),
         ),
+        CommandRefusal::KeptLocal => (
+            "kept_local",
+            "this team keeps everything on this computer".to_string(),
+        ),
         CommandRefusal::ForbiddenCommand { pattern } => (
             "command_forbidden",
             format!("the command matches the team's forbidden pattern {pattern} (5.12)"),

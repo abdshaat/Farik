@@ -47,9 +47,10 @@ pub use crate::generated::event::{
     RequestTriagedBody, RequestTriagedBodySize, RetroAppendedBody, ReviewRecordedBody,
     SessionEndedBody, SessionEndedBodyReason, SessionStartedBody, SessionStartedBodyEffort,
     SessionStartedBodyModel, SessionStartedBodyPurpose, SkillPinnedBody, SkillRemovedBody,
-    SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody, TaskCreatedBody,
-    TaskCreatedBodyFiledAs, TaskFlaggedBody, TaskIntegratedBody, TaskIntegratedBodyIntegratedBy,
-    TaskReassignedBody, TaskReassignedBodyReason, TaskRoomGrantedBody, TaskTransitionedBody,
+    SprintEndedBody, SprintEndedBodyEndedBy, SprintPlannedBody, SprintStartedBody,
+    TaskConflictedBody, TaskCreatedBody, TaskCreatedBodyFiledAs, TaskFlaggedBody,
+    TaskIntegratedBody, TaskIntegratedBodyIntegratedBy, TaskReassignedBody,
+    TaskReassignedBodyReason, TaskRoomGrantedBody, TaskTransitionedBody,
     TaskTransitionedBodyEffectsItem, TeamDecidedBody, TeamPausedBody, TeamPausedBodyBy,
     TeamPausedBodyReason, TeamQuestionAnsweredBody, TeamQuestionAskedBody, TeamUpdatedBody,
     TokenUsage, ToolApprovalDecidedBody, ToolApprovalRequestedBody, ToolApprovedBody,
@@ -309,6 +310,7 @@ fn body_def_name(kind: EventKind) -> &'static str {
         EventKind::WorktreeTidied => "worktreeTidiedBody",
         EventKind::PullRequestConflicted => "pullRequestConflictedBody",
         EventKind::PullRequestRefreshed => "pullRequestRefreshedBody",
+        EventKind::TaskConflicted => "taskConflictedBody",
         EventKind::GoalSet => "goalSetBody",
         EventKind::GoalPaused | EventKind::GoalResumed => "goalIdBody",
         EventKind::GoalEnded => "goalEndedBody",
@@ -389,6 +391,7 @@ pub fn is_about_one_contract(kind: EventKind) -> bool {
             | EventKind::WorktreeTidied
             | EventKind::PullRequestConflicted
             | EventKind::PullRequestRefreshed
+            | EventKind::TaskConflicted
             | EventKind::TeamQuestionAsked
             | EventKind::TeamQuestionAnswered
             | EventKind::TeamDecided
@@ -568,6 +571,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
         | EventBody::WorktreeTidied(_)
         | EventBody::PullRequestConflicted(_)
         | EventBody::PullRequestRefreshed(_)
+        | EventBody::TaskConflicted(_)
         | EventBody::GoalSet(_)
         | EventBody::GoalPaused(_)
         | EventBody::GoalResumed(_)
@@ -584,7 +588,7 @@ fn attribution(body: &mut EventBody) -> Option<(&'static str, &mut String)> {
 
 /// Every kind the log holds in this phase, in the order `docs/schemas/event.schema.json` lists
 /// them. The step that adds a kind adds it here.
-pub const EVERY_KIND: [EventKind; 141] = [
+pub const EVERY_KIND: [EventKind; 142] = [
     EventKind::TaskCreated,
     EventKind::RequestTriaged,
     EventKind::ContractWritten,
@@ -709,6 +713,7 @@ pub const EVERY_KIND: [EventKind; 141] = [
     EventKind::WorktreeTidied,
     EventKind::PullRequestConflicted,
     EventKind::PullRequestRefreshed,
+    EventKind::TaskConflicted,
     EventKind::GoalSet,
     EventKind::GoalPaused,
     EventKind::GoalResumed,
@@ -1139,6 +1144,9 @@ pub enum EventBody {
     /// An accepted task's pull request stopped merging and Catervas brought it up to date (ADR 0069).
     #[serde(rename = "pull_request.refreshed")]
     PullRequestRefreshed(PullRequestRefreshedBody),
+    /// A local team's accepted task no longer merges into the integration branch and went back to its assignee (ADR 0085).
+    #[serde(rename = "task.conflicted")]
+    TaskConflicted(TaskConflictedBody),
     /// The owner set a goal, or edited the standing one (ADR 0075).
     #[serde(rename = "goal.set")]
     GoalSet(GoalSetBody),
@@ -1322,6 +1330,7 @@ impl EventBody {
             Self::WorktreeTidied(_) => EventKind::WorktreeTidied,
             Self::PullRequestConflicted(_) => EventKind::PullRequestConflicted,
             Self::PullRequestRefreshed(_) => EventKind::PullRequestRefreshed,
+            Self::TaskConflicted(_) => EventKind::TaskConflicted,
             Self::GoalSet(_) => EventKind::GoalSet,
             Self::GoalPaused(_) => EventKind::GoalPaused,
             Self::GoalResumed(_) => EventKind::GoalResumed,
@@ -2410,7 +2419,7 @@ mod tests {
             assert_eq!(event.body.kind(), kind);
             assert_eq!(event_to_value(&event), wire, "{kind}");
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
     }
 
     #[test]
@@ -2439,7 +2448,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
 
         let remove = |kind: EventKind, field: &str| {
             let mut wire = an_event_wire(kind);
@@ -2970,7 +2979,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
 
         // A decision session says which request it decides.
         let mut started = an_event_wire(EventKind::SessionStarted);
@@ -3111,7 +3120,7 @@ mod tests {
                 "{kind}"
             );
         }
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
 
         // A decision always carries its note, empty when the owner said nothing, which leaves a
         // body of the order alone to an expiry: the schema's choice of bodies must match one.
@@ -3426,7 +3435,7 @@ mod tests {
 
     #[test]
     fn reads_a_team_paused_and_resumed_by_the_human() {
-        assert_eq!(EVERY_KIND.len(), 141);
+        assert_eq!(EVERY_KIND.len(), 142);
         for kind in [EventKind::TeamPaused, EventKind::TeamResumed] {
             assert_eq!(a_body_wire(kind), json!({ "by": "human" }));
             let input = an_event_wire(kind);

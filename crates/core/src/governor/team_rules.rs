@@ -50,6 +50,9 @@ pub struct TeamRules {
     pub read_only_paths: Vec<String>,
     /// Git subcommands `catervas_exec` runs on top of the read-only ones (ADR 0080 decision 6).
     pub git_subcommands: Vec<String>,
+    /// Whether the team keeps everything on this computer: `catervas_exec` then refuses a
+    /// pushing git subcommand whatever `git_subcommands` lists (ADR 0085).
+    pub keeps_local: bool,
     /// Globs a contract's `allowed_paths` must fall within; empty means no ceiling.
     pub allowed_paths_ceiling: Vec<String>,
     /// Verification methods every contract must have at least one criterion of.
@@ -77,6 +80,7 @@ impl Default for TeamRules {
                 .collect(),
             read_only_paths: Vec::new(),
             git_subcommands: Vec::new(),
+            keeps_local: false,
             allowed_paths_ceiling: Vec::new(),
             required_criteria: Vec::new(),
             require_new_tests: false,

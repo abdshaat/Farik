@@ -1683,7 +1683,6 @@ fn model_label(id: &str, newest: &[(String, String)]) -> String {
 /// before its own grants and revokes.
 fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
     let newest = newest(deps)?;
-    let permissions = team.permissions();
     let agents = team
         .agents
         .iter()
@@ -1696,8 +1695,8 @@ fn effective(deps: &ToolDeps, team: &Team) -> Result<Value, Failure> {
             Ok(json!({
                 "id": agent.id,
                 "model": { "id": model, "label": model_label(&model, &newest), "effort": effort },
-                "tiers": agent.tiers(&permissions),
-                "base_tiers": bare.tiers(&permissions),
+                "tiers": team.tiers_of(agent),
+                "base_tiers": team.tiers_of(&bare),
             }))
         })
         .collect::<Result<Vec<_>, Failure>>()?;
@@ -2020,9 +2019,14 @@ fn integration_branch_errors(
     }
 }
 
-/// Whether finished work can go online: the repository has an `origin`, and for a project folder
-/// every member's repository has one. A git error counts as `false`.
+/// Whether finished work can go online: the team does not keep everything on this computer, the
+/// repository has an `origin`, and for a project folder every member's repository has one. A git
+/// error counts as `false`.
 fn online(state: &DaemonState, deps: &ToolDeps) -> bool {
+    // A team that keeps everything on this computer is never online (ADR 0085).
+    if deps.files.read_team().is_ok_and(|team| team.keeps_local()) {
+        return false;
+    }
     let members = match deps.files.read_repos() {
         Ok(Some(repos)) if !repos.repos.is_empty() => repos.repos,
         Ok(_) => return deps.git.has_remote("origin").unwrap_or(false),
@@ -3359,6 +3363,14 @@ pub(super) mod tests {
 
         harness.with_origin();
         assert_eq!(online(&harness), json!(true));
+
+        // A team that keeps everything on this computer is never online (ADR 0085).
+        let local = Harness::new("team-get-local", |wire| {
+            wire["policy"]["integration"] = json!("local");
+        });
+        let _ = local.orchestrator(local.recorded(Vec::new()));
+        local.with_origin();
+        assert_eq!(online(&local), json!(false));
     }
 
     #[test]

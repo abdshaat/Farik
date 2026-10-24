@@ -734,7 +734,7 @@ pub(crate) fn tiers_of(deps: &ToolDeps, agent: &str) -> Vec<PermissionTier> {
     team.agents
         .iter()
         .find(|one| one.id.as_str() == agent)
-        .map(|one| one.tiers(&team.permissions()))
+        .map(|one| team.tiers_of(one))
         .unwrap_or_default()
 }
 
