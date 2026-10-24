@@ -1,5 +1,5 @@
 import { Button } from "@catervas/ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useHub } from "../../app/connection.tsx";
 import { t } from "../../strings/t.ts";
@@ -31,7 +31,7 @@ type ProofEnd = {
 type AskedPair = {
 	a: LinkProject;
 	b: LinkProject;
-	proof: { sentence: string; ends: ProofEnd[] };
+	proof: { kind: string; sentence: string; ends: ProofEnd[] };
 	also: string[];
 	hints: HintKind[];
 };
@@ -92,6 +92,8 @@ function Card(props: { project: LinkProject }) {
 /** Where a proof was read: "tidepool-web/package.json, line 14:" and the line. */
 function End(props: { end: ProofEnd }) {
 	const { end } = props;
+	// A session of shared work (line 0) is its text alone: the title and the day.
+	if (end.line === 0) return <li>{end.text}</li>;
 	return (
 		<li>
 			{end.file === "description"
@@ -114,6 +116,12 @@ function Question(props: {
 }) {
 	const { pair } = props;
 	const [open, setOpen] = useState(false);
+	const actions = useRef<HTMLDivElement>(null);
+	const shared = pair.proof.kind === "shared_work";
+	// Shared work leads with Yes, which has focus.
+	useEffect(() => {
+		if (shared) actions.current?.querySelector("button")?.focus();
+	}, [shared]);
 	const also = [
 		...pair.also.map((one) =>
 			asIt(one, pair.proof.ends[0]?.name ?? pair.a.name),
@@ -144,7 +152,10 @@ function Question(props: {
 				<div id="proof-lines" className={styles.panel}>
 					<ul>
 						{pair.proof.ends.map((end) => (
-							<End key={`${end.project}${end.file}${end.line}`} end={end} />
+							<End
+								key={`${end.project}${end.file}${end.line}${end.text}`}
+								end={end}
+							/>
 						))}
 						<li>{t("togetherChecked")}</li>
 					</ul>
@@ -153,7 +164,7 @@ function Question(props: {
 			{also.map((line) => (
 				<p key={line}>{t("togetherAlso", { what: line })}</p>
 			))}
-			<div className={styles.actions}>
+			<div className={styles.actions} ref={actions}>
 				<Button
 					kind="primary"
 					disabled={props.busy}
@@ -314,7 +325,13 @@ export function Together() {
 	return (
 		<Wizard
 			step={0}
-			title={finished ? t("togetherDone") : t("togetherTitle")}
+			title={
+				finished
+					? t("togetherDone")
+					: first?.proof.kind === "shared_work"
+						? t("togetherTitleShared")
+						: t("togetherTitle")
+			}
 			lead={
 				first && pairs
 					? t("togetherQuestion", { n: done + 1, total: done + pairs.length })

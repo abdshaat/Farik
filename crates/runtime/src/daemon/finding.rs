@@ -18,7 +18,7 @@ use futures_util::StreamExt as _;
 use catervas_core::claude_history::{ProjectKey, fold_by_remote, normalise_remote};
 use catervas_core::claude_services::catalog::CATALOG;
 use catervas_core::finding::{Candidate, Choice, Section, section_of, suggest};
-use catervas_core::linking::{ClaudeAiProjectText, Proof};
+use catervas_core::linking::{ClaudeAiProjectText, Proof, SessionNote};
 use catervas_store::claude_export::{ExportError, ExportLimits, import_claude_export};
 use catervas_store::claude_history::{HistoryError, add_project_by_hand, place_sessions};
 use catervas_store::git::Git;
@@ -1180,6 +1180,8 @@ fn build_listing(
 struct LinkScope {
     projects: Vec<LinkProject>,
     claude_ai: Vec<ClaudeAiProjectText>,
+    /// What is known of the sessions that wrote under the projects' folders.
+    sessions: std::collections::BTreeMap<String, SessionNote>,
 }
 
 /// The projects chosen as teams (the choice made, else the suggestion the page showed), and the
@@ -1195,6 +1197,7 @@ fn link_scope(
     let mut scope = LinkScope {
         projects: Vec::new(),
         claude_ai: Vec::new(),
+        sessions: activity.sessions.clone(),
     };
     for row in &listing.rows {
         let wanted =
@@ -1328,7 +1331,12 @@ fn linking_pairs(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
         hub,
         host,
         |index, scope| {
-            let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+            let evaluation = evaluate(
+                &scope.projects,
+                &scope.claude_ai,
+                &scope.sessions,
+                &read_of(host),
+            );
             let pairs =
                 asked_pairs(index, &scope.projects, &evaluation).map_err(|e| internal(&e))?;
             let shown = pairs
@@ -1359,7 +1367,12 @@ fn linking_maybe(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
         hub,
         host,
         |index, scope| {
-            let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+            let evaluation = evaluate(
+                &scope.projects,
+                &scope.claude_ai,
+                &scope.sessions,
+                &read_of(host),
+            );
             let maybe = maybe_pairs(index, &evaluation).map_err(|e| internal(&e))?;
             let shown = maybe
                 .iter()
@@ -1383,7 +1396,12 @@ fn linking_groups(hub: &Hub, host: &dyn FindingHost) -> Result<Value, Failure> {
         hub,
         host,
         |index, scope| {
-            let evaluation = evaluate(&scope.projects, &scope.claude_ai, &read_of(host));
+            let evaluation = evaluate(
+                &scope.projects,
+                &scope.claude_ai,
+                &scope.sessions,
+                &read_of(host),
+            );
             let groups =
                 confirmed_groups(index, &scope.projects, &evaluation).map_err(|e| internal(&e))?;
             let shown = groups
@@ -1426,6 +1444,7 @@ fn linking_answer(hub: &Hub, host: &dyn FindingHost, params: &Value) -> Result<V
                 index,
                 &scope.projects,
                 &scope.claude_ai,
+                &scope.sessions,
                 &read_of(host),
                 wanted,
                 answer,

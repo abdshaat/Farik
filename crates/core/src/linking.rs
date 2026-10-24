@@ -2,9 +2,9 @@
 //! only suggest it (`docs/SPEC.md` 4.4; ADR 0059). Pure: the files come in as strings. A hint is
 //! never a proof, and only a proof the owner says Yes to makes a link.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 
 /// The corpus of tempting pairs the proofs are held to.
 pub mod fixtures;
@@ -40,6 +40,8 @@ pub struct ClaudeAiProjectText {
 /// What kind of proof, in the order the screen prefers them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ProofKind {
+    /// At least two of the owner's sessions changed files in both.
+    SharedWork,
     /// One uses the other's code through a local path.
     PathDependency,
     /// One includes the other as a submodule.
@@ -61,6 +63,7 @@ impl ProofKind {
     #[must_use]
     pub fn as_wire(self) -> &'static str {
         match self {
+            Self::SharedWork => "shared_work",
             Self::PathDependency => "path_dependency",
             Self::Submodule => "submodule",
             Self::DeclaredPackage => "declared_package",
@@ -75,6 +78,7 @@ impl ProofKind {
     #[must_use]
     pub fn from_wire(wire: &str) -> Option<Self> {
         [
+            Self::SharedWork,
             Self::PathDependency,
             Self::Submodule,
             Self::DeclaredPackage,
@@ -96,7 +100,8 @@ pub struct ProofEnd {
     /// The file, relative to the project's root; for a claude.ai Project `description` or a file
     /// name.
     pub file: String,
-    /// The line, counted from 1.
+    /// The line, counted from 1; 0 marks a session end of a `SharedWork` proof, whose `file` is
+    /// the session's id (empty for the "and N more" end).
     pub line: usize,
     /// The line, trimmed and cut to `TEXT_LIMIT` characters.
     pub text: String,
@@ -377,6 +382,8 @@ impl Context<'_> {
 
 fn sentence(kind: ProofKind, a: &str, b: &str) -> String {
     match kind {
+        // A shared-work sentence names its sessions' count, so `find_shared_work` writes it.
+        ProofKind::SharedWork => format!("You worked on {a} and {b} together."),
         ProofKind::PathDependency => format!("{a} uses {b}'s code."),
         ProofKind::Submodule => format!("{a} includes {b}."),
         ProofKind::DeclaredPackage => format!("{a} uses {b}'s package."),
@@ -1160,7 +1167,7 @@ pub fn find_proofs(projects: &[ProjectFiles], claude_ai: &[ClaudeAiProjectText])
 }
 
 /// Whether `now` still holds `earlier`: a proof of the same kind between the same two projects,
-/// read from the same files.
+/// read from the same files (shared work, from whichever sessions).
 #[must_use]
 pub fn still_holds(now: &[Proof], earlier: &Proof) -> bool {
     let files = |proof: &Proof| -> Vec<(String, String)> {
@@ -1174,7 +1181,8 @@ pub fn still_holds(now: &[Proof], earlier: &Proof) -> bool {
         proof.kind == earlier.kind
             && proof.a == earlier.a
             && proof.b == earlier.b
-            && files(proof) == files(earlier)
+            // Shared work holds while it is found, whichever sessions are listed behind it.
+            && (proof.kind == ProofKind::SharedWork || files(proof) == files(earlier))
     })
 }
 
@@ -1193,6 +1201,101 @@ pub struct ProjectHintInput {
     pub written_in: BTreeSet<String>,
 }
 
+/// What the index knows of a session, for the sessions listed behind a shared-work proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionNote {
+    /// The session's title, when it has one.
+    pub title: Option<String>,
+    /// When it last did anything.
+    pub last_at: DateTime<Utc>,
+}
+
+/// The fewest sessions that changed files in two projects for that to prove they work together.
+pub const SHARED_SESSIONS: usize = 2;
+
+/// The most sessions listed as ends of a shared-work proof; the rest are counted in one more end.
+const SHARED_ENDS: usize = 3;
+
+/// The shared-work proofs among `inputs`: each pair with at least `SHARED_SESSIONS` sessions in
+/// both `written_in` sets, `a` the lesser key. Its ends are the newest sessions, up to three, each
+/// `<title or 'A session'> · <day>`, and "and N more" when there are others. `sessions` holds what
+/// is known of each session; one it lacks is listed last, with no day.
+#[must_use]
+pub fn find_shared_work(
+    inputs: &[ProjectHintInput],
+    sessions: &BTreeMap<String, SessionNote>,
+) -> Vec<Proof> {
+    let mut found = Vec::new();
+    for (at, x) in inputs.iter().enumerate() {
+        for y in &inputs[at + 1..] {
+            let (a, b) = if x.key < y.key { (x, y) } else { (y, x) };
+            if a.key == b.key {
+                continue;
+            }
+            let mut shared: Vec<&String> = a.written_in.intersection(&b.written_in).collect();
+            if shared.len() < SHARED_SESSIONS {
+                continue;
+            }
+            // Newest first; a session with no note last; ties by id.
+            shared.sort_by(|p, q| {
+                let (p_at, q_at) = (sessions.get(*p), sessions.get(*q));
+                q_at.map(|note| note.last_at)
+                    .cmp(&p_at.map(|note| note.last_at))
+                    .then_with(|| p.cmp(q))
+            });
+            let mut ends: Vec<ProofEnd> = shared
+                .iter()
+                .take(SHARED_ENDS)
+                .map(|id| {
+                    let text = match sessions.get(*id) {
+                        Some(note) => format!(
+                            "{} · {}",
+                            note.title
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|title| !title.is_empty())
+                                .map_or_else(
+                                    || "A session".to_string(),
+                                    |title| title.chars().take(TEXT_LIMIT - 20).collect()
+                                ),
+                            note.last_at.format("%Y-%m-%d")
+                        ),
+                        None => "A session".to_string(),
+                    };
+                    ProofEnd {
+                        project: a.key.clone(),
+                        file: (*id).clone(),
+                        line: 0,
+                        text,
+                    }
+                })
+                .collect();
+            if shared.len() > SHARED_ENDS {
+                ends.push(ProofEnd {
+                    project: a.key.clone(),
+                    file: String::new(),
+                    line: 0,
+                    text: format!("and {} more", shared.len() - SHARED_ENDS),
+                });
+            }
+            found.push(Proof {
+                kind: ProofKind::SharedWork,
+                a: a.key.clone(),
+                b: b.key.clone(),
+                ends,
+                sentence: format!(
+                    "You worked on {} and {} together in {} sessions.",
+                    a.name,
+                    b.name,
+                    shared.len()
+                ),
+            });
+        }
+    }
+    found.sort_by(|x, y| (&x.a, &x.b).cmp(&(&y.a, &y.b)));
+    found
+}
+
 /// Why two projects might be related without proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HintKind {
@@ -1202,7 +1305,7 @@ pub enum HintKind {
     SameDays,
     /// A shared word of at least 4 letters in their names.
     SimilarNames,
-    /// A session wrote files under both.
+    /// Exactly one session wrote files under both; two or more are `ProofKind::SharedWork`.
     WroteBoth,
 }
 
@@ -1312,7 +1415,7 @@ pub fn find_hints(inputs: &[ProjectHintInput], proofs: &[Proof]) -> Vec<Hint> {
             {
                 kinds.push(HintKind::SimilarNames);
             }
-            if a.written_in.intersection(&b.written_in).next().is_some() {
+            if a.written_in.intersection(&b.written_in).count() == 1 {
                 kinds.push(HintKind::WroteBoth);
             }
             if !kinds.is_empty() {
@@ -1330,9 +1433,9 @@ pub fn find_hints(inputs: &[ProjectHintInput], proofs: &[Proof]) -> Vec<Hint> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
+    use std::collections::{BTreeMap, BTreeSet};
 
-    use chrono::NaiveDate;
+    use chrono::{NaiveDate, TimeZone};
 
     use super::fixtures::tempting_corpus;
     use super::*;
@@ -1348,7 +1451,19 @@ mod tests {
     #[test]
     fn proves_each_related_pair_and_no_tempting_one() {
         let corpus = tempting_corpus();
-        let proofs = find_proofs(&corpus.projects, &corpus.claude_ai);
+        let mut proofs = find_proofs(&corpus.projects, &corpus.claude_ai);
+        let inputs: Vec<ProjectHintInput> = corpus
+            .projects
+            .iter()
+            .map(|project| ProjectHintInput {
+                key: project.key.clone(),
+                name: project.name.clone(),
+                remote_key: project.remote_key.clone(),
+                active_days: BTreeSet::new(),
+                written_in: corpus.written_in(&project.name),
+            })
+            .collect();
+        proofs.extend(find_shared_work(&inputs, &corpus.session_notes()));
         let mut failures: Vec<String> = Vec::new();
 
         for (kind, a, b) in &corpus.related {
@@ -1518,6 +1633,119 @@ mod tests {
                 (ProofKind::Workflow, "github.com/net-co/status-page"),
             ]
         );
+    }
+
+    /// A hint input for `name` that wrote in the sessions `written`.
+    fn wrote(name: &str, written: &[&str]) -> ProjectHintInput {
+        ProjectHintInput {
+            key: format!("github.com/work-co/{name}"),
+            name: name.to_string(),
+            remote_key: None,
+            active_days: BTreeSet::new(),
+            written_in: written.iter().map(|id| (*id).to_string()).collect(),
+        }
+    }
+
+    fn note(title: Option<&str>, day: u32) -> SessionNote {
+        SessionNote {
+            title: title.map(str::to_string),
+            last_at: chrono::Utc
+                .with_ymd_and_hms(2026, 10, day, 9, 30, 0)
+                .single()
+                .expect("a time"),
+        }
+    }
+
+    #[test]
+    fn proves_shared_work_from_two_sessions() {
+        let notes: BTreeMap<String, SessionNote> = BTreeMap::from([
+            ("s1".to_string(), note(Some("Fix the login redirect"), 20)),
+            ("s2".to_string(), note(None, 21)),
+            ("s3".to_string(), note(Some("Third"), 19)),
+            ("s4".to_string(), note(Some("Fourth"), 18)),
+            ("s5".to_string(), note(Some("Fifth"), 17)),
+        ]);
+
+        // Two shared sessions are a proof, with both sessions as ends, newest first.
+        let inputs = [
+            wrote("tidepool-web", &["s1", "s2", "other"]),
+            wrote("tidepool-api", &["s1", "s2"]),
+        ];
+        let found = find_shared_work(&inputs, &notes);
+        assert_eq!(found.len(), 1, "{found:?}");
+        let proof = &found[0];
+        assert_eq!(proof.kind, ProofKind::SharedWork);
+        assert_eq!(proof.kind.as_wire(), "shared_work");
+        assert_eq!(
+            ProofKind::from_wire("shared_work"),
+            Some(ProofKind::SharedWork)
+        );
+        assert_eq!(
+            (proof.a.as_str(), proof.b.as_str()),
+            (
+                "github.com/work-co/tidepool-api",
+                "github.com/work-co/tidepool-web"
+            )
+        );
+        assert_eq!(
+            proof.sentence,
+            "You worked on tidepool-api and tidepool-web together in 2 sessions."
+        );
+        let ends: Vec<(&str, usize, &str)> = proof
+            .ends
+            .iter()
+            .map(|end| (end.file.as_str(), end.line, end.text.as_str()))
+            .collect();
+        assert_eq!(
+            ends,
+            vec![
+                ("s2", 0, "A session · 2026-10-21"),
+                ("s1", 0, "Fix the login redirect · 2026-10-20"),
+            ]
+        );
+        assert!(proof.ends.iter().all(|end| end.project == proof.a));
+        // Its wire form reads back.
+        assert_eq!(Proof::from_json(&proof.to_json()).as_ref(), Some(proof));
+
+        // Five shared sessions: three ends and "and 2 more".
+        let inputs = [
+            wrote("tidepool-web", &["s1", "s2", "s3", "s4", "s5"]),
+            wrote("tidepool-api", &["s1", "s2", "s3", "s4", "s5"]),
+        ];
+        let found = find_shared_work(&inputs, &notes);
+        let texts: Vec<(&str, &str)> = found[0]
+            .ends
+            .iter()
+            .map(|end| (end.file.as_str(), end.text.as_str()))
+            .collect();
+        assert_eq!(found[0].ends.len(), 4);
+        assert_eq!(texts[3], ("", "and 2 more"));
+        assert_eq!(texts[0].0, "s2");
+        assert_eq!(texts[2].0, "s3");
+
+        // One shared session is no proof, only the hint.
+        let one = [
+            wrote("tidepool-web", &["s1"]),
+            wrote("tidepool-api", &["s1"]),
+        ];
+        assert!(find_shared_work(&one, &notes).is_empty());
+        let hints = find_hints(&one, &[]);
+        assert_eq!(hints.len(), 1);
+        assert!(hints[0].kinds.contains(&HintKind::WroteBoth), "{hints:?}");
+
+        // Two shared sessions give no WroteBoth hint, proven or not.
+        let two = [
+            wrote("tidepool-web", &["s1", "s2"]),
+            wrote("tidepool-api", &["s1", "s2"]),
+        ];
+        let hinted = find_hints(&two, &[]);
+        assert!(
+            hinted
+                .iter()
+                .all(|hint| !hint.kinds.contains(&HintKind::WroteBoth)),
+            "{hinted:?}"
+        );
+        assert!(find_hints(&two, &find_shared_work(&two, &notes)).is_empty());
     }
 
     #[test]
