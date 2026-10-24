@@ -346,6 +346,7 @@ pub fn a_body_wire(kind: EventKind) -> Value {
         }),
         EventKind::DocumentRewriteStarted => json!({ "tasks": ["CTV-1", "CTV-2"] }),
         EventKind::WorktreeTidied => json!({ "put_back": ["tsconfig.json"], "removed": [] }),
+        EventKind::TaskConflicted => json!({ "into": "main", "paths": ["src/lib.rs"] }),
         EventKind::PullRequestConflicted => json!({
             "url": "https://github.com/o/r/pull/7",
             "into": "main",

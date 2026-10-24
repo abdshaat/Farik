@@ -1,4 +1,4 @@
-# 0085. Shared work links repositories into one team
+# 0086. Shared work links repositories into one team
 
 Date: 2026-10-23
 Status: accepted (the founder, 2026-10-23, quoted below)

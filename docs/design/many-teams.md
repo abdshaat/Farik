@@ -228,7 +228,7 @@ Catervas asks two different questions and never mixes them.
 **Do these two projects work together?** Never decided by Catervas alone. The evidence has two grades.
 
 - **Proof:** shared work, or a reference from one project to the other that Catervas can check in committed files.
-  - **Shared work, first (ADR 0085):** at least two of the owner's Claude Code sessions each wrote files (`Write`, `Edit`, `MultiEdit`) under both projects' folders. Catervas's own sessions do not count, and reading does not. The screen says "You worked on web and api together in 2 sessions." with the sessions, by title and day, behind ⓘ, and leads with **Yes, one team**. Pairs with shared work are asked before the rest, and their file proofs show as "Also".
+  - **Shared work, first (ADR 0086):** at least two of the owner's Claude Code sessions each wrote files (`Write`, `Edit`, `MultiEdit`) under both projects' folders. Catervas's own sessions do not count, and reading does not. The screen says "You worked on web and api together in 2 sessions." with the sessions, by title and day, behind ⓘ, and leads with **Yes, one team**. Pairs with shared work are asked before the rest, and their file proofs show as "Also".
   - A path dependency or workspace member (`"api": "file:../api"`, a Cargo `path`, a `go.mod` `replace` to a local path).
   - A git submodule.
   - A package the other project declares as its own (its manifest's `name`, with its own remote as `repository`) appearing in this one's dependencies.
@@ -239,7 +239,7 @@ Catervas asks two different questions and never mixes them.
 
   Each file proof is kept as both ends: the file, line and quoted text in each project; shared work is kept as its sessions. It is checked again when shown and when the team is created (shared work by counting the sessions again); a proof that no longer holds is dropped.
 - **Hints:** behaviour, never enough on its own.
-  - Exactly one session wrote files in both (reading both does not count). Two or more are proof, above (ADR 0085).
+  - Exactly one session wrote files in both (reading both does not count). Two or more are proof, above (ADR 0086).
   - The same remote owner.
   - Activity on the same days.
   - Similar names.

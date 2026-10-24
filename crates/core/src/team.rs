@@ -357,9 +357,11 @@ pub fn validate_team(input: &Value) -> Result<Team, Vec<ValidationError>> {
             });
         }
     }
-    // Catervas merges only as ADR 0073 allows, by its own key (ADR 0061): `auto_merge` and `manual` still load, and read as a pull
-    // request.
-    team.policy.integration = Integration::PullRequest;
+    // Catervas merges online only as ADR 0073 allows, by its own key (ADR 0061): `auto_merge` and `manual` still load, and read as a
+    // pull request. `local` is read as itself (ADR 0085).
+    if team.policy.integration != Integration::Local {
+        team.policy.integration = Integration::PullRequest;
+    }
     if errors.is_empty() {
         Ok(team)
     } else {
@@ -1336,6 +1338,23 @@ impl Team {
         self.policy.permissions.clone().unwrap_or_default()
     }
 
+    /// Whether the team keeps everything on this computer (`policy.integration: local`, ADR 0085).
+    #[must_use]
+    pub fn keeps_local(&self) -> bool {
+        self.policy.integration == Integration::Local
+    }
+
+    /// The tiers `agent` holds under this team's answers: `Agent::tiers`, less `git_remote` when
+    /// the team keeps everything on this computer, whatever the agent's own grants say.
+    #[must_use]
+    pub fn tiers_of(&self, agent: &Agent) -> Vec<PermissionTier> {
+        let mut tiers = agent.tiers(&self.permissions());
+        if self.keeps_local() {
+            tiers.retain(|tier| *tier != PermissionTier::GitRemote);
+        }
+        tiers
+    }
+
     /// The rules the governor applies, with what the team left out filled in from what
     /// `catervas-core` ships (`docs/SPEC.md` section 5.12).
     ///
@@ -1366,6 +1385,7 @@ impl Team {
                 .map(|glob| glob.to_string())
                 .collect(),
             git_subcommands: wire_strings(&self.rules.git_subcommands),
+            keeps_local: self.keeps_local(),
             allowed_paths_ceiling: self
                 .rules
                 .allowed_paths_ceiling
@@ -1605,6 +1625,8 @@ mod tests {
         task_private_folder, validate_team, workbook_path_fault,
     };
     use super::{CustomServer, CustomTransport, canonical_json, custom_server, spec_sha256};
+    use crate::governor::permissions::{CommandRefusal, evaluate_command};
+
     use crate::contract::fixtures::a_contract_wire;
     use crate::contract::validate_contract;
     use crate::folders::DocumentFormat;
@@ -1723,6 +1745,64 @@ mod tests {
         assert_eq!(
             serde_json::to_value(super::defaults().policy.integration).expect("serialises"),
             json!("pull_request")
+        );
+    }
+
+    #[test]
+    fn a_local_team_keeps_everything_on_this_computer() {
+        // ADR 0085: `local` reads as itself, takes `git_remote` from every agent, and refuses a
+        // pushing git subcommand in `catervas_exec`.
+        let mut team_wire = a_team_wire();
+        team_wire["policy"]["integration"] = json!("local");
+        team_wire["policy"]["permissions"] = json!({ "push": true });
+        team_wire["agents"][1]["grants"] = json!(["git_remote"]);
+        let local = team(&team_wire);
+        assert_eq!(local.policy.integration, Integration::Local);
+        assert!(local.keeps_local());
+        assert_eq!(wire(&local.policy.integration), json!("local"));
+        for agent in &local.agents {
+            assert!(
+                !local.tiers_of(agent).contains(&PermissionTier::GitRemote),
+                "{}",
+                agent.id.as_str()
+            );
+        }
+        let rules = local.rules();
+        assert!(rules.keeps_local);
+        let listed = TeamRules {
+            git_subcommands: vec!["push".to_string()],
+            ..rules
+        };
+        for command in [
+            "git push origin x",
+            "git send-pack origin",
+            "cd a && sudo git push",
+        ] {
+            assert_eq!(
+                evaluate_command(command, &listed),
+                Err(CommandRefusal::KeptLocal),
+                "{command}"
+            );
+        }
+        let open = TeamRules {
+            keeps_local: false,
+            ..listed
+        };
+        assert_eq!(evaluate_command("git push origin x", &open), Ok(()));
+
+        team_wire["policy"]["integration"] = json!("pull_request");
+        let online = team(&team_wire);
+        assert!(!online.keeps_local());
+        assert!(
+            online
+                .tiers_of(&online.agents[1])
+                .contains(&PermissionTier::GitRemote)
+        );
+        assert_eq!(
+            super::describe_change(&online, &local),
+            [
+                "Everything stays on this computer; Catervas adds finished work to your project folder."
+            ]
         );
     }
 

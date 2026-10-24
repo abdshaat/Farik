@@ -108,8 +108,10 @@ fn refused(code: &'static str, detail: impl Into<String>) -> ToolError {
 
 /// What becomes of a folder change, in the sentence the tool answers with: a pull request when
 /// there is an `origin`, else a merge by hand (Catervas never merges, ADR 0061).
-fn next_by(has_origin: bool, branch: &str, into: &str) -> String {
-    if has_origin {
+fn next_by(has_origin: bool, keeps_local: bool, branch: &str, into: &str) -> String {
+    if keeps_local {
+        format!("Catervas adds {branch} to {into} on its next tick.")
+    } else if has_origin {
         format!(
             "Catervas opens a pull request for {branch} on its next tick; the document is in {into} once it merges."
         )
@@ -205,6 +207,7 @@ pub(crate) fn land(
             change,
             next: next_by(
                 deps.git.has_remote("origin").unwrap_or(false),
+                team.keeps_local(),
                 &branch,
                 &into,
             ),

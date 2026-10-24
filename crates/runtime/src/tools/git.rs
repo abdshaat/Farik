@@ -238,6 +238,12 @@ fn removals(worktree: &std::path::Path, removed: &[String]) -> Result<Vec<String
 /// `refs/heads/<branch>`, as integration does, so that a tag of the same name cannot make the push
 /// ambiguous.
 pub(super) fn push(call: &Call<'_>, input: &PushInput) -> Result<Value, ToolError> {
+    // No agent holds the tier under `local`; this is the door's own lock (ADR 0085).
+    if call.team.keeps_local() {
+        return Err(failed(
+            "kept_local: this team keeps everything on this computer",
+        ));
+    }
     let task = assignees_task(call)?;
     let allowed = call.team.push_remotes();
     let remote = match &input.remote {

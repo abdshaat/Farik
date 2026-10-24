@@ -2,7 +2,7 @@
 
 Status: ready
 Branch: `feat/shared-work-links`, its own pull request to `main`
-Decision: ADR 0085 (amends ADR 0059's linking rule)
+Decision: ADR 0086 (amends ADR 0059's linking rule)
 Spec: `docs/SPEC.md` 4.4, F1 (phase 10 step 06b's linking)
 Depends on: `main` at `101aaf2e` (pull request #91 merged)
 Readiness confirmed by: the planner (Opus 5.5), 2026-10-23 (ADR 0065)
@@ -97,8 +97,8 @@ Tests (`apps/web/src/pages/find/Together.test.tsx`):
 
 ### Task 4: Spec and design
 
-- `docs/SPEC.md`: a new revision, the next free number above the newest, dated 2026-10-23, "records shared work as the first proof that two repositories are one team (ADR 0085)". It changes 4.4's and F1's linking rule.
-- `docs/design/many-teams.md` section 4: the proof list gains shared work, first. The hints lose "a session wrote files in both" except for one session. A line cites ADR 0085.
+- `docs/SPEC.md`: a new revision, the next free number above the newest, dated 2026-10-23, "records shared work as the first proof that two repositories are one team (ADR 0086)". It changes 4.4's and F1's linking rule.
+- `docs/design/many-teams.md` section 4: the proof list gains shared work, first. The hints lose "a session wrote files in both" except for one session. A line cites ADR 0086.
 
 - [x] `docs(spec): shared work links repositories, ADR 0085`
 

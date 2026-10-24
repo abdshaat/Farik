@@ -41,6 +41,9 @@ pub fn describe_change(old: &Team, new: &Team) -> Vec<String> {
                 Integration::PullRequest | Integration::AutoMerge | Integration::Manual => {
                     "Finished work opens a pull request for you to merge."
                 }
+                Integration::Local => {
+                    "Everything stays on this computer; Catervas adds finished work to your project folder."
+                }
             }
             .to_string(),
         );

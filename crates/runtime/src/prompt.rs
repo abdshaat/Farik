@@ -288,11 +288,7 @@ pub fn assemble_system_prompt(input: &PromptInput<'_>) -> Result<String, FilesEr
                 ),
                 input.document_format,
                 input.documents_local,
-                if input
-                    .agent
-                    .tiers(input.permissions)
-                    .contains(&PermissionTier::GitRemote)
-                {
+                if held_tiers(input).contains(&PermissionTier::GitRemote) {
                     input.push_remotes
                 } else {
                     &[]
@@ -446,9 +442,19 @@ fn memory_section(input: &PromptInput<'_>) -> String {
     }
 }
 
+/// The agent's tiers under the team's answers, less `git_remote` for a team that keeps everything
+/// on this computer (ADR 0085), as `Team::tiers_of` works them out.
+fn held_tiers(input: &PromptInput<'_>) -> Vec<PermissionTier> {
+    let mut tiers = input.agent.tiers(input.permissions);
+    if input.rules.keeps_local {
+        tiers.retain(|tier| *tier != PermissionTier::GitRemote);
+    }
+    tiers
+}
+
 /// Whether the session's tiers let it call the tool named `name`, among those it is offered.
 fn offers(input: &PromptInput<'_>, name: &str) -> bool {
-    let tiers = input.agent.tiers(input.permissions);
+    let tiers = held_tiers(input);
     input
         .tools
         .iter()
@@ -681,7 +687,7 @@ fn repositories_line(members: &[MemberLine], own_repo: Option<&OwnRepo>) -> Opti
 /// The Catervas tools the agent's tiers allow of those it is offered, the built-ins it may use, and,
 /// for a session offered a tool that runs commands or git, where its shell and git are (ADR 0004).
 fn tools_section(input: &PromptInput<'_>) -> String {
-    let tiers = input.agent.tiers(input.permissions);
+    let tiers = held_tiers(input);
     let catervas = std::iter::once(
         "Catervas's tools are called `mcp__catervas__<name>`: `catervas_read_board` is \
          `mcp__catervas__catervas_read_board`. These are yours:"
@@ -1334,6 +1340,7 @@ mod tests {
             protected_paths: vec![".env".to_string(), "**/*.pem".to_string()],
             read_only_paths: vec!["vendor/**".to_string()],
             git_subcommands: Vec::new(),
+            keeps_local: false,
             allowed_paths_ceiling: Vec::new(),
             required_criteria: Vec::new(),
             require_new_tests: false,
@@ -1360,6 +1367,7 @@ mod tests {
             protected_paths: vec![".env".to_string()],
             read_only_paths: Vec::new(),
             git_subcommands: vec!["fetch".to_string(), "merge".to_string()],
+            keeps_local: false,
             allowed_paths_ceiling: vec!["src/**".to_string(), "docs/**".to_string()],
             required_criteria: vec!["test".to_string()],
             require_new_tests: true,
